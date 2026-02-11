@@ -152,7 +152,7 @@ export default function HomePage() {
               <div className="bando-top">
                 <h3 className="bando-title">Autoimpiego Centro Nord</h3>
                 <div className="bando-badge">
-                  Piemonte, Valle d'Aosta, Liguria, Lombardia, Veneto, Friuli, Trentino, Emilia-R., Toscana, Lazio,
+                  Piemonte, Valle d&apos;Aosta, Liguria, Lombardia, Veneto, Friuli, Trentino, Emilia-R., Toscana, Lazio,
                   Umbria, Marche
                 </div>
               </div>
@@ -317,14 +317,14 @@ export default function HomePage() {
               <div className="step-num">04</div>
               <div className="step-content">
                 <h3>Invio domanda</h3>
-                <p>Procediamo all'invio della domanda e monitoriamo eventuali integrazioni richieste.</p>
+                <p>Procediamo all&apos;invio della domanda e monitoriamo eventuali integrazioni richieste.</p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">05</div>
               <div className="step-content">
                 <h3>Post-approvazione</h3>
-                <p>Supporto fino all'erogazione finale, incluse rendicontazione e comunicazioni operative.</p>
+                <p>Supporto fino all&apos;erogazione finale, incluse rendicontazione e comunicazioni operative.</p>
               </div>
             </div>
           </div>

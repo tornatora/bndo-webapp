@@ -320,7 +320,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q3' ? (
-          <QuestionLayout title="In quale regione aprirai l'attivita?" subtitle="Domanda 3 di 12">
+          <QuestionLayout title="In quale regione aprirai l&apos;attivita?" subtitle="Domanda 3 di 12">
             <select value={answers.q3 ?? ''} onChange={(event) => setAnswers((previous) => ({ ...previous, q3: event.target.value }))}>
               <option value="">Seleziona una regione...</option>
               {[
@@ -362,7 +362,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q4' ? (
-          <QuestionLayout title="Sei residente nella regione in cui aprirai l'attivita?" subtitle="Domanda 4 di 12">
+          <QuestionLayout title="Sei residente nella regione in cui aprirai l&apos;attivita?" subtitle="Domanda 4 di 12">
             <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q4', value)} />
             <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q4', value)} />
             <BackRow onBack={goBack} />
@@ -370,7 +370,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q4b' ? (
-          <QuestionLayout title="Sei disposto a trasferire la residenza prima dell'erogazione?" subtitle="Domanda 4-B">
+          <QuestionLayout title="Sei disposto a trasferire la residenza prima dell&apos;erogazione?" subtitle="Domanda 4-B">
             <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q4b', value)} />
             <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q4b', value)} />
             <BackRow onBack={goBack} />
@@ -391,7 +391,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q5b' ? (
-          <QuestionLayout title="Sei disposto a chiudere P.IVA o contratto prima dell'erogazione?" subtitle="Domanda 5-B">
+          <QuestionLayout title="Sei disposto a chiudere P.IVA o contratto prima dell&apos;erogazione?" subtitle="Domanda 5-B">
             <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q5b', value)} />
             <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q5b', value)} />
             <BackRow onBack={goBack} />
@@ -399,7 +399,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q5c' ? (
-          <QuestionLayout title="Sei disposto a dimetterti prima dell'erogazione?" subtitle="Domanda 5-C">
+          <QuestionLayout title="Sei disposto a dimetterti prima dell&apos;erogazione?" subtitle="Domanda 5-C">
             <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q5c', value)} />
             <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q5c', value)} />
             <BackRow onBack={goBack} />
@@ -427,7 +427,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q7' ? (
-          <QuestionLayout title="Come intendi avviare l'attivita?" subtitle="Domanda 7 di 12">
+          <QuestionLayout title="Come intendi avviare l&apos;attivita?" subtitle="Domanda 7 di 12">
             <OptionButton text="Ditta individuale" value="A" onPick={(value) => handleAnswer('q7', value)} />
             <OptionButton text="Societa" value="B" onPick={(value) => handleAnswer('q7', value)} />
             <OptionButton text="Attivita professionale" value="C" onPick={(value) => handleAnswer('q7', value)} />
@@ -452,7 +452,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q9' ? (
-          <QuestionLayout title="Qual e lo stato dell'attivita?" subtitle="Domanda 9 di 12">
+          <QuestionLayout title="Qual e lo stato dell&apos;attivita?" subtitle="Domanda 9 di 12">
             <OptionButton text="Non ancora avviata" value="A" onPick={(value) => handleAnswer('q9', value)} />
             <OptionButton text="Avviata da meno di 1 mese" value="B" onPick={(value) => handleAnswer('q9', value)} />
             <OptionButton text="Avviata da piu di 1 mese" value="C" onPick={(value) => handleAnswer('q9', value)} />
@@ -461,7 +461,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q10' ? (
-          <QuestionLayout title="Qual e l'investimento complessivo previsto?" subtitle="Domanda 10 di 12">
+          <QuestionLayout title="Qual e l&apos;investimento complessivo previsto?" subtitle="Domanda 10 di 12">
             {investmentOptions.map((option) => (
               <OptionButton key={option.value} text={option.text} value={option.value} onPick={(value) => handleAnswer('q10', value)} />
             ))}
@@ -550,7 +550,7 @@ export default function QuizPage() {
 
             <div className="success-options">
               <div className="option-card">
-                <h3>⚡ Accedi subito all'area cliente</h3>
+                <h3>⚡ Accedi subito all&apos;area cliente</h3>
                 <p>I tuoi dati sono stati salvati. Puoi continuare il processo operativo dalla dashboard.</p>
                 <Link href="/login" className="btn-next" style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}>
                   Vai al login
@@ -575,7 +575,7 @@ export default function QuizPage() {
             <div className="process-info">
               <h4>📋 Prossimi passi consigliati</h4>
               <ol>
-                <li>Accedi all'area cliente.</li>
+                <li>Accedi all&apos;area cliente.</li>
                 <li>Carica la documentazione richiesta.</li>
                 <li>Coordina la pratica con il consulente dedicato via chat.</li>
               </ol>

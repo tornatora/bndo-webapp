@@ -125,7 +125,7 @@ export default async function DashboardPage() {
       <div id="tab-pratiche" className="tab-panel active">
         <div className="welcome-section" id="pratiche">
           <h1 className="welcome-title">📋 Le Tue Pratiche</h1>
-          <p className="welcome-subtitle">Monitora l'avanzamento delle tue richieste</p>
+          <p className="welcome-subtitle">Monitora l&apos;avanzamento delle tue richieste</p>
 
           <div className="stats-grid">
             <div className="stat-item">
