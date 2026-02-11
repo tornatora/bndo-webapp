@@ -88,7 +88,7 @@ function OptionButton({
 
 export default function QuizPage() {
   const [step, setStep] = useState<StepId>('intro');
-  const [history, setHistory] = useState<StepId[]>([]);
+  const [, setHistory] = useState<StepId[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [contact, setContact] = useState<ContactData>(defaultContact);
   const [submitting, setSubmitting] = useState(false);
