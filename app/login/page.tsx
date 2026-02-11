@@ -3,8 +3,10 @@ import Link from 'next/link';
 export default function LoginPage({
   searchParams
 }: {
-  searchParams: { error?: string };
+  searchParams?: { error?: string | string[] };
 }) {
+  const errorParam = Array.isArray(searchParams?.error) ? searchParams?.error[0] : searchParams?.error;
+
   return (
     <section id="loginScreen" className="login-hero">
       <div className="login-content">
@@ -46,8 +48,8 @@ export default function LoginPage({
             />
           </div>
 
-          {searchParams.error ? (
-            <p style={{ marginBottom: '16px', fontSize: '14px', fontWeight: 600, color: '#b91c1c' }}>{searchParams.error}</p>
+          {errorParam ? (
+            <p style={{ marginBottom: '16px', fontSize: '14px', fontWeight: 600, color: '#b91c1c' }}>{errorParam}</p>
           ) : null}
 
           <button type="submit" className="btn-login">
