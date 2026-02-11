@@ -103,6 +103,7 @@ export default function QuizPage() {
   const [contact, setContact] = useState<ContactData>(defaultContact);
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [blockedFromStep, setBlockedFromStep] = useState<StepId | null>(null);
 
   const progress = Math.round((progressMap[step] / 12) * 100);
   const region = answers.q3 ?? null;
@@ -192,25 +193,30 @@ export default function QuizPage() {
     });
   }
 
+  function showBlocked(fromStep: StepId) {
+    setBlockedFromStep(fromStep);
+    setStep('blocked');
+  }
+
   function handleAnswer(questionId: string, value: string) {
     setAnswers((previous) => ({ ...previous, [questionId]: value }));
 
     if (questionId === 'q1') {
-      if (value === 'A') return setStep('blocked');
+      if (value === 'A') return showBlocked('q1');
       if (value === 'B') return goTo('q2');
       return goTo('q1b');
     }
     if (questionId === 'q1b') {
-      return value === 'A' ? goTo('q2') : setStep('blocked');
+      return value === 'A' ? goTo('q2') : showBlocked('q1b');
     }
     if (questionId === 'q2') {
-      return value === 'D' ? setStep('blocked') : goTo('q3');
+      return value === 'D' ? showBlocked('q2') : goTo('q3');
     }
     if (questionId === 'q4') {
       return value === 'A' ? goTo('q5') : goTo('q4b');
     }
     if (questionId === 'q4b') {
-      return value === 'A' ? goTo('q5') : setStep('blocked');
+      return value === 'A' ? goTo('q5') : showBlocked('q4b');
     }
     if (questionId === 'q5') {
       if (['A', 'B', 'C', 'D'].includes(value)) return goTo('q6');
@@ -218,16 +224,16 @@ export default function QuizPage() {
       return goTo('q5c');
     }
     if (questionId === 'q5b') {
-      return value === 'A' ? goTo('q6') : setStep('blocked');
+      return value === 'A' ? goTo('q6') : showBlocked('q5b');
     }
     if (questionId === 'q5c') {
-      return value === 'A' ? goTo('q6') : setStep('blocked');
+      return value === 'A' ? goTo('q6') : showBlocked('q5c');
     }
     if (questionId === 'q6') {
       return value === 'A' || value === 'B' ? goTo('q7') : goTo('q6b');
     }
     if (questionId === 'q6b') {
-      return value === 'A' ? goTo('q7') : setStep('blocked');
+      return value === 'A' ? goTo('q7') : showBlocked('q6b');
     }
     if (questionId === 'q7') {
       return value === 'A' || value === 'C' ? goTo('q9') : goTo('q8');
@@ -236,16 +242,16 @@ export default function QuizPage() {
       return value === 'A' ? goTo('q9') : goTo('q8b');
     }
     if (questionId === 'q8b') {
-      return value === 'A' ? goTo('q9') : setStep('blocked');
+      return value === 'A' ? goTo('q9') : showBlocked('q8b');
     }
     if (questionId === 'q9') {
-      return value === 'A' || value === 'B' ? goTo('q10') : setStep('blocked');
+      return value === 'A' || value === 'B' ? goTo('q10') : showBlocked('q9');
     }
     if (questionId === 'q10') {
       return goTo('q11');
     }
     if (questionId === 'q11') {
-      return value === 'A' ? setStep('blocked') : goTo('q12');
+      return value === 'A' ? showBlocked('q11') : goTo('q12');
     }
   }
 
@@ -287,21 +293,13 @@ export default function QuizPage() {
         throw new Error(payload?.error ?? 'Salvataggio non riuscito.');
       }
 
+      setBlockedFromStep(null);
       setStep('success');
     } catch (error) {
       setSubmissionError(error instanceof Error ? error.message : 'Errore invio quiz.');
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function restart() {
-    setStep('q1');
-    setHistory([]);
-    setAnswers({});
-    setContact(defaultContact);
-    setSubmitting(false);
-    setSubmissionError(null);
   }
 
   return (
@@ -327,17 +325,25 @@ export default function QuizPage() {
         {step === 'intro' ? (
           <div className="intro-page">
             <div className="hero-text">
-              <span className="word word-1">Verifichiamo</span>{' '}
+              <span className="word word-1">Verifica</span>{' '}
               <span className="word word-2">in</span>{' '}
-              <span className="word word-3">tempo</span>{' '}
-              <span className="word word-4">reale</span>{' '}
-              <span className="word word-5">se</span>{' '}
-              <span className="word word-6">hai</span>{' '}
-              <span className="word word-7">i</span>{' '}
-              <span className="word word-8 highlight">requisiti</span>{' '}
-              <span className="word word-9">per</span>{' '}
-              <span className="word word-10">accedere</span>{' '}
-              <span className="word word-11">ai bandi</span>
+              <span className="word word-3">
+                <span className="highlight">2 minuti</span>
+              </span>{' '}
+              <span className="word word-4">se</span>{' '}
+              <span className="word word-5">puoi</span>{' '}
+              <span className="word word-6">accedere</span>{' '}
+              <span className="word word-7">a</span>{' '}
+              <span className="word word-8">
+                <span className="highlight">Resto al Sud 2.0</span>
+              </span>{' '}
+              <span className="word word-9">e</span>{' '}
+              <span className="word word-10">
+                <span className="highlight">Autoimpiego</span>
+              </span>{' '}
+              <span className="word word-11">
+                <span className="highlight">Centro-Nord</span>
+              </span>
             </div>
             <div className="loader-container">
               <div className="loader-bar">
@@ -348,11 +354,17 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q1' ? (
-          <QuestionLayout title="Quanti anni hai?" subtitle="Domanda 1 di 12">
-            <OptionButton text="Meno di 18 anni" value="A" onPick={(value) => handleAnswer('q1', value)} />
-            <OptionButton text="Tra 18 e 34 anni (inclusi)" value="B" onPick={(value) => handleAnswer('q1', value)} />
-            <OptionButton text="35 anni o piu" value="C" onPick={(value) => handleAnswer('q1', value)} />
-          </QuestionLayout>
+          <div>
+            <div className="tag">Domanda 1 di 12</div>
+            <h1>Requisiti Bandi Invitalia</h1>
+            <p className="subtitle">Iniziamo con le informazioni di base</p>
+            <div className="question">Quanti anni hai?</div>
+            <div className="input-group">
+              <OptionButton text="Meno di 18 anni" value="A" onPick={(value) => handleAnswer('q1', value)} />
+              <OptionButton text="Tra 18 e 34 anni (inclusi)" value="B" onPick={(value) => handleAnswer('q1', value)} />
+              <OptionButton text="35 anni o piu" value="C" onPick={(value) => handleAnswer('q1', value)} />
+            </div>
+          </div>
         ) : null}
 
         {step === 'q1b' ? (
@@ -530,7 +542,8 @@ export default function QuizPage() {
         {step === 'q11' ? (
           <QuestionLayout title="Quante risorse personali puoi dimostrare di avere disponibili?" subtitle="Domanda 11 di 12">
             <p className="info-box">
-              ⚠️ <strong>Attenzione:</strong> e una garanzia minima indicativa. Non dovrai spendere questo importo.
+              ⚠️ <strong>Attenzione:</strong> non dovrai spendere questo importo. E richiesto solo come titolo di garanzia
+              (min. 10%) e potra essere svincolato dopo i pagamenti ai fornitori.
             </p>
             <OptionButton text="Meno del 10%" value="A" onPick={(value) => handleAnswer('q11', value)} />
             <OptionButton text="Circa il 10%" value="B" onPick={(value) => handleAnswer('q11', value)} />
@@ -540,7 +553,7 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q12' ? (
-          <QuestionLayout title="Inserisci i tuoi dati per finalizzare la verifica" subtitle="Domanda 12 di 12">
+          <QuestionLayout title="Inserisci i tuoi dati per procedere" subtitle="Domanda 12 di 12">
             <div className="input-group">
               <input
                 placeholder="Nome *"
@@ -587,14 +600,31 @@ export default function QuizPage() {
           <div className="final-page">
             <div className="error-icon">⚠️</div>
             <h2>Purtroppo non sei idoneo</h2>
-            <p>Con i dati inseriti non hai i requisiti per questi bandi.</p>
+            <p>Con i dati inseriti non hai i requisiti per questi bandi Invitalia.</p>
+            <p>
+              <strong>Ma non preoccuparti!</strong> Contattaci per scoprire altre opportunita:
+            </p>
             <div className="buttons">
-              <button type="button" className="btn-back" onClick={restart}>
-                Rifai il quiz
+              <button
+                type="button"
+                className="btn-back"
+                onClick={() => {
+                  if (blockedFromStep) {
+                    setStep(blockedFromStep);
+                    return;
+                  }
+                  goBack();
+                }}
+              >
+                Indietro
               </button>
-              <a href="https://wa.me/393471234567" target="_blank" rel="noreferrer" className="btn-next">
+              <button
+                type="button"
+                className="btn-next"
+                onClick={() => window.open('https://wa.me/393471234567', '_blank')}
+              >
                 Contattaci
-              </a>
+              </button>
             </div>
           </div>
         ) : null}
@@ -607,36 +637,84 @@ export default function QuizPage() {
             <div className="bando-name">{isSouth ? 'Resto al Sud 2.0' : 'Autoimpiego Centro-Nord'}</div>
 
             <div className="success-options">
-              <div className="option-card">
-                <h3>⚡ Accedi subito all&apos;area cliente</h3>
-                <p>I tuoi dati sono stati salvati. Puoi continuare il processo operativo dalla dashboard.</p>
-                <Link href="/login" className="btn-next" style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}>
-                  Vai al login
-                </Link>
+              <div
+                className="option-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => window.open('https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00', '_blank')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    window.open('https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00', '_blank');
+                  }
+                }}
+              >
+                <h3>
+                  ⚡ Salta la fila
+                  <span className="badge badge-premium">Consigliato</span>
+                </h3>
+                <p>
+                  Pagamento immediato di <strong>100€</strong> per accedere subito alla verifica documenti e saltare la
+                  lista d&apos;attesa.
+                </p>
+                <button type="button" className="btn-premium">
+                  Paga 100€ e inizia subito
+                </button>
               </div>
 
-              <div className="option-card">
-                <h3>💬 Parla con un consulente</h3>
-                <p>Se vuoi supporto immediato, contattaci su WhatsApp.</p>
-                <a
-                  href="https://wa.me/393471234567"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-back"
-                  style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
-                >
-                  Apri chat WhatsApp
-                </a>
+              <div
+                className="option-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => window.open('https://wa.me/393471234567', '_blank')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    window.open('https://wa.me/393471234567', '_blank');
+                  }
+                }}
+              >
+                <h3>
+                  💬 Parla con un consulente
+                  <span className="badge badge-free">Gratuito</span>
+                </h3>
+                <p>Chatta gratuitamente con un nostro esperto per approfondire la tua situazione prima di procedere.</p>
+                <button type="button" className="btn-chat">
+                  Chatta con noi
+                </button>
               </div>
             </div>
 
             <div className="process-info">
-              <h4>📋 Prossimi passi consigliati</h4>
+              <h4>📋 Come funziona il processo "Salta la fila":</h4>
               <ol>
-                <li>Accedi all&apos;area cliente.</li>
-                <li>Carica la documentazione richiesta.</li>
-                <li>Coordina la pratica con il consulente dedicato via chat.</li>
+                <li>
+                  <strong>Pagamento 100€:</strong> Accedi immediatamente alla verifica documenti
+                </li>
+                <li>
+                  <strong>Invio documenti:</strong> Carica i documenti richiesti per la verifica
+                </li>
+                <li>
+                  <strong>Verifica:</strong> Il nostro team verifica la conformita dei documenti
+                  <ul style={{ marginTop: 6 }}>
+                    <li>
+                      ✅ <strong>Documenti OK:</strong> Riceverai link per pagare altri 200€ per la compilazione pratica
+                    </li>
+                    <li>
+                      ❌ <strong>Documenti NON OK:</strong> Rimborso completo dei 100€
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <strong>Invio pratica:</strong> Inviamo la pratica a Invitalia
+                </li>
+                <li>
+                  <strong>Saldo finale:</strong> Ultimi 200EUR a pratica inviata
+                </li>
               </ol>
+              <p style={{ marginTop: 12, fontWeight: 500, color: 'var(--navy)' }}>
+                💰 Totale servizio completo: 500€ (100€ + 200€ + 200€)
+              </p>
             </div>
           </div>
         ) : null}

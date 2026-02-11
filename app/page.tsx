@@ -18,7 +18,7 @@ export default function HomePage() {
       <header id="header" className={scrolled ? 'scrolled' : ''}>
         <nav>
           <div className="logo">
-            <img src="/Logo-Bandozen.png" alt="BandoZen" />
+            <img src="/Logo-BNDO.png" alt="BNDO" />
           </div>
           <ul className="nav-menu">
             <li>
@@ -388,7 +388,7 @@ export default function HomePage() {
       <footer>
         <div className="footer-grid">
           <div className="footer-col">
-            <h4>BandoZen</h4>
+            <h4>BNDO</h4>
             <p>La piattaforma con esperti reali per i bandi pubblici Resto al Sud 2.0 e Autoimpiego Centro Nord</p>
           </div>
           <div className="footer-col">
@@ -434,7 +434,7 @@ export default function HomePage() {
             </ul>
           </div>
         </div>
-        <div className="footer-bottom">&copy; 2026 BandoZen</div>
+        <div className="footer-bottom">&copy; 2026 BNDO</div>
       </footer>
     </>
   );

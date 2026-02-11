@@ -63,7 +63,8 @@
         }
 
         .logo img {
-            height: 30px;
+            height: 36px;
+            width: auto;
             display: block;
             transition: transform 0.3s ease;
         }
@@ -186,8 +187,14 @@
             letter-spacing: -0.01em;
             width: 100%;
             min-height: 52px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
             position: relative;
             overflow: hidden;
+            isolation: isolate;
+            -webkit-mask-image: -webkit-radial-gradient(white, black);
         }
 
         .btn-primary::before {
@@ -201,6 +208,8 @@
             border-radius: 50%;
             transform: translate(-50%, -50%);
             transition: width 0.5s ease, height 0.5s ease;
+            z-index: 0;
+            pointer-events: none;
         }
 
         .btn-primary:hover::before {
@@ -530,6 +539,12 @@
             position: relative;
             overflow: hidden;
             transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            isolation: isolate;
+            -webkit-mask-image: -webkit-radial-gradient(white, black);
         }
 
         .bando-btn::before {
@@ -543,6 +558,8 @@
             border-radius: 50%;
             transform: translate(-50%, -50%);
             transition: width 0.5s ease, height 0.5s ease;
+            z-index: 0;
+            pointer-events: none;
         }
 
         .bando-btn:hover::before {
@@ -558,6 +575,7 @@
         .bando-btn span {
             position: relative;
             z-index: 1;
+            color: white;
         }
 
         .bando-btn:active {
@@ -857,7 +875,7 @@
             }
 
             .logo img {
-                height: 32px;
+                height: 42px;
             }
 
             .nav-menu {
@@ -908,6 +926,12 @@
                 transition: all 0.3s ease;
                 position: relative;
                 overflow: hidden;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                text-decoration: none;
+                isolation: isolate;
+                -webkit-mask-image: -webkit-radial-gradient(white, black);
             }
 
             .btn-nav::before {
@@ -921,6 +945,8 @@
                 border-radius: 50%;
                 transform: translate(-50%, -50%);
                 transition: width 0.4s ease, height 0.4s ease;
+                z-index: 0;
+                pointer-events: none;
             }
 
             .btn-nav:hover::before {
@@ -931,6 +957,18 @@
             .btn-nav span {
                 position: relative;
                 z-index: 1;
+                color: white;
+            }
+
+            .nav-menu .btn-nav,
+            .nav-menu .btn-nav:hover {
+                color: white;
+            }
+
+            .nav-menu .btn-nav::after,
+            .nav-menu .btn-nav:hover::after {
+                display: none;
+                width: 0;
             }
 
             .hero {
