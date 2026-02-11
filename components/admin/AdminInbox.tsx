@@ -226,18 +226,20 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
       }
 
       const payload = (await response.json()) as { message?: Message };
-      if (payload.message) {
+      const persistedMessage = payload.message;
+
+      if (persistedMessage) {
         setMessages((previous) => {
           const withoutOptimistic = previous.filter((message) => message.id !== optimistic.id);
-          const exists = withoutOptimistic.some((message) => message.id === payload.message?.id);
+          const exists = withoutOptimistic.some((message) => message.id === persistedMessage.id);
           if (exists) return withoutOptimistic;
-          return [...withoutOptimistic, payload.message].sort(
+          return [...withoutOptimistic, persistedMessage].sort(
             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
         });
         updateThreadMetadata(selectedThreadId, {
-          lastMessage: payload.message.body,
-          lastMessageAt: payload.message.created_at
+          lastMessage: persistedMessage.body,
+          lastMessageAt: persistedMessage.created_at
         });
       }
     } catch (error) {
