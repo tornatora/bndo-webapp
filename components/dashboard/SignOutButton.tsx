@@ -3,12 +3,18 @@
 import { useTransition } from 'react';
 import { LogOut } from 'lucide-react';
 
-export function SignOutButton() {
+export function SignOutButton({
+  className = 'btn btn-muted w-full',
+  compact = false
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const [pending, startTransition] = useTransition();
 
   return (
     <button
-      className="btn btn-muted w-full"
+      className={className}
       onClick={() => {
         startTransition(async () => {
           await fetch('/api/auth/logout', { method: 'POST' });
@@ -17,7 +23,7 @@ export function SignOutButton() {
       }}
       disabled={pending}
     >
-      <LogOut className="h-4 w-4" />
+      {!compact ? <LogOut className="h-4 w-4" /> : null}
       {pending ? 'Uscita in corso...' : 'Esci'}
     </button>
   );

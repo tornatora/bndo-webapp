@@ -1,209 +1,397 @@
 'use client';
 
 import Link from 'next/link';
-import { Menu, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-const menuLinks = [
-  { href: '#bandi', label: 'Bandi' },
-  { href: '#servizi', label: 'Servizi' },
-  { href: '#processo', label: 'Processo' }
-];
-
-const steps = [
-  {
-    title: 'Verifica requisiti',
-    description: 'Compili il quiz e ricevi una risposta immediata su idoneita e bando consigliato.'
-  },
-  {
-    title: 'Raccolta documenti',
-    description: 'Un consulente ti guida nel caricamento e nella verifica di tutta la documentazione.'
-  },
-  {
-    title: 'Invio pratica',
-    description: 'Gestiamo invio e monitoraggio della domanda con aggiornamenti real-time in dashboard.'
-  },
-  {
-    title: 'Assistenza post invio',
-    description: 'Supporto su richieste integrative e gestione step successivi fino all esito.'
-  }
-];
-
 export default function HomePage() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
-    document.body.style.overflow = isMenuOpen ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isMenuOpen]);
+    const onScroll = () => setScrolled(window.scrollY > 50);
+    onScroll();
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   return (
-    <main className="min-h-screen bg-[#f4f8fc]">
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200/70 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-8">
-          <a href="#" className="text-lg font-extrabold text-brand.navy">
-            BNDO
-          </a>
-
-          <nav className="hidden items-center gap-6 lg:flex">
-            {menuLinks.map((link) => (
-              <a key={link.href} href={link.href} className="text-sm font-semibold text-slate-600 hover:text-brand.navy">
-                {link.label}
-              </a>
-            ))}
-            <Link href="/login" className="btn btn-muted !py-2 text-sm">
-              Area clienti
-            </Link>
-            <Link href="/quiz" className="btn btn-primary !py-2 text-sm">
-              Verifica requisiti
-            </Link>
-          </nav>
-
-          <button
-            type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-brand.navy lg:hidden"
-            onClick={() => setIsMenuOpen((previous) => !previous)}
-            aria-label="Apri menu"
-          >
-            {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-        </div>
+    <>
+      <header id="header" className={scrolled ? 'scrolled' : ''}>
+        <nav>
+          <div className="logo">
+            <a href="#" style={{ fontSize: '22px', fontWeight: 700, color: 'var(--navy)', textDecoration: 'none' }}>
+              BNDO
+            </a>
+          </div>
+          <ul className="nav-menu">
+            <li>
+              <a href="#bandi">Bandi</a>
+            </li>
+            <li>
+              <a href="#servizi">Servizi</a>
+            </li>
+            <li>
+              <a href="#processo">Processo</a>
+            </li>
+            <li>
+              <Link href="/quiz" className="btn-nav">
+                <span>Inizia ora</span>
+              </Link>
+            </li>
+          </ul>
+        </nav>
       </header>
 
-      {isMenuOpen ? (
-        <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={() => setIsMenuOpen(false)}>
-          <div
-            className="absolute right-0 top-16 h-[calc(100vh-4rem)] w-full max-w-sm overflow-y-auto bg-white p-5 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <nav className="space-y-3">
-              {menuLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  className="block rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-brand.navy"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  {link.label}
-                </a>
-              ))}
-              <Link href="/quiz" className="btn btn-primary mt-3 w-full" onClick={() => setIsMenuOpen(false)}>
-                Verifica requisiti
+      <main>
+        <section className="hero">
+          <div className="hero-content">
+            <div className="tag">Piattaforma con esperti reali</div>
+            <h1>Partecipare ai bandi non e mai stato cosi semplice</h1>
+            <p className="lead">
+              Assistenza completa per Resto al Sud 2.0 e Autoimpiego Centro Nord. Presentazione domanda a EUR 500,
+              success fee solo se vinci.
+            </p>
+            <div className="cta-group">
+              <Link href="/quiz" className="btn-primary">
+                <span>Verifica requisiti gratis</span>
               </Link>
-              <Link href="/login" className="btn btn-muted w-full" onClick={() => setIsMenuOpen(false)}>
-                Area clienti
-              </Link>
-            </nav>
+              <a href="#bandi" className="btn-link">
+                Scopri i bandi
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section className="stats">
+          <div className="stats-grid">
+            <div className="stat">
+              <div className="stat-value">EUR 500</div>
+              <div className="stat-label">Presentazione domanda</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">&lt;7</div>
+              <div className="stat-label">Giorni per invio</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">&lt;2h</div>
+              <div className="stat-label">Tempo di risposta</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">2%</div>
+              <div className="stat-label">Success fee se vinci</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="section" id="bandi">
+          <div className="section-header">
+            <div className="label">Bandi attivi</div>
+            <h2>Scegli il bando giusto per te</h2>
+            <p className="section-desc">Verifica i requisiti e scopri a quanto puoi accedere</p>
+          </div>
+
+          <div className="grid-2">
+            <div className="bando-card">
+              <div className="bando-top">
+                <h3 className="bando-title">Resto al Sud 2.0</h3>
+                <div className="bando-badge">
+                  Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia
+                </div>
+              </div>
+
+              <div className="bando-amount">
+                <div className="amount-label">Contributo massimo</div>
+                <div className="amount-value">EUR 200k</div>
+                <div className="amount-detail">fino al 75% a fondo perduto</div>
+              </div>
+
+              <div className="bando-specs">
+                <div className="spec-row">
+                  <div className="spec-label">Eta</div>
+                  <div className="spec-value">18-35 anni non compiuti</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Requisiti</div>
+                  <div className="spec-value">Disoccupato, inoccupato, inattivo, working poor, GOL</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Voucher</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">EUR 40k-50k</span> 100% a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Programma &lt;=EUR 120k</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">75%</span> a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Programma EUR 120k-200k</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">70%</span> a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Settori</div>
+                  <div className="spec-value">Tutti (escluso agricoltura/pesca)</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Scadenza</div>
+                  <div className="spec-value">A sportello fino a esaurimento fondi</div>
+                </div>
+              </div>
+
+              <div className="bando-footer">
+                <Link href="/quiz" className="bando-btn">
+                  <span>Verifica requisiti</span>
+                </Link>
+              </div>
+            </div>
+
+            <div className="bando-card">
+              <div className="bando-top">
+                <h3 className="bando-title">Autoimpiego Centro Nord</h3>
+                <div className="bando-badge">
+                  Piemonte, Valle d'Aosta, Liguria, Lombardia, Veneto, Friuli, Trentino, Emilia-R., Toscana, Lazio,
+                  Umbria, Marche
+                </div>
+              </div>
+
+              <div className="bando-amount">
+                <div className="amount-label">Contributo massimo</div>
+                <div className="amount-value">EUR 200k</div>
+                <div className="amount-detail">fino al 65% a fondo perduto</div>
+              </div>
+
+              <div className="bando-specs">
+                <div className="spec-row">
+                  <div className="spec-label">Eta</div>
+                  <div className="spec-value">18-35 anni non compiuti</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Requisiti</div>
+                  <div className="spec-value">Disoccupato, inoccupato, inattivo, working poor, GOL</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Voucher</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">EUR 30k-40k</span> 100% a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Programma &lt;=EUR 120k</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">65%</span> a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Programma EUR 120k-200k</div>
+                  <div className="spec-value">
+                    <span className="spec-highlight">60%</span> a fondo perduto
+                  </div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Settori</div>
+                  <div className="spec-value">Industria, artigianato, servizi, turismo, commercio</div>
+                </div>
+                <div className="spec-row">
+                  <div className="spec-label">Scadenza</div>
+                  <div className="spec-value">A sportello fino a esaurimento fondi</div>
+                </div>
+              </div>
+
+              <div className="bando-footer">
+                <Link href="/quiz" className="bando-btn">
+                  <span>Verifica requisiti</span>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="section-bg" id="servizi">
+          <div className="section-inner">
+            <div className="section-header">
+              <div className="label">Come funziona</div>
+              <h2>Prezzi chiari e trasparenti</h2>
+              <p className="section-desc">
+                Paghi solo EUR 500 per la presentazione della domanda, poi success fee solo se vinci il bando
+              </p>
+            </div>
+
+            <div className="grid-2">
+              <div className="servizi-card">
+                <h3>Cosa include il servizio</h3>
+
+                <div className="servizi-list">
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Verifica requisiti completa</strong> - Analizziamo il tuo profilo e ti diciamo esattamente a
+                      quale bando puoi accedere
+                    </div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Business plan professionale</strong> - Creiamo insieme un business plan completo formato
+                      Invitalia con previsioni triennali
+                    </div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Compilazione domanda completa</strong> - I nostri consulenti compilano e inviano la domanda
+                      per te
+                    </div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Consulente dedicato</strong> - Un esperto reale di finanza agevolata assegnato a te
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="servizi-card">
+                <h3>Struttura dei costi</h3>
+
+                <div className="price-highlight">
+                  <div className="price-label-small">Presentazione domanda</div>
+                  <div className="price-amount">EUR 500</div>
+                  <div className="price-note">Pagamento unico dopo verifica requisiti</div>
+                </div>
+
+                <div className="pricing-breakdown">
+                  <div className="pricing-row">
+                    <div className="pricing-label">Se il bando viene approvato</div>
+                    <div className="pricing-value">2% sul contributo</div>
+                  </div>
+                  <div className="pricing-row">
+                    <div className="pricing-label">Assistenza rendicontazione completa</div>
+                    <div className="pricing-value">+3% sul contributo</div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 32 }}>
+                  <Link href="/quiz" className="bando-btn">
+                    <span>Inizia ora</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      ) : null}
 
-      <section className="mx-auto w-full max-w-7xl px-4 pb-10 pt-24 sm:px-8">
-        <article className="panel relative overflow-hidden p-6 sm:p-10">
-          <div className="pointer-events-none absolute -left-16 top-0 h-52 w-52 rounded-full bg-brand.mint/20 blur-3xl" />
-          <div className="pointer-events-none absolute -right-10 bottom-0 h-48 w-48 rounded-full bg-brand.steel/20 blur-3xl" />
+        <section className="section" id="processo">
+          <div className="section-header">
+            <div className="label">Il processo</div>
+            <h2>5 step per ottenere i contributi</h2>
+            <p className="section-desc">Un processo chiaro e guidato da esperti reali</p>
+          </div>
 
-          <div className="relative grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-            <div>
-              <p className="badge badge-new">Piattaforma con consulenti reali</p>
-              <h1 className="mt-4 text-3xl font-extrabold leading-tight text-brand.navy sm:text-5xl">
-                Verifica i requisiti in 2 minuti e avvia la pratica senza errori.
-              </h1>
-              <p className="mt-4 max-w-2xl text-base text-slate-600 sm:text-lg">
-                Un unico flusso: quiz, raccolta documenti, chat con consulente, notifiche sincronizzate e monitoraggio
-                pratica da app.
-              </p>
-
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Link href="/quiz" className="btn btn-primary">
-                  Verifica requisiti gratis
-                </Link>
-                <Link href="/login" className="btn btn-muted">
-                  Accedi a app.bndo.it
-                </Link>
+          <div className="process">
+            <div className="step">
+              <div className="step-num">01</div>
+              <div className="step-content">
+                <h3>Verifica requisiti</h3>
+                <p>Compila il form rapido e scopri subito se hai i requisiti per partecipare ai bandi disponibili.</p>
               </div>
             </div>
-
-            <div className="panel h-fit border-brand.steel/20 bg-white/95 p-5">
-              <h2 className="text-xl font-extrabold text-brand.navy">Costi trasparenti</h2>
-              <div className="mt-4 rounded-2xl bg-brand.navy p-4 text-white">
-                <p className="text-sm text-slate-200">Presentazione domanda</p>
-                <p className="text-3xl font-extrabold">EUR 500</p>
+            <div className="step">
+              <div className="step-num">02</div>
+              <div className="step-content">
+                <h3>Raccolta documenti</h3>
+                <p>Il tuo consulente dedicato ti guida nella raccolta e preparazione di tutti i documenti necessari.</p>
               </div>
-              <div className="mt-4 space-y-2 text-sm text-slate-700">
-                <p className="rounded-xl bg-slate-50 p-3">Success fee solo in caso di esito positivo.</p>
-                <p className="rounded-xl bg-slate-50 p-3">Dashboard operativa con supporto consulente dedicato.</p>
-                <p className="rounded-xl bg-slate-50 p-3">Tempo medio di prima risposta: entro 2 ore lavorative.</p>
+            </div>
+            <div className="step">
+              <div className="step-num">03</div>
+              <div className="step-content">
+                <h3>Business plan</h3>
+                <p>Prepariamo insieme business plan e pratica secondo il formato richiesto da Invitalia.</p>
+              </div>
+            </div>
+            <div className="step">
+              <div className="step-num">04</div>
+              <div className="step-content">
+                <h3>Invio domanda</h3>
+                <p>Procediamo all'invio della domanda e monitoriamo eventuali integrazioni richieste.</p>
+              </div>
+            </div>
+            <div className="step">
+              <div className="step-num">05</div>
+              <div className="step-content">
+                <h3>Post-approvazione</h3>
+                <p>Supporto fino all'erogazione finale, incluse rendicontazione e comunicazioni operative.</p>
               </div>
             </div>
           </div>
-        </article>
+        </section>
 
-        <section id="bandi" className="mt-8 grid gap-4 lg:grid-cols-2">
-          <article className="panel p-5">
-            <p className="text-sm font-semibold text-brand.steel">Resto al Sud 2.0</p>
-            <h3 className="mt-1 text-xl font-extrabold text-brand.navy">Contributi fino a EUR 200.000</h3>
-            <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              <li>Eta 18-34 anni e stato occupazionale compatibile.</li>
-              <li>Regioni: Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia.</li>
-              <li>Voucher e contributi a fondo perduto su spese ammissibili.</li>
-            </ul>
-            <Link href="/quiz" className="btn btn-primary mt-4">
-              Verifica requisiti
+        <section className="cta-section">
+          <div className="cta-content">
+            <h2>Inizia ora la tua pratica</h2>
+            <p>Verifica gratuitamente se hai i requisiti per i bandi</p>
+            <Link href="/quiz" className="btn-primary btn-primary-white">
+              <span>Verifica requisiti gratis</span>
             </Link>
-          </article>
+          </div>
+        </section>
+      </main>
 
-          <article className="panel p-5">
-            <p className="text-sm font-semibold text-brand.steel">Autoimpiego Centro-Nord</p>
-            <h3 className="mt-1 text-xl font-extrabold text-brand.navy">Agevolazioni fino a EUR 200.000</h3>
-            <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              <li>Copertura fino al 65% secondo fasce investimento.</li>
-              <li>Requisiti e limiti verificati automaticamente nel quiz.</li>
-              <li>Gestione documenti e pratica in area riservata con assistenza.</li>
+      <footer>
+        <div className="footer-grid">
+          <div className="footer-col">
+            <h4>BNDO</h4>
+            <p>La piattaforma con esperti reali per i bandi pubblici Resto al Sud 2.0 e Autoimpiego Centro Nord</p>
+          </div>
+          <div className="footer-col">
+            <h4>Bandi</h4>
+            <ul>
+              <li>
+                <a href="#bandi">Resto al Sud 2.0</a>
+              </li>
+              <li>
+                <a href="#bandi">Autoimpiego Centro Nord</a>
+              </li>
+              <li>
+                <a href="#servizi">Servizi</a>
+              </li>
             </ul>
-            <Link href="/quiz" className="btn btn-primary mt-4">
-              Verifica requisiti
-            </Link>
-          </article>
-        </section>
-
-        <section id="servizi" className="panel mt-8 p-6 sm:p-8">
-          <h2 className="text-2xl font-extrabold text-brand.navy">Servizio completo, gestibile senza codice</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">Quiz guidato e acquisizione lead automatica</p>
-            <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">Area cliente con upload documenti e chat realtime</p>
-            <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">Pannello admin con notifiche sincronizzate</p>
-            <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">Architettura scalabile su Supabase + Next.js</p>
           </div>
-        </section>
-
-        <section id="processo" className="panel mt-8 p-6 sm:p-8">
-          <h2 className="text-2xl font-extrabold text-brand.navy">Come funziona</h2>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {steps.map((step, index) => (
-              <article key={step.title} className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs font-bold tracking-wide text-brand.steel">STEP {String(index + 1).padStart(2, '0')}</p>
-                <h3 className="mt-1 font-bold text-brand.navy">{step.title}</h3>
-                <p className="mt-1 text-sm text-slate-600">{step.description}</p>
-              </article>
-            ))}
+          <div className="footer-col">
+            <h4>Processo</h4>
+            <ul>
+              <li>
+                <a href="#processo">Come funziona</a>
+              </li>
+              <li>
+                <a href="#servizi">Costi</a>
+              </li>
+              <li>
+                <a href="#">FAQ</a>
+              </li>
+            </ul>
           </div>
-        </section>
-
-        <section className="panel mt-8 flex flex-wrap items-center justify-between gap-3 bg-brand.navy p-6 text-white sm:p-8">
-          <div>
-            <h2 className="text-2xl font-extrabold">Inizia dalla verifica requisiti</h2>
-            <p className="mt-1 text-sm text-slate-200">Collega bndo.it, app.bndo.it e admin.bndo.it in un solo sistema.</p>
+          <div className="footer-col">
+            <h4>Supporto</h4>
+            <ul>
+              <li>
+                <a href="#">Contatti</a>
+              </li>
+              <li>
+                <a href="#">Privacy</a>
+              </li>
+              <li>
+                <a href="#">Termini</a>
+              </li>
+            </ul>
           </div>
-          <Link href="/quiz" className="btn bg-white font-bold text-brand.navy">
-            Vai al quiz
-          </Link>
-        </section>
-
-        <footer className="py-8 text-center text-sm text-slate-500">(c) 2026 BNDO</footer>
-      </section>
-    </main>
+        </div>
+        <div className="footer-bottom">(c) 2026 BNDO</div>
+      </footer>
+    </>
   );
 }

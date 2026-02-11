@@ -7,39 +7,62 @@ export default function LoginPage({
   searchParams: { error?: string };
 }) {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4">
-      <section className="panel w-full p-6 sm:p-8">
-        <h1 className="text-2xl font-extrabold text-brand.navy">Accedi alla dashboard gare</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Inserisci username o email e password ricevuti dopo l&apos;acquisto del servizio.
-        </p>
+    <section id="loginScreen" className="login-hero">
+      <div className="login-content">
+        <div className="login-header">
+          <div className="login-badge">
+            <span>👤</span>
+            <span>Area Cliente</span>
+          </div>
+          <h1 className="login-title">Bentornato</h1>
+          <p className="login-subtitle">Accedi alla tua area personale BNDO</p>
+        </div>
 
-        <form action={loginAction} className="mt-6 space-y-4">
-          <div>
-            <label className="label" htmlFor="identifier">
-              Username o email
+        <form action={loginAction} className="login-form">
+          <div className="form-group">
+            <label className="form-label" htmlFor="identifier">
+              Username o Email
             </label>
-            <input id="identifier" name="identifier" className="input" required />
+            <input
+              id="identifier"
+              name="identifier"
+              type="text"
+              className="form-input"
+              placeholder="Inserisci username o email"
+              required
+            />
           </div>
 
-          <div>
-            <label className="label" htmlFor="password">
+          <div className="form-group">
+            <label className="form-label" htmlFor="password">
               Password
             </label>
-            <input id="password" name="password" type="password" className="input" required />
+            <input
+              id="password"
+              name="password"
+              type="password"
+              className="form-input"
+              placeholder="Inserisci password"
+              required
+            />
           </div>
 
-          {searchParams.error ? <p className="text-sm font-semibold text-red-700">{searchParams.error}</p> : null}
+          {searchParams.error ? (
+            <p style={{ marginBottom: '16px', fontSize: '14px', fontWeight: 600, color: '#b91c1c' }}>{searchParams.error}</p>
+          ) : null}
 
-          <button className="btn btn-primary w-full" type="submit">
-            Entra
+          <button type="submit" className="btn-login">
+            <span>Accedi alla Dashboard →</span>
           </button>
-        </form>
 
-        <p className="mt-4 text-sm text-slate-500">
-          Non hai ancora un account? <Link href="/" className="font-semibold text-brand.steel">Attiva il servizio</Link>
-        </p>
-      </section>
-    </main>
+          <p style={{ marginTop: '16px', fontSize: '14px', color: 'var(--text-light)' }}>
+            Non hai ancora un account?{' '}
+            <Link href="/" style={{ color: 'var(--navy)', fontWeight: 600 }}>
+              Attiva il servizio
+            </Link>
+          </p>
+        </form>
+      </div>
+    </section>
   );
 }

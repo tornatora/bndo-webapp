@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { AlertCircle, ArrowUpRight, Clock3, FileCheck2 } from 'lucide-react';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
@@ -28,22 +27,27 @@ export default async function DashboardPage() {
 
   if (!profile.company_id) {
     return (
-      <div className="panel p-6 text-sm text-red-700">
-        Profilo non associato ad alcuna azienda. Contatta il supporto.
-      </div>
+      <section className="welcome-section">
+        <h1 className="welcome-title">Profilo non valido</h1>
+        <p className="welcome-subtitle">Profilo non associato ad alcuna azienda. Contatta il supporto.</p>
+      </section>
     );
   }
 
   const supabase = createClient();
 
-  const [{ data: matches }, { data: existingThread }] = await Promise.all([
+  const [{ data: matches }, { data: existingThread }, { count: docsCount }] = await Promise.all([
     supabase
       .from('tender_matches')
       .select('id, relevance_score, status, tender_id')
       .eq('company_id', profile.company_id)
       .order('relevance_score', { ascending: false })
       .limit(12),
-    supabase.from('consultant_threads').select('id').eq('company_id', profile.company_id).maybeSingle()
+    supabase.from('consultant_threads').select('id').eq('company_id', profile.company_id).maybeSingle(),
+    supabase
+      .from('application_documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', profile.company_id)
   ]);
 
   let threadId = existingThread?.id ?? null;
@@ -98,7 +102,6 @@ export default async function DashboardPage() {
   const tenderMap = new Map((tenders ?? []).map((tender) => [tender.id, tender]));
   const typedMatches: TenderMatchResult[] = (matches ?? []).flatMap((match) => {
     const tender = tenderMap.get(match.tender_id);
-
     if (!tender) return [];
 
     return [
@@ -111,104 +114,115 @@ export default async function DashboardPage() {
     ];
   });
 
+  const unreadCount = (messages ?? []).filter(
+    (message) =>
+      message.sender_profile_id !== profile.id &&
+      new Date(message.created_at).getTime() > new Date(participant?.last_read_at ?? new Date(0).toISOString()).getTime()
+  ).length;
+
   return (
-    <div className="space-y-5">
-      <section className="panel p-5 sm:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-brand.steel">Dashboard gare</p>
-            <h1 className="text-2xl font-extrabold text-brand.navy">Opportunita rilevanti per la tua azienda</h1>
-          </div>
+    <>
+      <div id="tab-pratiche" className="tab-panel active">
+        <div className="welcome-section" id="pratiche">
+          <h1 className="welcome-title">📋 Le Tue Pratiche</h1>
+          <p className="welcome-subtitle">Monitora l'avanzamento delle tue richieste</p>
 
-          <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <p className="font-semibold">{typedMatches.length} gare attive in watchlist</p>
-            <p>Match automatico aggiornato quotidianamente</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="space-y-3">
-          {typedMatches.length === 0 ? (
-            <div className="panel flex items-center gap-2 p-4 text-sm text-slate-600">
-              <AlertCircle className="h-4 w-4 text-brand.steel" />
-              Nessuna gara disponibile al momento. Il consulente ti aggiornera appena emergono nuove opportunita.
+          <div className="stats-grid">
+            <div className="stat-item">
+              <div className="stat-value">{typedMatches.length}</div>
+              <div className="stat-label">Pratiche Attive</div>
             </div>
-          ) : (
-            typedMatches.map((match) => {
-              const deadline = new Date(match.tender.deadline_at);
-              const statusClass =
-                match.status === 'submitted'
-                  ? 'badge badge-done'
-                  : match.status === 'participating'
-                    ? 'badge badge-progress'
-                    : 'badge badge-new';
-
-              return (
-                <article key={match.id} className="panel p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-brand.steel">{match.tender.authority_name}</p>
-                      <h2 className="mt-0.5 text-lg font-bold text-brand.navy">{match.tender.title}</h2>
-                    </div>
-                    <span className={statusClass}>{match.status.replace('_', ' ')}</span>
-                  </div>
-
-                  <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
-                    <div className="rounded-lg bg-slate-50 px-3 py-2">
-                      <p className="text-xs uppercase">Relevance</p>
-                      <p className="font-semibold">{Math.round(match.relevance_score * 100)}%</p>
-                    </div>
-                    <div className="rounded-lg bg-slate-50 px-3 py-2">
-                      <p className="text-xs uppercase">Scadenza</p>
-                      <p className="font-semibold">{deadline.toLocaleDateString('it-IT')}</p>
-                    </div>
-                    <div className="rounded-lg bg-slate-50 px-3 py-2">
-                      <p className="text-xs uppercase">Valore</p>
-                      <p className="font-semibold">
-                        {match.tender.procurement_value
-                          ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(
-                              match.tender.procurement_value
-                            )
-                          : 'N/D'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href={`/dashboard/tenders/${match.tender.id}`} className="btn btn-primary text-sm">
-                      Apri sintesi
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
-                    <Link href={`/dashboard/tenders/${match.tender.id}/apply`} className="btn btn-muted text-sm">
-                      <FileCheck2 className="h-4 w-4" />
-                      Partecipa
-                    </Link>
-                  </div>
-                </article>
-              );
-            })
-          )}
-        </div>
-
-        <div id="chat">
-          {threadId ? (
-            <ChatPanel
-              threadId={threadId}
-              viewerProfileId={profile.id}
-              initialMessages={messages ?? []}
-              initialLastReadAt={participant?.last_read_at ?? null}
-            />
-          ) : (
-            <div className="panel p-5 text-sm text-red-700">Impossibile inizializzare la chat consulente.</div>
-          )}
-
-          <div className="panel mt-4 flex items-center gap-2 p-4 text-sm text-slate-600">
-            <Clock3 className="h-4 w-4 text-brand.steel" />
-            SLA medio risposta consulente: entro 2 ore lavorative.
+            <div className="stat-item">
+              <div className="stat-value">{docsCount ?? 0}</div>
+              <div className="stat-label">Documenti Caricati</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">{unreadCount}</div>
+              <div className="stat-label">Messaggi Non Letti</div>
+            </div>
           </div>
         </div>
-      </section>
-    </div>
+
+        {typedMatches.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📋</div>
+            <p className="empty-text">Nessuna pratica disponibile al momento.</p>
+          </div>
+        ) : (
+          typedMatches.map((match) => {
+            const statusClass = match.status === 'submitted' ? 'badge badge-success' : 'badge badge-info';
+            const statusLabel = match.status === 'submitted' ? 'Completata' : 'In corso';
+            const relevance = Math.round(match.relevance_score * 100);
+
+            return (
+              <article key={match.id} className="pratica-card">
+                <div className="pratica-header">
+                  <div>
+                    <h2 className="pratica-title">{match.tender.title}</h2>
+                    <p className="pratica-type">{match.tender.authority_name}</p>
+                  </div>
+                  <span className={statusClass}>{statusLabel}</span>
+                </div>
+
+                <div className="progress-section">
+                  <div className="progress-header">
+                    <span className="progress-label">Rilevanza pratica</span>
+                    <span className="progress-value">{relevance}%</span>
+                  </div>
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${relevance}%` }} />
+                  </div>
+                </div>
+
+                <div className="action-buttons" style={{ marginTop: 20 }}>
+                  <Link href={`/dashboard/tenders/${match.tender.id}`} className="btn-action primary">
+                    <span>📋</span>
+                    <span>Apri sintesi</span>
+                  </Link>
+                  <Link href={`/dashboard/tenders/${match.tender.id}/apply`} className="btn-action secondary">
+                    <span>📤</span>
+                    <span>Partecipa</span>
+                  </Link>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div id="tab-documenti" className="tab-panel active">
+        <div className="welcome-section" id="documenti">
+          <h1 className="welcome-title">📄 I Tuoi Documenti</h1>
+          <p className="welcome-subtitle">Gestisci i documenti dalle singole pratiche in modo guidato.</p>
+          <div className="action-buttons" style={{ marginTop: 20 }}>
+            <Link href="/dashboard" className="btn-action secondary">
+              <span>↗</span>
+              <span>Apri una pratica e carica i file</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-messaggi" className="tab-panel active">
+        <div className="welcome-section" id="messaggi">
+          <h1 className="welcome-title">💬 Messaggi</h1>
+          <p className="welcome-subtitle">Chatta con il tuo consulente in tempo reale</p>
+        </div>
+
+        {threadId ? (
+          <ChatPanel
+            threadId={threadId}
+            viewerProfileId={profile.id}
+            initialMessages={messages ?? []}
+            initialLastReadAt={participant?.last_read_at ?? null}
+          />
+        ) : (
+          <div className="empty-state">
+            <div className="empty-icon">⚠️</div>
+            <p className="empty-text">Impossibile inizializzare la chat consulente.</p>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

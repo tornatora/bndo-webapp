@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import './quiz.css';
 
 type StepId =
   | 'intro'
@@ -76,12 +77,8 @@ function OptionButton({
   onPick: (value: string) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onPick(value)}
-      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-medium text-slate-700 transition hover:border-brand.mint hover:bg-brand.mint/5"
-    >
-      {text}
+    <button type="button" onClick={() => onPick(value)} className="option">
+      <div className="option-content">{text}</div>
     </button>
   );
 }
@@ -114,6 +111,14 @@ export default function QuizPage() {
           ],
     [isSouth]
   );
+
+  useEffect(() => {
+    if (step !== 'intro') return;
+    const timer = setTimeout(() => {
+      setStep('q1');
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [step]);
 
   function goTo(next: StepId) {
     setHistory((previous) => (step === 'intro' || step === 'blocked' || step === 'success' ? previous : [...previous, step]));
@@ -247,38 +252,40 @@ export default function QuizPage() {
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-3xl px-4 py-6 sm:py-10">
-      <section className="panel p-5 sm:p-8">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <Link href="/" className="text-sm font-semibold text-brand.steel">
-            Torna al sito
-          </Link>
-          <Link href="/login" className="text-sm font-semibold text-brand.steel">
-            Area clienti
-          </Link>
-        </div>
-
+    <main className="quiz-page">
+      <section className={`container ${step === 'intro' ? 'intro-container' : ''}`}>
         {step !== 'intro' ? (
-          <div className="mb-6">
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-              <div className="h-full rounded-full bg-brand.mint transition-all" style={{ width: `${progress}%` }} />
+          <>
+            <div className="top-links">
+              <Link href="/">Torna al sito</Link>
+              <Link href="/login">Area clienti</Link>
             </div>
-            <p className="mt-2 text-xs text-slate-500">Progress: {progress}%</p>
-          </div>
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+          </>
         ) : null}
 
         {step === 'intro' ? (
-          <div className="space-y-5 text-center">
-            <p className="badge badge-new">Verifica requisiti in 2 minuti</p>
-            <h1 className="text-3xl font-extrabold text-brand.navy sm:text-4xl">
-              Scopri subito se puoi accedere ai bandi attivi.
-            </h1>
-            <p className="text-sm text-slate-600 sm:text-base">
-              Ti faremo poche domande guidate e al termine salveremo il tuo esito per richiamarti con un consulente.
-            </p>
-            <button type="button" className="btn btn-primary" onClick={() => setStep('q1')}>
-              Inizia verifica
-            </button>
+          <div className="intro-page">
+            <div className="hero-text">
+              <span className="word word-1">Verifichiamo</span>{' '}
+              <span className="word word-2">in</span>{' '}
+              <span className="word word-3">tempo</span>{' '}
+              <span className="word word-4">reale</span>{' '}
+              <span className="word word-5">se</span>{' '}
+              <span className="word word-6">hai</span>{' '}
+              <span className="word word-7">i</span>{' '}
+              <span className="word word-8 highlight">requisiti</span>{' '}
+              <span className="word word-9">per</span>{' '}
+              <span className="word word-10">accedere</span>{' '}
+              <span className="word word-11">ai bandi</span>
+            </div>
+            <div className="loader-container">
+              <div className="loader-bar">
+                <div className="loader-fill" />
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -314,11 +321,7 @@ export default function QuizPage() {
 
         {step === 'q3' ? (
           <QuestionLayout title="In quale regione aprirai l'attivita?" subtitle="Domanda 3 di 12">
-            <select
-              className="input"
-              value={answers.q3 ?? ''}
-              onChange={(event) => setAnswers((previous) => ({ ...previous, q3: event.target.value }))}
-            >
+            <select value={answers.q3 ?? ''} onChange={(event) => setAnswers((previous) => ({ ...previous, q3: event.target.value }))}>
               <option value="">Seleziona una regione...</option>
               {[
                 'Abruzzo',
@@ -347,11 +350,11 @@ export default function QuizPage() {
                 </option>
               ))}
             </select>
-            <div className="mt-4 flex gap-2">
-              <button type="button" className="btn btn-muted flex-1" onClick={goBack}>
+            <div className="buttons">
+              <button type="button" className="btn-back" onClick={goBack}>
                 Indietro
               </button>
-              <button type="button" className="btn btn-primary flex-1" onClick={handleRegionNext} disabled={!answers.q3}>
+              <button type="button" className="btn-next" onClick={handleRegionNext} disabled={!answers.q3}>
                 Avanti
               </button>
             </div>
@@ -468,8 +471,8 @@ export default function QuizPage() {
 
         {step === 'q11' ? (
           <QuestionLayout title="Quante risorse personali puoi dimostrare di avere disponibili?" subtitle="Domanda 11 di 12">
-            <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-              E una garanzia minima indicativa: non significa che dovrai spendere l importo dichiarato.
+            <p className="info-box">
+              ⚠️ <strong>Attenzione:</strong> e una garanzia minima indicativa. Non dovrai spendere questo importo.
             </p>
             <OptionButton text="Meno del 10%" value="A" onPick={(value) => handleAnswer('q11', value)} />
             <OptionButton text="Circa il 10%" value="B" onPick={(value) => handleAnswer('q11', value)} />
@@ -480,80 +483,102 @@ export default function QuizPage() {
 
         {step === 'q12' ? (
           <QuestionLayout title="Inserisci i tuoi dati per finalizzare la verifica" subtitle="Domanda 12 di 12">
-            <div className="space-y-3">
+            <div className="input-group">
               <input
-                className="input"
-                placeholder="Nome"
+                placeholder="Nome *"
                 value={contact.firstName}
                 onChange={(event) => setContact((previous) => ({ ...previous, firstName: event.target.value }))}
               />
+            </div>
+            <div className="input-group">
               <input
-                className="input"
-                placeholder="Cognome"
+                placeholder="Cognome *"
                 value={contact.lastName}
                 onChange={(event) => setContact((previous) => ({ ...previous, lastName: event.target.value }))}
               />
+            </div>
+            <div className="input-group">
               <input
                 type="email"
-                className="input"
-                placeholder="Email"
+                placeholder="Email *"
                 value={contact.email}
                 onChange={(event) => setContact((previous) => ({ ...previous, email: event.target.value }))}
               />
+            </div>
+            <div className="input-group">
               <input
-                className="input"
-                placeholder="Telefono"
+                placeholder="Telefono *"
                 value={contact.phone}
                 onChange={(event) => setContact((previous) => ({ ...previous, phone: event.target.value }))}
               />
             </div>
-            <div className="mt-4 flex gap-2">
-              <button type="button" className="btn btn-muted flex-1" onClick={goBack}>
+
+            <div className="buttons">
+              <button type="button" className="btn-back" onClick={goBack}>
                 Indietro
               </button>
-              <button type="button" className="btn btn-primary flex-1" disabled={submitting} onClick={submitQuiz}>
+              <button type="button" className="btn-next" disabled={submitting} onClick={submitQuiz}>
                 {submitting ? 'Invio...' : 'Invia'}
               </button>
             </div>
-            {submissionError ? <p className="mt-2 text-sm font-semibold text-red-700">{submissionError}</p> : null}
+            {submissionError ? <p className="error-text">{submissionError}</p> : null}
           </QuestionLayout>
         ) : null}
 
         {step === 'blocked' ? (
-          <div className="space-y-4 text-center">
-            <p className="text-sm font-bold uppercase tracking-wide text-red-700">Esito non idoneo</p>
-            <h2 className="text-2xl font-extrabold text-brand.navy">Al momento non risulti idoneo</h2>
-            <p className="text-sm text-slate-600">
-              Possiamo comunque analizzare alternative su misura. Lascia i tuoi contatti e ti richiamiamo.
-            </p>
-            <div className="flex flex-wrap justify-center gap-2">
-              <button type="button" className="btn btn-muted" onClick={restart}>
+          <div className="final-page">
+            <div className="error-icon">⚠️</div>
+            <h2>Purtroppo non sei idoneo</h2>
+            <p>Con i dati inseriti non hai i requisiti per questi bandi.</p>
+            <div className="buttons">
+              <button type="button" className="btn-back" onClick={restart}>
                 Rifai il quiz
               </button>
-              <a href="https://wa.me/393471234567" target="_blank" rel="noreferrer" className="btn btn-primary">
-                Parla con un consulente
+              <a href="https://wa.me/393471234567" target="_blank" rel="noreferrer" className="btn-next">
+                Contattaci
               </a>
             </div>
           </div>
         ) : null}
 
         {step === 'success' ? (
-          <div className="space-y-4 text-center">
-            <p className="text-sm font-bold uppercase tracking-wide text-brand.steel">Esito positivo</p>
-            <h2 className="text-2xl font-extrabold text-brand.navy">Idoneita confermata</h2>
-            <p className="text-sm text-slate-600">
-              Hai i requisiti per {isSouth ? 'Resto al Sud 2.0' : 'Autoimpiego Centro-Nord'}.
-            </p>
-            <div className="rounded-xl bg-brand.mint/10 p-4 text-sm text-slate-700">
-              I tuoi dati sono stati salvati. Un consulente ti contattera con i prossimi passi operativi.
+          <div className="success-page">
+            <div className="success-icon">🎉</div>
+            <h2>Complimenti! Hai tutti i requisiti!</h2>
+            <p>In base alle risposte fornite possiedi i requisiti per presentare la domanda.</p>
+            <div className="bando-name">{isSouth ? 'Resto al Sud 2.0' : 'Autoimpiego Centro-Nord'}</div>
+
+            <div className="success-options">
+              <div className="option-card">
+                <h3>⚡ Accedi subito all'area cliente</h3>
+                <p>I tuoi dati sono stati salvati. Puoi continuare il processo operativo dalla dashboard.</p>
+                <Link href="/login" className="btn-next" style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}>
+                  Vai al login
+                </Link>
+              </div>
+
+              <div className="option-card">
+                <h3>💬 Parla con un consulente</h3>
+                <p>Se vuoi supporto immediato, contattaci su WhatsApp.</p>
+                <a
+                  href="https://wa.me/393471234567"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-back"
+                  style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
+                >
+                  Apri chat WhatsApp
+                </a>
+              </div>
             </div>
-            <div className="flex flex-wrap justify-center gap-2">
-              <Link href="/login" className="btn btn-primary">
-                Accedi all area clienti
-              </Link>
-              <button type="button" className="btn btn-muted" onClick={restart}>
-                Nuova verifica
-              </button>
+
+            <div className="process-info">
+              <h4>📋 Prossimi passi consigliati</h4>
+              <ol>
+                <li>Accedi all'area cliente.</li>
+                <li>Carica la documentazione richiesta.</li>
+                <li>Coordina la pratica con il consulente dedicato via chat.</li>
+              </ol>
             </div>
           </div>
         ) : null}
@@ -573,17 +598,19 @@ function QuestionLayout({
 }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-brand.steel">{subtitle}</p>
-      <h1 className="mt-2 text-2xl font-extrabold text-brand.navy">{title}</h1>
-      <div className="mt-4 space-y-2">{children}</div>
+      <div className="tag">{subtitle}</div>
+      <div className="question">{title}</div>
+      <div className="input-group">{children}</div>
     </div>
   );
 }
 
 function BackRow({ onBack }: { onBack: () => void }) {
   return (
-    <button type="button" className="btn btn-muted mt-2" onClick={onBack}>
-      Indietro
-    </button>
+    <div className="buttons">
+      <button type="button" className="btn-back" onClick={onBack}>
+        Indietro
+      </button>
+    </div>
   );
 }

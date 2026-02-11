@@ -1,6 +1,5 @@
 'use client';
 
-import { Bell, BellRing } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
@@ -187,91 +186,86 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
     setSending(false);
   }
 
-  return (
-    <section className="panel flex h-[430px] flex-col p-4">
-      <header className="mb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-brand.navy">Consulente dedicato</h3>
-            <p className="text-sm text-slate-600">
-              Richiedi supporto su documentazione, requisiti e strategia di partecipazione.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-brand.navy"
-            aria-label="Apri notifiche chat"
-            onClick={() => setIsNotificationsOpen((previous) => !previous)}
-          >
-            {unreadCount > 0 ? <BellRing className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
-            {unreadCount > 0 ? (
-              <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-bold text-white">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            ) : null}
-          </button>
-        </div>
+  function getInitials(senderId: string) {
+    return senderId === viewerProfileId ? 'U' : 'A';
+  }
 
-        {isNotificationsOpen ? (
-          <div className="mt-3 max-h-44 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2">
+  return (
+    <div>
+      <div className="action-buttons" style={{ marginBottom: 12 }}>
+        <button type="button" className="notification-bell" onClick={() => setIsNotificationsOpen((previous) => !previous)}>
+          <span>🔔</span>
+          {unreadCount > 0 ? (
+            <span className="notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>
+          ) : null}
+        </button>
+      </div>
+
+      {isNotificationsOpen ? (
+        <div className="notifications-panel" style={{ display: 'block', position: 'static', marginBottom: 16 }}>
+          <div className="notifications-header">
+            <div className="notifications-title">🔔 Nuovi messaggi</div>
+          </div>
+          <div className="notifications-list">
             {unreadCount === 0 ? (
-              <p className="rounded-lg bg-slate-50 p-2 text-xs text-slate-500">Nessun nuovo messaggio.</p>
+              <div className="notification-item">
+                <div className="notification-message">Nessun nuovo messaggio.</div>
+              </div>
             ) : (
               unreadMessages
                 .slice(-8)
                 .reverse()
                 .map((notification) => (
-                  <article key={notification.id} className="rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
-                    <p className="font-semibold text-brand.navy">Nuovo messaggio consulente</p>
-                    <p>{notification.body}</p>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {new Date(notification.created_at).toLocaleString('it-IT')}
-                    </p>
-                  </article>
+                  <div className="notification-item unread" key={notification.id}>
+                    <div className="notification-title">Nuovo messaggio consulente</div>
+                    <div className="notification-message">{notification.body}</div>
+                    <div className="notification-time">{new Date(notification.created_at).toLocaleString('it-IT')}</div>
+                  </div>
                 ))
             )}
           </div>
-        ) : null}
-      </header>
+        </div>
+      ) : null}
 
-      <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-3">
-        {messages.length === 0 ? (
-          <p className="text-sm text-slate-500">Nessun messaggio. Inizia una conversazione con il consulente.</p>
-        ) : (
-          messages.map((message) => {
-            const isMine = message.sender_profile_id === viewerProfileId;
-
-            return (
-              <div
-                key={message.id}
-                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
-                  isMine
-                    ? 'ml-auto bg-brand.navy text-white'
-                    : 'bg-white text-slate-700 ring-1 ring-slate-200'
-                }`}
-              >
-                <p>{message.body}</p>
-                <p className={`mt-1 text-[11px] ${isMine ? 'text-slate-200' : 'text-slate-400'}`}>
-                  {new Date(message.created_at).toLocaleString('it-IT')}
-                </p>
+      <div className="chat-card">
+        <div className="chat-container">
+          <div ref={scrollRef} className="chat-messages" id="chatMessages">
+            {messages.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">💬</div>
+                <p className="empty-text">Nessun messaggio. Inizia una conversazione!</p>
               </div>
-            );
-          })
-        )}
-      </div>
+            ) : (
+              messages.map((message) => {
+                const isMine = message.sender_profile_id === viewerProfileId;
 
-      <form className="mt-3 flex items-center gap-2" onSubmit={sendMessage}>
-        <input
-          className="input"
-          placeholder="Scrivi al consulente..."
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          maxLength={1200}
-        />
-        <button type="submit" className="btn btn-primary whitespace-nowrap" disabled={sending}>
-          {sending ? 'Invio...' : 'Invia'}
-        </button>
-      </form>
-    </section>
+                return (
+                  <div key={message.id} className={`message ${isMine ? 'user' : ''}`}>
+                    <div className="message-avatar">{getInitials(message.sender_profile_id)}</div>
+                    <div className="message-content">
+                      <div className="message-bubble">{message.body}</div>
+                      <div className="message-time">{new Date(message.created_at).toLocaleString('it-IT')}</div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <form className="chat-input-area" onSubmit={sendMessage}>
+            <input
+              className="chat-input"
+              placeholder="Scrivi un messaggio..."
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              maxLength={1200}
+            />
+            <button type="submit" className="btn-send" disabled={sending}>
+              {sending ? 'Invio...' : 'Invia'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }
