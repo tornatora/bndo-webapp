@@ -41,6 +41,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <span>💬</span>
             <span>Messaggi</span>
           </Link>
+          <Link className="main-tab" href="/dashboard/password">
+            <span>🔐</span>
+            <span>Password</span>
+          </Link>
         </div>
       </nav>
 

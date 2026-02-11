@@ -3,9 +3,10 @@ import Link from 'next/link';
 export default function LoginPage({
   searchParams
 }: {
-  searchParams?: { error?: string | string[] };
+  searchParams?: { error?: string | string[]; success?: string | string[] };
 }) {
   const errorParam = Array.isArray(searchParams?.error) ? searchParams?.error[0] : searchParams?.error;
+  const successParam = Array.isArray(searchParams?.success) ? searchParams?.success[0] : searchParams?.success;
 
   return (
     <section id="loginScreen" className="login-hero">
@@ -52,14 +53,26 @@ export default function LoginPage({
             <p style={{ marginBottom: '16px', fontSize: '14px', fontWeight: 600, color: '#b91c1c' }}>{errorParam}</p>
           ) : null}
 
+          {successParam ? (
+            <p style={{ marginBottom: '16px', fontSize: '14px', fontWeight: 600, color: '#15803d' }}>{successParam}</p>
+          ) : null}
+
           <button type="submit" className="btn-login">
             <span>Accedi alla Dashboard →</span>
           </button>
 
+          <p style={{ marginTop: '12px', fontSize: '14px', color: 'var(--text-light)' }}>
+            Hai dimenticato la password?{' '}
+            <Link href="/forgot-password" style={{ color: 'var(--navy)', fontWeight: 600 }}>
+              Recuperala qui
+            </Link>
+            .
+          </p>
+
           <p style={{ marginTop: '16px', fontSize: '14px', color: 'var(--text-light)' }}>
             Non hai ancora un account?{' '}
-            <Link href="/" style={{ color: 'var(--navy)', fontWeight: 600 }}>
-              Attiva il servizio
+            <Link href="/register" style={{ color: 'var(--navy)', fontWeight: 600 }}>
+              Registrati
             </Link>
           </p>
         </form>

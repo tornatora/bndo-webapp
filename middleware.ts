@@ -41,7 +41,7 @@ export async function middleware(request: NextRequest) {
 
   const isDashboardPath = path.startsWith('/dashboard');
   const isAdminPath = path.startsWith('/admin');
-  const isAuthPath = path.startsWith('/login');
+  const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
   const hasAuthError = request.nextUrl.searchParams.has('error');
 
   if ((isDashboardPath || isAdminPath) && !user) {
@@ -56,5 +56,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/quiz', '/dashboard/:path*', '/admin/:path*', '/login']
+  matcher: ['/', '/quiz', '/dashboard/:path*', '/admin/:path*', '/login', '/register', '/forgot-password', '/reset-password']
 };
