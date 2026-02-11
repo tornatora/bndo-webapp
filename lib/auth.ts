@@ -36,7 +36,7 @@ export async function requireOpsProfile() {
   const { user, profile } = await requireUserProfile();
 
   if (!hasOpsAccess(profile.role)) {
-    redirect('/dashboard?error=access_denied');
+    redirect('/forbidden?reason=admin_only');
   }
 
   return { user, profile };
