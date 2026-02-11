@@ -686,7 +686,7 @@ export default function QuizPage() {
             </div>
 
             <div className="process-info">
-              <h4>📋 Come funziona il processo "Salta la fila":</h4>
+              <h4>📋 Come funziona il processo &quot;Salta la fila&quot;:</h4>
               <ol>
                 <li>
                   <strong>Pagamento 100€:</strong> Accedi immediatamente alla verifica documenti
