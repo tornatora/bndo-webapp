@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { loginAction } from './actions';
 
 export default function LoginPage({
   searchParams
@@ -18,7 +17,7 @@ export default function LoginPage({
           <p className="login-subtitle">Accedi alla tua area personale BNDO</p>
         </div>
 
-        <form action={loginAction} className="login-form">
+        <form action="/api/auth/login" method="post" className="login-form">
           <div className="form-group">
             <label className="form-label" htmlFor="identifier">
               Username o Email
