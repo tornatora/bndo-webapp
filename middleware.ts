@@ -42,12 +42,13 @@ export async function middleware(request: NextRequest) {
   const isDashboardPath = path.startsWith('/dashboard');
   const isAdminPath = path.startsWith('/admin');
   const isAuthPath = path.startsWith('/login');
+  const hasAuthError = request.nextUrl.searchParams.has('error');
 
   if ((isDashboardPath || isAdminPath) && !user) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (isAuthPath && user) {
+  if (isAuthPath && user && !hasAuthError) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

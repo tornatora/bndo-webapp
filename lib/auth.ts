@@ -26,7 +26,7 @@ export async function requireUserProfile() {
     .single();
 
   if (error || !profile) {
-    redirect('/login?error=profile_not_found');
+    redirect('/api/auth/logout?redirect=/login?error=profile_not_found');
   }
 
   return { user, profile };
