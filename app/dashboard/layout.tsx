@@ -13,7 +13,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <span>🎯 BNDO</span>
           </div>
           <div className="nav-actions">
-            <span className="nav-user">@{profile.username}</span>
+            <div className="notification-bell" id="notificationBell">
+              <span>🔔</span>
+              <span className="notification-count" id="notificationCount" style={{ display: 'none' }}>
+                0
+              </span>
+            </div>
+            <span className="nav-user" id="userName">
+              @{profile.username}
+            </span>
             <SignOutButton className="btn-logout" compact />
           </div>
         </nav>

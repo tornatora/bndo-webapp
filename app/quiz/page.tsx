@@ -1,8 +1,21 @@
 'use client';
 
 import Link from 'next/link';
+import Script from 'next/script';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import './quiz.css';
+
+declare global {
+  interface Window {
+    confetti?: (options: {
+      particleCount: number;
+      angle: number;
+      spread: number;
+      origin: { x: number };
+      colors: string[];
+    }) => void;
+  }
+}
 
 type StepId =
   | 'intro'
@@ -118,6 +131,46 @@ export default function QuizPage() {
       setStep('q1');
     }, 2500);
     return () => clearTimeout(timer);
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== 'success') return;
+
+    let animationId: number | null = null;
+    const timer = window.setTimeout(() => {
+      const duration = 3000;
+      const end = Date.now() + duration;
+
+      const burst = () => {
+        window.confetti?.({
+          particleCount: 5,
+          angle: 60,
+          spread: 55,
+          origin: { x: 0 },
+          colors: ['#22C55F', '#0B1136', '#FFF']
+        });
+        window.confetti?.({
+          particleCount: 5,
+          angle: 120,
+          spread: 55,
+          origin: { x: 1 },
+          colors: ['#22C55F', '#0B1136', '#FFF']
+        });
+
+        if (Date.now() < end) {
+          animationId = window.requestAnimationFrame(burst);
+        }
+      };
+
+      burst();
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (animationId !== null) {
+        window.cancelAnimationFrame(animationId);
+      }
+    };
   }, [step]);
 
   function goTo(next: StepId) {
@@ -253,6 +306,11 @@ export default function QuizPage() {
 
   return (
     <main className="quiz-page">
+      <Script
+        src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"
+        strategy="afterInteractive"
+      />
+
       <section className={`container ${step === 'intro' ? 'intro-container' : ''}`}>
         {step !== 'intro' ? (
           <>

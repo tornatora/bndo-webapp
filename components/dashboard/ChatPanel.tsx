@@ -27,20 +27,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const markReadTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setMessages(initialMessages);
-  }, [initialMessages]);
-
-  useEffect(() => {
-    setLastReadAt(initialLastReadAt ?? new Date(0).toISOString());
-  }, [initialLastReadAt]);
-
-  function scrollToBottom() {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }
-
   const unreadMessages = useMemo(
     () =>
       messages.filter(
@@ -50,8 +36,62 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
       ),
     [messages, viewerProfileId, lastReadAt]
   );
-
   const unreadCount = unreadMessages.length;
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
+  useEffect(() => {
+    setLastReadAt(initialLastReadAt ?? new Date(0).toISOString());
+  }, [initialLastReadAt]);
+
+  useEffect(() => {
+    const bell = document.getElementById('notificationBell');
+    if (!bell) return;
+
+    const onToggle = () => setIsNotificationsOpen((previous) => !previous);
+    bell.addEventListener('click', onToggle);
+
+    return () => {
+      bell.removeEventListener('click', onToggle);
+    };
+  }, []);
+
+  useEffect(() => {
+    const countElement = document.getElementById('notificationCount');
+    if (!countElement) return;
+
+    if (unreadCount > 0) {
+      countElement.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+      countElement.style.display = 'flex';
+      return;
+    }
+
+    countElement.textContent = '0';
+    countElement.style.display = 'none';
+  }, [unreadCount]);
+
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      const bell = document.getElementById('notificationBell');
+      const panel = document.getElementById('notificationsPanel');
+      const target = event.target as Node | null;
+      if (!target || !bell || !panel) return;
+      if (bell.contains(target) || panel.contains(target)) return;
+      setIsNotificationsOpen(false);
+    };
+
+    document.addEventListener('click', onDocumentClick);
+    return () => {
+      document.removeEventListener('click', onDocumentClick);
+    };
+  }, []);
+
+  function scrollToBottom() {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }
 
   async function markThreadAsRead() {
     if (isMarkingRead) return;
@@ -192,40 +232,37 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
 
   return (
     <div>
-      <div className="action-buttons" style={{ marginBottom: 12 }}>
-        <button type="button" className="notification-bell" onClick={() => setIsNotificationsOpen((previous) => !previous)}>
-          <span>🔔</span>
-          {unreadCount > 0 ? (
-            <span className="notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>
-          ) : null}
-        </button>
-      </div>
-
-      {isNotificationsOpen ? (
-        <div className="notifications-panel" style={{ display: 'block', position: 'static', marginBottom: 16 }}>
-          <div className="notifications-header">
-            <div className="notifications-title">🔔 Nuovi messaggi</div>
-          </div>
-          <div className="notifications-list">
-            {unreadCount === 0 ? (
-              <div className="notification-item">
-                <div className="notification-message">Nessun nuovo messaggio.</div>
-              </div>
-            ) : (
-              unreadMessages
-                .slice(-8)
-                .reverse()
-                .map((notification) => (
-                  <div className="notification-item unread" key={notification.id}>
-                    <div className="notification-title">Nuovo messaggio consulente</div>
-                    <div className="notification-message">{notification.body}</div>
-                    <div className="notification-time">{new Date(notification.created_at).toLocaleString('it-IT')}</div>
-                  </div>
-                ))
-            )}
-          </div>
+      <div className={`notifications-panel ${isNotificationsOpen ? 'active' : ''}`} id="notificationsPanel">
+        <div className="notifications-header">
+          <div className="notifications-title">🔔 Notifiche</div>
         </div>
-      ) : null}
+        <div className="notifications-list" id="notificationsList">
+          {unreadCount === 0 ? (
+            <div className="notification-item">
+              <div className="notification-title">✅ Tutto letto</div>
+              <div className="notification-message">Nessun nuovo messaggio.</div>
+              <div className="notification-time">Adesso</div>
+            </div>
+          ) : (
+            unreadMessages
+              .slice(-8)
+              .reverse()
+              .map((notification) => (
+                <button
+                  key={notification.id}
+                  type="button"
+                  className="notification-item unread"
+                  style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
+                  onClick={() => void markThreadAsRead()}
+                >
+                  <div className="notification-title">💬 Nuovo messaggio consulente</div>
+                  <div className="notification-message">{notification.body}</div>
+                  <div className="notification-time">{new Date(notification.created_at).toLocaleString('it-IT')}</div>
+                </button>
+              ))
+          )}
+        </div>
+      </div>
 
       <div className="chat-card">
         <div className="chat-container">

@@ -12,7 +12,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span>⚙️ BNDO Admin</span>
           </div>
           <div className="nav-actions">
-            <span className="nav-user">{profile.full_name}</span>
+            <div className="notification-bell" id="adminNotificationBell">
+              <span>🔔</span>
+              <span className="notification-count" id="ncount" style={{ display: 'none' }}>
+                0
+              </span>
+            </div>
+            <span className="nav-user" id="uname">
+              {profile.full_name}
+            </span>
             <SignOutButton className="btn-logout" compact />
           </div>
         </nav>

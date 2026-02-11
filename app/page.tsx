@@ -18,9 +18,7 @@ export default function HomePage() {
       <header id="header" className={scrolled ? 'scrolled' : ''}>
         <nav>
           <div className="logo">
-            <a href="#" style={{ fontSize: '22px', fontWeight: 700, color: 'var(--navy)', textDecoration: 'none' }}>
-              BNDO
-            </a>
+            <img src="/Logo-Bandozen.png" alt="BandoZen" />
           </div>
           <ul className="nav-menu">
             <li>
@@ -45,9 +43,9 @@ export default function HomePage() {
         <section className="hero">
           <div className="hero-content">
             <div className="tag">Piattaforma con esperti reali</div>
-            <h1>Partecipare ai bandi non e mai stato cosi semplice</h1>
+            <h1>Partecipare ai bandi non &egrave; mai stato cos&igrave; semplice</h1>
             <p className="lead">
-              Assistenza completa per Resto al Sud 2.0 e Autoimpiego Centro Nord. Presentazione domanda a EUR 500,
+              Assistenza completa per Resto al Sud 2.0 e Autoimpiego Centro Nord. Presentazione domanda a &euro;500,
               success fee solo se vinci.
             </p>
             <div className="cta-group">
@@ -64,7 +62,7 @@ export default function HomePage() {
         <section className="stats">
           <div className="stats-grid">
             <div className="stat">
-              <div className="stat-value">EUR 500</div>
+              <div className="stat-value">&euro;500</div>
               <div className="stat-label">Presentazione domanda</div>
             </div>
             <div className="stat">
@@ -100,7 +98,7 @@ export default function HomePage() {
 
               <div className="bando-amount">
                 <div className="amount-label">Contributo massimo</div>
-                <div className="amount-value">EUR 200k</div>
+                <div className="amount-value">&euro;200k</div>
                 <div className="amount-detail">fino al 75% a fondo perduto</div>
               </div>
 
@@ -116,17 +114,17 @@ export default function HomePage() {
                 <div className="spec-row">
                   <div className="spec-label">Voucher</div>
                   <div className="spec-value">
-                    <span className="spec-highlight">EUR 40k-50k</span> 100% a fondo perduto
+                    <span className="spec-highlight">&euro;40k-50k</span> 100% a fondo perduto
                   </div>
                 </div>
                 <div className="spec-row">
-                  <div className="spec-label">Programma &lt;=EUR 120k</div>
+                  <div className="spec-label">Programma &le;&euro;120k</div>
                   <div className="spec-value">
                     <span className="spec-highlight">75%</span> a fondo perduto
                   </div>
                 </div>
                 <div className="spec-row">
-                  <div className="spec-label">Programma EUR 120k-200k</div>
+                  <div className="spec-label">Programma &euro;120k-200k</div>
                   <div className="spec-value">
                     <span className="spec-highlight">70%</span> a fondo perduto
                   </div>
@@ -159,7 +157,7 @@ export default function HomePage() {
 
               <div className="bando-amount">
                 <div className="amount-label">Contributo massimo</div>
-                <div className="amount-value">EUR 200k</div>
+                <div className="amount-value">&euro;200k</div>
                 <div className="amount-detail">fino al 65% a fondo perduto</div>
               </div>
 
@@ -175,17 +173,17 @@ export default function HomePage() {
                 <div className="spec-row">
                   <div className="spec-label">Voucher</div>
                   <div className="spec-value">
-                    <span className="spec-highlight">EUR 30k-40k</span> 100% a fondo perduto
+                    <span className="spec-highlight">&euro;30k-40k</span> 100% a fondo perduto
                   </div>
                 </div>
                 <div className="spec-row">
-                  <div className="spec-label">Programma &lt;=EUR 120k</div>
+                  <div className="spec-label">Programma &le;&euro;120k</div>
                   <div className="spec-value">
                     <span className="spec-highlight">65%</span> a fondo perduto
                   </div>
                 </div>
                 <div className="spec-row">
-                  <div className="spec-label">Programma EUR 120k-200k</div>
+                  <div className="spec-label">Programma &euro;120k-200k</div>
                   <div className="spec-value">
                     <span className="spec-highlight">60%</span> a fondo perduto
                   </div>
@@ -215,7 +213,7 @@ export default function HomePage() {
               <div className="label">Come funziona</div>
               <h2>Prezzi chiari e trasparenti</h2>
               <p className="section-desc">
-                Paghi solo EUR 500 per la presentazione della domanda, poi success fee solo se vinci il bando
+                Paghi solo &euro;500 per la presentazione della domanda, poi success fee solo se vinci il bando
               </p>
             </div>
 
@@ -251,6 +249,20 @@ export default function HomePage() {
                       <strong>Consulente dedicato</strong> - Un esperto reale di finanza agevolata assegnato a te
                     </div>
                   </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Raccolta documenti assistita</strong> - Ti aiutiamo con P.IVA, conto corrente, SPID, firma
+                      digitale e tutta la documentazione
+                    </div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">✓</div>
+                    <div className="servizi-text">
+                      <strong>Monitoraggio pratica</strong> - Seguiamo la valutazione e gestiamo eventuali integrazioni
+                      richieste da Invitalia
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -259,7 +271,7 @@ export default function HomePage() {
 
                 <div className="price-highlight">
                   <div className="price-label-small">Presentazione domanda</div>
-                  <div className="price-amount">EUR 500</div>
+                  <div className="price-amount">&euro;500</div>
                   <div className="price-note">Pagamento unico dopo verifica requisiti</div>
                 </div>
 
@@ -269,8 +281,25 @@ export default function HomePage() {
                     <div className="pricing-value">2% sul contributo</div>
                   </div>
                   <div className="pricing-row">
-                    <div className="pricing-label">Assistenza rendicontazione completa</div>
+                    <div className="pricing-label">Assistenza rendicontazione completa (fino all&apos;erogazione finale)</div>
                     <div className="pricing-value">+3% sul contributo</div>
+                  </div>
+                </div>
+
+                <div className="servizi-list">
+                  <div className="servizi-item">
+                    <div className="servizi-icon">•</div>
+                    <div className="servizi-text">Se il bando non viene approvato, paghi solo i &euro;500 iniziali</div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">•</div>
+                    <div className="servizi-text">Nessun costo nascosto o commissione aggiuntiva</div>
+                  </div>
+                  <div className="servizi-item">
+                    <div className="servizi-icon">•</div>
+                    <div className="servizi-text">
+                      Assistenza rendicontazione opzionale (gestione spese, erogazioni, comunicazioni Invitalia)
+                    </div>
                   </div>
                 </div>
 
@@ -296,35 +325,50 @@ export default function HomePage() {
               <div className="step-num">01</div>
               <div className="step-content">
                 <h3>Verifica requisiti</h3>
-                <p>Compila il form rapido e scopri subito se hai i requisiti per partecipare ai bandi disponibili.</p>
+                <p>
+                  Compila il nostro form rapido e scopri in tempo reale se hai tutti i requisiti per partecipare ai bandi
+                  disponibili. Gratuito e senza impegno.
+                </p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">02</div>
               <div className="step-content">
                 <h3>Raccolta documenti</h3>
-                <p>Il tuo consulente dedicato ti guida nella raccolta e preparazione di tutti i documenti necessari.</p>
+                <p>
+                  Il tuo consulente dedicato ti guida nella raccolta e preparazione di tutti i documenti necessari. Ti
+                  aiutiamo con P.IVA, conto corrente, SPID e firma digitale.
+                </p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">03</div>
               <div className="step-content">
                 <h3>Business plan</h3>
-                <p>Prepariamo insieme business plan e pratica secondo il formato richiesto da Invitalia.</p>
+                <p>
+                  Creiamo insieme un business plan completo con previsioni economico-finanziarie triennali secondo il formato
+                  richiesto dal bando Invitalia.
+                </p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">04</div>
               <div className="step-content">
                 <h3>Invio domanda</h3>
-                <p>Procediamo all&apos;invio della domanda e monitoriamo eventuali integrazioni richieste.</p>
+                <p>
+                  Dopo il controllo finale, procediamo all&apos;invio della domanda. Monitoriamo costantemente lo stato e
+                  gestiamo eventuali integrazioni richieste.
+                </p>
               </div>
             </div>
             <div className="step">
               <div className="step-num">05</div>
               <div className="step-content">
-                <h3>Post-approvazione</h3>
-                <p>Supporto fino all&apos;erogazione finale, incluse rendicontazione e comunicazioni operative.</p>
+                <h3>Post-approvazione (opzionale)</h3>
+                <p>
+                  Se scegli il pacchetto completo, ti seguiamo anche dopo l&apos;approvazione: gestione rendicontazione,
+                  comunicazioni con Invitalia, richieste di erogazione e supporto fino all&apos;erogazione finale.
+                </p>
               </div>
             </div>
           </div>
@@ -344,7 +388,7 @@ export default function HomePage() {
       <footer>
         <div className="footer-grid">
           <div className="footer-col">
-            <h4>BNDO</h4>
+            <h4>BandoZen</h4>
             <p>La piattaforma con esperti reali per i bandi pubblici Resto al Sud 2.0 e Autoimpiego Centro Nord</p>
           </div>
           <div className="footer-col">
@@ -390,7 +434,7 @@ export default function HomePage() {
             </ul>
           </div>
         </div>
-        <div className="footer-bottom">(c) 2026 BNDO</div>
+        <div className="footer-bottom">&copy; 2026 BandoZen</div>
       </footer>
     </>
   );

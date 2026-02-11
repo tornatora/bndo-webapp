@@ -40,6 +40,7 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const selectedThreadRef = useRef<string | null>(initialThreadId);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +49,7 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     () => threads.find((thread) => thread.threadId === selectedThreadId) ?? null,
     [threads, selectedThreadId]
   );
+  const unreadTotal = useMemo(() => threads.reduce((sum, thread) => sum + thread.unreadCount, 0), [threads]);
 
   function scrollToBottom() {
     if (!scrollRef.current) return;
@@ -181,7 +183,49 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
       }
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewerProfileId]);
+
+  useEffect(() => {
+    const bell = document.getElementById('adminNotificationBell');
+    if (!bell) return;
+
+    const onToggle = () => setIsNotificationsOpen((previous) => !previous);
+    bell.addEventListener('click', onToggle);
+    return () => {
+      bell.removeEventListener('click', onToggle);
+    };
+  }, []);
+
+  useEffect(() => {
+    const countElement = document.getElementById('ncount');
+    if (!countElement) return;
+
+    if (unreadTotal > 0) {
+      countElement.textContent = unreadTotal > 99 ? '99+' : String(unreadTotal);
+      countElement.style.display = 'flex';
+      return;
+    }
+
+    countElement.textContent = '0';
+    countElement.style.display = 'none';
+  }, [unreadTotal]);
+
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      const bell = document.getElementById('adminNotificationBell');
+      const panel = document.getElementById('npanel');
+      const target = event.target as Node | null;
+      if (!target || !bell || !panel) return;
+      if (bell.contains(target) || panel.contains(target)) return;
+      setIsNotificationsOpen(false);
+    };
+
+    document.addEventListener('click', onDocumentClick);
+    return () => {
+      document.removeEventListener('click', onDocumentClick);
+    };
+  }, []);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -259,10 +303,29 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     );
   }
 
-  const unreadTotal = threads.reduce((sum, thread) => sum + thread.unreadCount, 0);
-
   return (
     <div id="view1">
+      <div className={`notifications-panel ${isNotificationsOpen ? 'active' : ''}`} id="npanel">
+        <div className="notifications-header">
+          <div className="notifications-title">🔔 Notifiche Sistema</div>
+        </div>
+        <div className="notifications-list">
+          {unreadTotal > 0 ? (
+            <div className="notification-item unread">
+              <div className="notification-title">💬 Messaggi in arrivo</div>
+              <div className="notification-message">Hai {unreadTotal} messaggi cliente non letti.</div>
+              <div className="notification-time">Adesso</div>
+            </div>
+          ) : (
+            <div className="notification-item">
+              <div className="notification-title">✅ Realtime attivo</div>
+              <div className="notification-message">Dashboard sincronizzata in tempo reale.</div>
+              <div className="notification-time">Adesso</div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="welcome-section">
         <h1 className="welcome-title">👥 Gestione Clienti</h1>
         <p className="welcome-subtitle">Inbox clienti e messaggi in tempo reale</p>
