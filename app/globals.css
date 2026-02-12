@@ -1993,27 +1993,28 @@
         }
 
         .main-tabs {
-            background: #fff;
-            border: 0.5px solid var(--border);
-            border-radius: 10px;
-            box-shadow: 0 1px 4px rgba(11, 17, 54, 0.04);
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
             position: sticky;
             top: 82px;
         }
 
         .main-tabs-container {
-            padding: 10px;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 2px;
+            border-left: 1px solid rgba(11, 17, 54, 0.12);
         }
 
         .main-tab {
             width: 100%;
             min-width: 0;
-            padding: 12px 14px;
-            border: 0.5px solid transparent;
-            border-radius: 8px;
+            padding: 11px 12px;
+            border: none;
+            border-radius: 0;
             background: transparent;
             color: var(--text-light);
             font-size: 14px;
@@ -2027,6 +2028,7 @@
             gap: 9px;
             letter-spacing: -0.01em;
             text-decoration: none;
+            border-left: 3px solid transparent;
         }
 
         .main-tab span:first-child {
@@ -2037,8 +2039,7 @@
 
         .main-tab.active {
             color: var(--navy);
-            background: #f3f6fc;
-            border-color: rgba(11, 17, 54, 0.16);
+            background: rgba(11, 17, 54, 0.04);
             border-left: 3px solid var(--navy);
         }
 
@@ -2048,8 +2049,8 @@
 
         .main-tab:hover:not(.active) {
             color: var(--navy);
-            background: rgba(11, 17, 54, 0.04);
-            border-color: rgba(11, 17, 54, 0.08);
+            background: rgba(11, 17, 54, 0.03);
+            border-left-color: rgba(11, 17, 54, 0.25);
         }
 
         @media (max-width: 1023px) {
@@ -2068,6 +2069,10 @@
 
             .main-tabs {
                 position: static;
+                background: #fff;
+                border: 0.5px solid var(--border);
+                border-radius: 10px;
+                box-shadow: 0 1px 4px rgba(11, 17, 54, 0.04);
             }
 
             .main-tabs-container {
@@ -2076,6 +2081,7 @@
                 gap: 8px;
                 overflow-x: auto;
                 scrollbar-width: none;
+                border-left: none;
             }
 
             .main-tabs-container::-webkit-scrollbar {
@@ -2088,10 +2094,18 @@
                 justify-content: center;
                 padding: 10px 12px;
                 font-size: 13px;
+                border-radius: 8px;
+                border-left: none;
             }
 
             .main-tab span:first-child {
                 font-size: 14px;
+            }
+
+            .main-tab.active {
+                border-left: none;
+                background: #f3f6fc;
+                border: 1px solid rgba(11, 17, 54, 0.16);
             }
         }
 

@@ -4,20 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-type TabItem = {
-  href: string;
-  key: 'pratiche' | 'documenti' | 'messaggi' | 'password';
-  icon: string;
-  label: string;
-};
-
-const TABS: TabItem[] = [
-  { href: '/dashboard#pratiche', key: 'pratiche', icon: '📋', label: 'Pratiche' },
-  { href: '/dashboard#documenti', key: 'documenti', icon: '📄', label: 'Documenti' },
-  { href: '/dashboard#messaggi', key: 'messaggi', icon: '💬', label: 'Messaggi' },
-  { href: '/dashboard/password', key: 'password', icon: '🔐', label: 'Password' }
-];
-
 export function DashboardTabs() {
   const pathname = usePathname();
   const [activeHash, setActiveHash] = useState('pratiche');
@@ -29,6 +15,17 @@ export function DashboardTabs() {
 
     const target = document.getElementById(`tab-${tabKey}`) ?? document.getElementById('tab-pratiche');
     target?.classList.add('active');
+  }
+
+  function handleSelectTab(tabKey: 'pratiche' | 'documenti' | 'messaggi') {
+    if (pathname !== '/dashboard' || typeof window === 'undefined') return;
+    setActiveHash(tabKey);
+    activatePanel(tabKey);
+
+    const nextHash = `#${tabKey}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${nextHash}`);
+    }
   }
 
   useEffect(() => {
@@ -54,19 +51,37 @@ export function DashboardTabs() {
   return (
     <nav className="main-tabs">
       <div className="main-tabs-container">
-        {TABS.map((tab) => {
-          const isActive =
-            tab.key === 'password'
-              ? pathname === '/dashboard/password'
-              : pathname === '/dashboard' && activeHash === tab.key;
+        <button
+          type="button"
+          className={`main-tab ${pathname === '/dashboard' && activeHash === 'pratiche' ? 'active' : ''}`}
+          onClick={() => handleSelectTab('pratiche')}
+        >
+          <span>📋</span>
+          <span>Pratiche</span>
+        </button>
 
-          return (
-            <Link key={tab.key} className={`main-tab ${isActive ? 'active' : ''}`} href={tab.href}>
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
-            </Link>
-          );
-        })}
+        <button
+          type="button"
+          className={`main-tab ${pathname === '/dashboard' && activeHash === 'documenti' ? 'active' : ''}`}
+          onClick={() => handleSelectTab('documenti')}
+        >
+          <span>📄</span>
+          <span>Documenti</span>
+        </button>
+
+        <button
+          type="button"
+          className={`main-tab ${pathname === '/dashboard' && activeHash === 'messaggi' ? 'active' : ''}`}
+          onClick={() => handleSelectTab('messaggi')}
+        >
+          <span>💬</span>
+          <span>Messaggi</span>
+        </button>
+
+        <Link className={`main-tab ${pathname === '/dashboard/password' ? 'active' : ''}`} href="/dashboard/password">
+          <span>🔐</span>
+          <span>Password</span>
+        </Link>
       </div>
     </nav>
   );
