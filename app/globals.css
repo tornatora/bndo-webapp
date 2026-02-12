@@ -1420,31 +1420,25 @@
 
         .dashboard-shell-client {
             width: 100%;
-            max-width: 1320px;
+            max-width: 1440px;
             margin: 0 auto;
             padding: 28px 24px 40px;
             display: grid;
-            grid-template-columns: 240px minmax(0, 1fr);
+            grid-template-columns: 280px minmax(0, 1fr);
             gap: 24px;
             align-items: start;
         }
 
         .dashboard-sidebar-client {
             min-width: 0;
+            position: sticky;
+            top: 92px;
         }
 
         .dashboard-content-client {
             margin: 0;
             max-width: none;
             padding: 0;
-        }
-
-        .tab-panel {
-            display: none;
-        }
-
-        .tab-panel.active {
-            display: block;
         }
 
         .welcome-section {
@@ -1993,26 +1987,24 @@
         }
 
         .main-tabs {
-            background: transparent;
-            border: none;
-            border-radius: 0;
-            box-shadow: none;
-            position: sticky;
-            top: 82px;
+            background: #fff;
+            border: 0.5px solid var(--border);
+            border-radius: 16px;
+            box-shadow: 0 6px 18px rgba(11, 17, 54, 0.06);
+            min-height: calc(100vh - 132px);
         }
 
         .main-tabs-container {
-            padding: 0;
+            padding: 16px 0;
             display: flex;
             flex-direction: column;
-            gap: 2px;
-            border-left: 1px solid rgba(11, 17, 54, 0.12);
+            gap: 4px;
         }
 
         .main-tab {
             width: 100%;
             min-width: 0;
-            padding: 11px 12px;
+            padding: 12px 18px;
             border: none;
             border-radius: 0;
             background: transparent;
@@ -2028,7 +2020,7 @@
             gap: 9px;
             letter-spacing: -0.01em;
             text-decoration: none;
-            border-left: 3px solid transparent;
+            border-left: 4px solid transparent;
         }
 
         .main-tab span:first-child {
@@ -2040,7 +2032,7 @@
         .main-tab.active {
             color: var(--navy);
             background: rgba(11, 17, 54, 0.04);
-            border-left: 3px solid var(--navy);
+            border-left: 4px solid var(--navy);
         }
 
         .main-tab.active span:first-child {
@@ -2060,6 +2052,7 @@
             }
 
             .dashboard-sidebar-client {
+                position: static;
                 margin-bottom: 16px;
             }
 
@@ -2073,6 +2066,7 @@
                 border: 0.5px solid var(--border);
                 border-radius: 10px;
                 box-shadow: 0 1px 4px rgba(11, 17, 54, 0.04);
+                min-height: 0;
             }
 
             .main-tabs-container {
@@ -2081,7 +2075,6 @@
                 gap: 8px;
                 overflow-x: auto;
                 scrollbar-width: none;
-                border-left: none;
             }
 
             .main-tabs-container::-webkit-scrollbar {
@@ -2120,10 +2113,6 @@
             }
         }
 
-        .tab-panel {
-            animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -2132,6 +2121,46 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        .profile-sections {
+            display: grid;
+            gap: 24px;
+        }
+
+        .profile-card {
+            margin-bottom: 0;
+        }
+
+        .profile-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px 20px;
+        }
+
+        .profile-form-grid-full {
+            grid-column: 1 / -1;
+        }
+
+        .profile-message {
+            grid-column: 1 / -1;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .profile-card .btn-action.primary {
+            min-height: 44px;
+        }
+
+        @media (max-width: 767px) {
+            .profile-form-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+
+            .profile-form-grid-full {
+                grid-column: auto;
             }
         }
 

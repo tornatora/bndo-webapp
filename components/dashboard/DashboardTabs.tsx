@@ -2,86 +2,42 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+
+type DashboardNavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  key: 'pratiche' | 'documenti' | 'messaggi' | 'profilo';
+};
+
+const NAV_ITEMS: DashboardNavItem[] = [
+  { href: '/dashboard', label: 'Pratiche', icon: '📋', key: 'pratiche' },
+  { href: '/dashboard/documents', label: 'Documenti', icon: '📄', key: 'documenti' },
+  { href: '/dashboard/messages', label: 'Messaggi', icon: '💬', key: 'messaggi' },
+  { href: '/dashboard/profile', label: 'Profilo', icon: '👤', key: 'profilo' }
+];
+
+function getActiveKey(pathname: string) {
+  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/tenders')) return 'pratiche';
+  if (pathname.startsWith('/dashboard/documents')) return 'documenti';
+  if (pathname.startsWith('/dashboard/messages')) return 'messaggi';
+  if (pathname.startsWith('/dashboard/profile') || pathname.startsWith('/dashboard/password')) return 'profilo';
+  return 'pratiche';
+}
 
 export function DashboardTabs() {
   const pathname = usePathname();
-  const [activeHash, setActiveHash] = useState('pratiche');
-
-  function activatePanel(tabKey: string) {
-    if (typeof window === 'undefined') return;
-    const panels = document.querySelectorAll<HTMLElement>('.tab-panel');
-    panels.forEach((panel) => panel.classList.remove('active'));
-
-    const target = document.getElementById(`tab-${tabKey}`) ?? document.getElementById('tab-pratiche');
-    target?.classList.add('active');
-  }
-
-  function handleSelectTab(tabKey: 'pratiche' | 'documenti' | 'messaggi') {
-    if (pathname !== '/dashboard' || typeof window === 'undefined') return;
-    setActiveHash(tabKey);
-    activatePanel(tabKey);
-
-    const nextHash = `#${tabKey}`;
-    if (window.location.hash !== nextHash) {
-      window.history.replaceState(null, '', `${window.location.pathname}${nextHash}`);
-    }
-  }
-
-  useEffect(() => {
-    if (pathname !== '/dashboard') {
-      setActiveHash(pathname === '/dashboard/password' ? 'password' : 'pratiche');
-      return;
-    }
-
-    const syncHash = () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      const safeHash = hash === 'documenti' || hash === 'messaggi' || hash === 'pratiche' ? hash : 'pratiche';
-      setActiveHash(safeHash);
-      activatePanel(safeHash);
-    };
-
-    syncHash();
-    window.addEventListener('hashchange', syncHash);
-    return () => {
-      window.removeEventListener('hashchange', syncHash);
-    };
-  }, [pathname]);
+  const activeKey = getActiveKey(pathname);
 
   return (
-    <nav className="main-tabs">
+    <nav className="main-tabs" aria-label="Navigazione dashboard">
       <div className="main-tabs-container">
-        <button
-          type="button"
-          className={`main-tab ${pathname === '/dashboard' && activeHash === 'pratiche' ? 'active' : ''}`}
-          onClick={() => handleSelectTab('pratiche')}
-        >
-          <span>📋</span>
-          <span>Pratiche</span>
-        </button>
-
-        <button
-          type="button"
-          className={`main-tab ${pathname === '/dashboard' && activeHash === 'documenti' ? 'active' : ''}`}
-          onClick={() => handleSelectTab('documenti')}
-        >
-          <span>📄</span>
-          <span>Documenti</span>
-        </button>
-
-        <button
-          type="button"
-          className={`main-tab ${pathname === '/dashboard' && activeHash === 'messaggi' ? 'active' : ''}`}
-          onClick={() => handleSelectTab('messaggi')}
-        >
-          <span>💬</span>
-          <span>Messaggi</span>
-        </button>
-
-        <Link className={`main-tab ${pathname === '/dashboard/password' ? 'active' : ''}`} href="/dashboard/password">
-          <span>🔐</span>
-          <span>Password</span>
-        </Link>
+        {NAV_ITEMS.map((item) => (
+          <Link key={item.key} className={`main-tab ${activeKey === item.key ? 'active' : ''}`} href={item.href}>
+            <span>{item.icon}</span>
+            <span>{item.label}</span>
+          </Link>
+        ))}
       </div>
     </nav>
   );
