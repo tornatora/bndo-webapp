@@ -75,13 +75,19 @@ export default function LoginPage({
             <span>{buttonText}</span>
           </button>
 
-          <p style={{ marginTop: '12px', fontSize: '14px', color: 'var(--text-light)' }}>
-            Hai dimenticato la password?{' '}
-            <Link href="/forgot-password" style={{ color: 'var(--navy)', fontWeight: 600 }}>
-              Recuperala qui
-            </Link>
-            .
-          </p>
+          {isAdminMode ? (
+            <p style={{ marginTop: '12px', fontSize: '14px', color: 'var(--text-light)' }}>
+              Recupero password admin disabilitato in area live.
+            </p>
+          ) : (
+            <p style={{ marginTop: '12px', fontSize: '14px', color: 'var(--text-light)' }}>
+              Hai dimenticato la password?{' '}
+              <Link href="/forgot-password" style={{ color: 'var(--navy)', fontWeight: 600 }}>
+                Recuperala qui
+              </Link>
+              .
+            </p>
+          )}
 
           {!isAdminMode ? (
             <p style={{ marginTop: '16px', fontSize: '14px', color: 'var(--text-light)' }}>

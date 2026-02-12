@@ -27,7 +27,16 @@ export async function middleware(request: NextRequest) {
   const isAppDomainAuthPath = isAuthPath || path.startsWith('/reset-password');
   const isQuizPath = path.startsWith('/quiz');
   const hasAuthError = request.nextUrl.searchParams.has('error');
-  const isAdminLoginMode = path === '/login' && request.nextUrl.searchParams.get('mode') === 'admin';
+  const isAdminMode = request.nextUrl.searchParams.get('mode') === 'admin';
+  const isAdminPasswordPath = path === '/forgot-password' || path === '/reset-password';
+  const isAdminAuthModePath = isAdminMode && path === '/login';
+
+  if (isAdminMode && isAdminPasswordPath) {
+    const loginUrl = buildAbsoluteUrl(ADMIN_URL, '/login');
+    loginUrl.searchParams.set('mode', 'admin');
+    loginUrl.searchParams.set('error', 'Recupero password admin disabilitato');
+    return NextResponse.redirect(loginUrl);
+  }
 
   const search = request.nextUrl.search;
   if (hasDistinctDomainMapping) {
@@ -44,6 +53,9 @@ export async function middleware(request: NextRequest) {
       if (path === '/') {
         return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/login', search));
       }
+      if (isAdminAuthModePath) {
+        return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, path, search));
+      }
       if (isAdminPath) {
         return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, path, search));
       }
@@ -56,7 +68,7 @@ export async function middleware(request: NextRequest) {
       if (path === '/') {
         return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin', search));
       }
-      if (isDashboardPath || (isAppDomainAuthPath && !isAdminLoginMode)) {
+      if (isDashboardPath || (isAppDomainAuthPath && !isAdminAuthModePath)) {
         return NextResponse.redirect(buildAbsoluteUrl(APP_URL, path, search));
       }
       if (isQuizPath) {
