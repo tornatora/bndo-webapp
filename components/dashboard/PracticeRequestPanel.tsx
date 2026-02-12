@@ -86,7 +86,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
 
   return (
     <section className="section-card">
-      <h2 className="section-title">➕ Richiedi una nuova pratica</h2>
+      <h2 className="section-title">Richiedi una nuova pratica</h2>
       <p className="welcome-subtitle" style={{ marginBottom: 12 }}>
         Per aprire una pratica devi prima completare il quiz requisiti.
       </p>

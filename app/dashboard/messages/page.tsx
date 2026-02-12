@@ -75,7 +75,7 @@ export default async function DashboardMessagesPage() {
   return (
     <>
       <section className="welcome-section">
-        <h1 className="welcome-title">💬 Messaggi</h1>
+        <h1 className="welcome-title">Messaggi</h1>
         <p className="welcome-subtitle">Chat diretta con il consulente. Risposta automatica immediata attiva.</p>
       </section>
 

@@ -28,7 +28,7 @@ export default async function DashboardProfilePage() {
   return (
     <>
       <section className="welcome-section">
-        <h1 className="welcome-title">⚙️ Profilo</h1>
+        <h1 className="welcome-title">Profilo</h1>
         <p className="welcome-subtitle">Gestisci dati account, fatturazione e sicurezza in un unico spazio.</p>
       </section>
 

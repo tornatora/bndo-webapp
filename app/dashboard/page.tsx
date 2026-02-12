@@ -115,7 +115,7 @@ export default async function DashboardPage() {
   return (
     <>
       <div className="welcome-section">
-        <h1 className="welcome-title">📋 Le Tue Pratiche</h1>
+        <h1 className="welcome-title">Le tue pratiche</h1>
         <p className="welcome-subtitle">Monitora l&apos;avanzamento delle tue richieste</p>
 
         <div className="stats-grid">

@@ -2109,15 +2109,31 @@
             display: flex;
             align-items: center;
             justify-content: flex-start;
+            gap: 9px;
             letter-spacing: -0.01em;
             text-decoration: none;
             border-left: 4px solid transparent;
+        }
+
+        .main-tab-icon {
+            font-size: 16px;
+            line-height: 1;
+            opacity: 0.85;
+            transition: all 0.2s ease;
+        }
+
+        .main-tab-label {
+            line-height: 1.25;
         }
 
         .main-tab.active {
             color: var(--navy);
             background: rgba(11, 17, 54, 0.04);
             border-left: 4px solid var(--navy);
+        }
+
+        .main-tab.active .main-tab-icon {
+            opacity: 1;
         }
 
         .main-tab:hover:not(.active) {
@@ -2166,7 +2182,7 @@
                 align-items: center;
                 justify-content: center;
                 text-align: center;
-                min-height: 38px;
+                min-height: 42px;
                 border-radius: 10px;
                 color: var(--text-light);
                 text-decoration: none;
@@ -2176,7 +2192,20 @@
                 background: transparent;
                 border: 1px solid transparent;
                 transition: all 0.2s ease;
-                padding: 0 6px;
+                padding: 4px 6px;
+                flex-direction: column;
+                gap: 3px;
+                line-height: 1.1;
+            }
+
+            .mobile-tab-icon {
+                font-size: 14px;
+                line-height: 1;
+            }
+
+            .mobile-tab-label {
+                font-size: 10px;
+                line-height: 1;
             }
 
             .mobile-tab.active {

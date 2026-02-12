@@ -213,7 +213,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
   return (
     <div className="profile-sections">
       <section className="section-card profile-card">
-        <h2 className="section-title">👤 Profilo Account</h2>
+        <h2 className="section-title">Profilo account</h2>
         <form onSubmit={handlePersonalSubmit} className="profile-form-grid">
           <div className="form-group">
             <label className="form-label" htmlFor="profileFullName">
@@ -265,7 +265,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
       </section>
 
       <section className="section-card profile-card">
-        <h2 className="section-title">🧾 Dati Fatturazione</h2>
+        <h2 className="section-title">Dati fatturazione</h2>
         <form onSubmit={handleBillingSubmit} className="profile-form-grid">
           <div className="profile-form-grid-full">
             <label className="form-label" style={{ marginBottom: 8 }}>
@@ -376,7 +376,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
       </section>
 
       <section className="section-card profile-card">
-        <h2 className="section-title">🔐 Sicurezza</h2>
+        <h2 className="section-title">Sicurezza</h2>
         <form onSubmit={handlePasswordSubmit} className="profile-form-grid">
           <div className="form-group">
             <label className="form-label" htmlFor="currentPassword">

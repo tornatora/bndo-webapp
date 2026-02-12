@@ -91,7 +91,7 @@ export default async function DashboardDocumentsPage() {
   return (
     <>
       <section className="welcome-section">
-        <h1 className="welcome-title">📄 I Tuoi Documenti</h1>
+        <h1 className="welcome-title">I tuoi documenti</h1>
         <p className="welcome-subtitle">Tutti i file caricati nelle pratiche, con download immediato.</p>
       </section>
 
