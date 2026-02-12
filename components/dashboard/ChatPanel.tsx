@@ -18,11 +18,24 @@ type ChatPanelProps = {
   initialLastReadAt: string | null;
 };
 
+type ChatSyncResponse = {
+  messages?: Message[];
+  lastReadAt?: string;
+};
+
+type SendMessageResponse = {
+  message?: Message;
+  autoReplyMessage?: Message;
+  autoReplyNotice?: string;
+};
+
 export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialLastReadAt }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [value, setValue] = useState('');
   const [sending, setSending] = useState(false);
   const [lastReadAt, setLastReadAt] = useState<string>(initialLastReadAt ?? new Date(0).toISOString());
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +58,46 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   useEffect(() => {
     setLastReadAt(initialLastReadAt ?? new Date(0).toISOString());
   }, [initialLastReadAt]);
+
+  useEffect(() => {
+    if (!deliveryNotice) return;
+    const timer = setTimeout(() => setDeliveryNotice(null), 6000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [deliveryNotice]);
+
+  function sortMessages(items: Message[]) {
+    return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  }
+
+  function mergeMessages(previous: Message[], incoming: Message[]) {
+    const byId = new Map<string, Message>();
+    for (const message of previous) byId.set(message.id, message);
+    for (const message of incoming) byId.set(message.id, message);
+    return sortMessages([...byId.values()]);
+  }
+
+  async function refreshMessages(silent = true) {
+    try {
+      const response = await fetch(`/api/chat/messages?threadId=${threadId}`);
+      if (!response.ok) {
+        throw new Error('Sincronizzazione chat non riuscita.');
+      }
+      const payload = (await response.json()) as ChatSyncResponse;
+      setMessages((previous) => mergeMessages(previous, payload.messages ?? []));
+      if (payload.lastReadAt) {
+        setLastReadAt(payload.lastReadAt);
+      }
+      if (!silent) {
+        setSyncError(null);
+      }
+    } catch (error) {
+      if (!silent) {
+        setSyncError(error instanceof Error ? error.message : 'Errore sincronizzazione chat.');
+      }
+    }
+  }
 
   useEffect(() => {
     const bell = document.getElementById('notificationBell');
@@ -154,6 +207,7 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
       .subscribe();
 
     scheduleMarkRead();
+    void refreshMessages(true);
 
     return () => {
       if (markReadTimeout.current) {
@@ -164,6 +218,26 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, viewerProfileId]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      void refreshMessages(true);
+    }, 25000);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshMessages(true);
+      scheduleMarkRead();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -182,6 +256,8 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
     if (!trimmed) return;
 
     setSending(true);
+    setSyncError(null);
+    setDeliveryNotice(null);
 
     const optimistic: Message = {
       id: `temp-${Date.now()}`,
@@ -194,36 +270,43 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
     setMessages((previous) => [...previous, optimistic]);
     setValue('');
 
-    const response = await fetch('/api/chat/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ threadId, body: trimmed })
-    });
+    try {
+      const response = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ threadId, body: trimmed })
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        throw new Error('Invio messaggio non riuscito.');
+      }
+
+      const payload = (await response.json()) as SendMessageResponse;
+      const persistedMessage = payload.message;
+
+      if (persistedMessage) {
+        setMessages((previous) => {
+          const withoutTemp = previous.filter((message) => message.id !== optimistic.id);
+          return mergeMessages(withoutTemp, [persistedMessage]);
+        });
+      }
+
+      if (payload.autoReplyMessage) {
+        setMessages((previous) => mergeMessages(previous, [payload.autoReplyMessage as Message]));
+      }
+
+      if (payload.autoReplyNotice) {
+        setDeliveryNotice(payload.autoReplyNotice);
+      }
+    } catch (error) {
       setMessages((previous) => previous.filter((msg) => msg.id !== optimistic.id));
       setValue(trimmed);
+      setSyncError(error instanceof Error ? error.message : 'Errore invio messaggio.');
+    } finally {
       setSending(false);
-      return;
     }
-
-    const payload = (await response.json()) as { message?: Message };
-    const persistedMessage = payload.message;
-
-    if (persistedMessage) {
-      setMessages((previous) => {
-        const withoutTemp = previous.filter((message) => message.id !== optimistic.id);
-        const exists = withoutTemp.some((message) => message.id === persistedMessage.id);
-        if (exists) return withoutTemp;
-        return [...withoutTemp, persistedMessage].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-      });
-    }
-
-    setSending(false);
   }
 
   function getInitials(senderId: string) {
@@ -301,6 +384,14 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
               {sending ? 'Invio...' : 'Invia'}
             </button>
           </form>
+
+          {deliveryNotice ? (
+            <p style={{ margin: '0 24px 14px', fontSize: '13px', fontWeight: 600, color: '#15803d' }}>{deliveryNotice}</p>
+          ) : null}
+
+          {syncError ? (
+            <p style={{ margin: '0 24px 14px', fontSize: '13px', fontWeight: 600, color: '#b91c1c' }}>{syncError}</p>
+          ) : null}
         </div>
       </div>
     </div>

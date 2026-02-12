@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { hasOpsAccess } from '@/lib/roles';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 
 const payloadSchema = z.object({
@@ -17,6 +18,17 @@ type ViewerProfile = {
   company_id: string | null;
   role: 'client_admin' | 'consultant' | 'ops_admin';
 };
+
+type ChatMessage = {
+  id: string;
+  thread_id: string;
+  sender_profile_id: string;
+  body: string;
+  created_at: string;
+};
+
+const AUTO_REPLY_BODY = 'Messaggio ricevuto: un consulente si connettera con te presto.';
+const AUTO_REPLY_WINDOW_MINUTES = 15;
 
 async function getViewerProfile() {
   const supabase = createClient();
@@ -73,6 +85,101 @@ async function ensureParticipant(
     },
     { onConflict: 'thread_id,profile_id' }
   );
+}
+
+async function findOpsSenderProfile(threadId: string) {
+  const supabaseAdmin = getSupabaseAdmin();
+
+  const { data: participantOps } = await supabaseAdmin
+    .from('consultant_thread_participants')
+    .select('profile_id, participant_role')
+    .eq('thread_id', threadId)
+    .in('participant_role', ['consultant', 'ops_admin'])
+    .limit(1)
+    .maybeSingle();
+
+  if (participantOps?.profile_id) {
+    return {
+      id: participantOps.profile_id,
+      role: participantOps.participant_role as ViewerProfile['role']
+    };
+  }
+
+  const { data: fallbackOps } = await supabaseAdmin
+    .from('profiles')
+    .select('id, role')
+    .in('role', ['consultant', 'ops_admin'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!fallbackOps?.id) {
+    return null;
+  }
+
+  return {
+    id: fallbackOps.id,
+    role: fallbackOps.role as ViewerProfile['role']
+  };
+}
+
+async function maybeCreateAutomaticReply(threadId: string, sender: ViewerProfile) {
+  if (sender.role !== 'client_admin') {
+    return { autoReplyNotice: null, autoReplyMessage: null };
+  }
+
+  const autoReplyNotice = 'Un consulente si connettera con te presto.';
+  const opsSender = await findOpsSenderProfile(threadId);
+
+  if (!opsSender) {
+    return { autoReplyNotice, autoReplyMessage: null };
+  }
+
+  const supabaseAdmin = getSupabaseAdmin();
+  const thresholdIso = new Date(Date.now() - AUTO_REPLY_WINDOW_MINUTES * 60_000).toISOString();
+
+  const { data: existingAck } = await supabaseAdmin
+    .from('consultant_messages')
+    .select('id')
+    .eq('thread_id', threadId)
+    .eq('sender_profile_id', opsSender.id)
+    .eq('body', AUTO_REPLY_BODY)
+    .gte('created_at', thresholdIso)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingAck?.id) {
+    return { autoReplyNotice, autoReplyMessage: null };
+  }
+
+  await supabaseAdmin.from('consultant_thread_participants').upsert(
+    {
+      thread_id: threadId,
+      profile_id: opsSender.id,
+      participant_role: opsSender.role,
+      last_read_at: new Date().toISOString()
+    },
+    { onConflict: 'thread_id,profile_id' }
+  );
+
+  const { data: autoReplyMessage, error } = await supabaseAdmin
+    .from('consultant_messages')
+    .insert({
+      thread_id: threadId,
+      sender_profile_id: opsSender.id,
+      body: AUTO_REPLY_BODY
+    })
+    .select('id, thread_id, sender_profile_id, body, created_at')
+    .single();
+
+  if (error || !autoReplyMessage) {
+    return { autoReplyNotice, autoReplyMessage: null };
+  }
+
+  return {
+    autoReplyNotice,
+    autoReplyMessage: autoReplyMessage as ChatMessage
+  };
 }
 
 export async function GET(request: Request) {
@@ -165,7 +272,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error?.message ?? 'Messaggio non inviato.' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message }, { status: 201 });
+    const autoReply = await maybeCreateAutomaticReply(payload.threadId, profile);
+
+    return NextResponse.json(
+      {
+        success: true,
+        message,
+        autoReplyNotice: autoReply.autoReplyNotice,
+        autoReplyMessage: autoReply.autoReplyMessage
+      },
+      { status: 201 }
+    );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: 'Payload chat non valido.' }, { status: 422 });

@@ -1,4 +1,59 @@
 import { NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+
+type CheckResult = {
+  name: string;
+  ok: boolean;
+  detail?: string;
+};
+
+async function runSupabaseChecks(): Promise<CheckResult[]> {
+  const supabaseAdmin = getSupabaseAdmin();
+
+  const [threadsCheck, messagesCheck, docsCheck, profilesCheck, storageBucketsCheck] = await Promise.all([
+    supabaseAdmin.from('consultant_threads').select('id').limit(1),
+    supabaseAdmin.from('consultant_messages').select('id').limit(1),
+    supabaseAdmin.from('application_documents').select('id').limit(1),
+    supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }).in('role', ['consultant', 'ops_admin']),
+    supabaseAdmin.storage.listBuckets()
+  ]);
+
+  const opsProfilesCount = profilesCheck.count ?? 0;
+  const hasOpsProfiles = opsProfilesCount > 0;
+  const hasDocumentsBucket =
+    !storageBucketsCheck.error &&
+    (storageBucketsCheck.data ?? []).some(
+      (bucket) => bucket.id === 'application-documents' || bucket.name === 'application-documents'
+    );
+
+  return [
+    {
+      name: 'consultant_threads_table',
+      ok: !threadsCheck.error,
+      detail: threadsCheck.error?.message
+    },
+    {
+      name: 'consultant_messages_table',
+      ok: !messagesCheck.error,
+      detail: messagesCheck.error?.message
+    },
+    {
+      name: 'application_documents_table',
+      ok: !docsCheck.error,
+      detail: docsCheck.error?.message
+    },
+    {
+      name: 'ops_profile_exists',
+      ok: !profilesCheck.error && hasOpsProfiles,
+      detail: profilesCheck.error?.message ?? (hasOpsProfiles ? undefined : 'Nessun utente ops_admin/consultant.')
+    },
+    {
+      name: 'storage_bucket_application_documents',
+      ok: hasDocumentsBucket,
+      detail: storageBucketsCheck.error?.message ?? (hasDocumentsBucket ? undefined : 'Bucket application-documents non trovato.')
+    }
+  ];
+}
 
 export async function GET() {
   const requiredEnv = [
@@ -12,8 +67,35 @@ export async function GET() {
     return !value || value.includes('YOUR_');
   });
 
-  return NextResponse.json({
-    ok: missing.length === 0,
-    missing
-  });
+  if (missing.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      missing,
+      checks: [],
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  try {
+    const checks = await runSupabaseChecks();
+    const failures = checks.filter((check) => !check.ok);
+
+    return NextResponse.json({
+      ok: failures.length === 0,
+      missing,
+      checks,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        missing,
+        checks: [],
+        error: error instanceof Error ? error.message : 'Health check fallito.',
+        timestamp: new Date().toISOString()
+      },
+      { status: 500 }
+    );
+  }
 }

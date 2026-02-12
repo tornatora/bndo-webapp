@@ -1,6 +1,8 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { requireUserProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
+import { DashboardTabs } from '@/components/dashboard/DashboardTabs';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUserProfile();
@@ -9,9 +11,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="dashboard active">
       <header className="dashboard-header">
         <nav className="dashboard-nav">
-          <div className="nav-brand">
-            <span>🎯 BNDO</span>
-          </div>
+          <Link href="/" className="nav-brand" aria-label="Vai alla home BNDO">
+            <Image src="/Logo-BNDO.png" alt="BNDO" width={138} height={30} className="nav-brand-logo" priority />
+          </Link>
           <div className="nav-actions">
             <div className="notification-bell" id="notificationBell">
               <span>🔔</span>
@@ -27,26 +29,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </nav>
       </header>
 
-      <nav className="main-tabs">
-        <div className="main-tabs-container">
-          <Link className="main-tab active" href="/dashboard#pratiche">
-            <span>📋</span>
-            <span>Pratiche</span>
-          </Link>
-          <Link className="main-tab" href="/dashboard#documenti">
-            <span>📄</span>
-            <span>Documenti</span>
-          </Link>
-          <Link className="main-tab" href="/dashboard#messaggi">
-            <span>💬</span>
-            <span>Messaggi</span>
-          </Link>
-          <Link className="main-tab" href="/dashboard/password">
-            <span>🔐</span>
-            <span>Password</span>
-          </Link>
-        </div>
-      </nav>
+      <DashboardTabs />
 
       <main className="dashboard-content">{children}</main>
     </div>

@@ -116,10 +116,51 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     }
   }
 
+  async function syncThreadSilently(threadId: string) {
+    try {
+      const response = await fetch(`/api/chat/messages?threadId=${threadId}`);
+      if (!response.ok) return;
+
+      const payload = (await response.json()) as MessagesResponse;
+      const ordered = (payload.messages ?? []).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+
+      if (selectedThreadRef.current === threadId) {
+        setMessages(ordered);
+      }
+
+      updateThreadMetadata(threadId, { unreadCount: payload.unreadCount ?? 0 });
+    } catch {
+      // silent fallback sync, no blocking UI error
+    }
+  }
+
   useEffect(() => {
     selectedThreadRef.current = selectedThreadId;
     if (!selectedThreadId) return;
     void loadMessages(selectedThreadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    if (!selectedThreadId) return;
+
+    const intervalId = setInterval(() => {
+      void syncThreadSilently(selectedThreadId);
+    }, 25000);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void syncThreadSilently(selectedThreadId);
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId]);
 

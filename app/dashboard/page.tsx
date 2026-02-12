@@ -36,7 +36,7 @@ export default async function DashboardPage() {
 
   const supabase = createClient();
 
-  const [{ data: matches }, { data: existingThread }, { count: docsCount }] = await Promise.all([
+  const [{ data: matches }, { data: existingThread }, { data: companyApplications }] = await Promise.all([
     supabase
       .from('tender_matches')
       .select('id, relevance_score, status, tender_id')
@@ -44,11 +44,13 @@ export default async function DashboardPage() {
       .order('relevance_score', { ascending: false })
       .limit(12),
     supabase.from('consultant_threads').select('id').eq('company_id', profile.company_id).maybeSingle(),
-    supabase
-      .from('application_documents')
-      .select('id', { count: 'exact', head: true })
-      .eq('company_id', profile.company_id)
+    supabase.from('tender_applications').select('id').eq('company_id', profile.company_id).limit(500)
   ]);
+
+  const applicationIds = (companyApplications ?? []).map((application) => application.id);
+  const { count: docsCount } = applicationIds.length
+    ? await supabase.from('application_documents').select('id', { count: 'exact', head: true }).in('application_id', applicationIds)
+    : { count: 0 };
 
   let threadId = existingThread?.id ?? null;
 

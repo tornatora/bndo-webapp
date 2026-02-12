@@ -113,6 +113,37 @@ export async function POST(request: Request) {
       .eq('company_id', profile.company_id)
       .eq('tender_id', tenderId);
 
+    // Avvisa inbox consulente con un messaggio automatico sul thread aziendale.
+    try {
+      const { data: ensuredThread } = await supabaseAdmin
+        .from('consultant_threads')
+        .upsert({ company_id: profile.company_id }, { onConflict: 'company_id' })
+        .select('id')
+        .single();
+
+      const threadId = ensuredThread?.id;
+
+      if (threadId) {
+        await supabaseAdmin.from('consultant_thread_participants').upsert(
+          {
+            thread_id: threadId,
+            profile_id: profile.id,
+            participant_role: 'client_admin',
+            last_read_at: new Date().toISOString()
+          },
+          { onConflict: 'thread_id,profile_id' }
+        );
+
+        await supabaseAdmin.from('consultant_messages').insert({
+          thread_id: threadId,
+          sender_profile_id: profile.id,
+          body: `Ho caricato il documento ${safeFileName} per la pratica ${tenderId}.`
+        });
+      }
+    } catch {
+      // Non bloccare upload documento in caso di errore notifica chat.
+    }
+
     return NextResponse.json(
       {
         success: true,

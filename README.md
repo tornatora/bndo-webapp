@@ -46,6 +46,7 @@ Web app full-stack per acquisizione clienti, vendita servizio, provisioning auto
 - `/login` accesso utenti
 - `/dashboard` area cliente (dominio consigliato: `app.bndo.it`)
 - `/admin` pannello operativo (dominio consigliato: `admin.bndo.it`)
+- `/api/health` check rapido pre go-live (env + DB chat/upload + bucket storage)
 
 ## Mapping domini (middleware)
 
