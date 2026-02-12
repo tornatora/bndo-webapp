@@ -20,7 +20,7 @@ function resolveSafeRedirect(target: string | null, fallback: URL, allowedHosts:
 }
 
 function redirectWithError(error: string, mode: 'admin' | 'user' = 'user', next: string | null = null) {
-  const url = buildAbsoluteUrl(APP_URL, '/login');
+  const url = buildAbsoluteUrl(mode === 'admin' ? ADMIN_URL : APP_URL, '/login');
   url.searchParams.set('error', error);
   if (mode === 'admin') {
     url.searchParams.set('mode', 'admin');

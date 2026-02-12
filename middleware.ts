@@ -27,6 +27,7 @@ export async function middleware(request: NextRequest) {
   const isAppDomainAuthPath = isAuthPath || path.startsWith('/reset-password');
   const isQuizPath = path.startsWith('/quiz');
   const hasAuthError = request.nextUrl.searchParams.has('error');
+  const isAdminLoginMode = path === '/login' && request.nextUrl.searchParams.get('mode') === 'admin';
 
   const search = request.nextUrl.search;
   if (hasDistinctDomainMapping) {
@@ -55,7 +56,7 @@ export async function middleware(request: NextRequest) {
       if (path === '/') {
         return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin', search));
       }
-      if (isDashboardPath || isAppDomainAuthPath) {
+      if (isDashboardPath || (isAppDomainAuthPath && !isAdminLoginMode)) {
         return NextResponse.redirect(buildAbsoluteUrl(APP_URL, path, search));
       }
       if (isQuizPath) {
@@ -90,7 +91,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (isAdminPath && !user) {
-    const loginUrl = buildAbsoluteUrl(APP_URL, '/login');
+    const loginUrl = buildAbsoluteUrl(ADMIN_URL, '/login');
     loginUrl.searchParams.set('mode', 'admin');
     loginUrl.searchParams.set('next', buildAbsoluteUrl(ADMIN_URL, path, request.nextUrl.search).toString());
     return NextResponse.redirect(loginUrl);
