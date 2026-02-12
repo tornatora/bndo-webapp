@@ -73,6 +73,17 @@
             transform: scale(1.02);
         }
 
+        .logo-wordmark {
+            font-size: 34px;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            font-style: italic;
+            line-height: 1;
+            color: #0b1a55;
+            display: inline-block;
+            text-transform: uppercase;
+        }
+
         .nav-menu {
             display: none;
         }
@@ -1338,6 +1349,17 @@
             object-fit: contain;
         }
 
+        .nav-brand-wordmark {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            font-style: italic;
+            line-height: 1;
+            color: #0b1a55;
+            display: inline-block;
+            text-transform: uppercase;
+        }
+
         .nav-brand-chip {
             border: 0.5px solid rgba(11, 17, 54, 0.14);
             background: rgba(11, 17, 54, 0.05);
@@ -1942,6 +1964,7 @@
             .login-form { padding: 28px 24px; }
             .dashboard-nav { padding: 14px 20px; }
             .nav-brand-logo { height: 24px; }
+            .nav-brand-wordmark { font-size: 24px; }
             .nav-brand-chip { display: none; }
             .nav-actions { gap: 12px; }
             .nav-user { display: none; }

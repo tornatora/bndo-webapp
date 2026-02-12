@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import { requireUserProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
@@ -12,7 +11,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <header className="dashboard-header">
         <nav className="dashboard-nav">
           <Link href="/" className="nav-brand" aria-label="Vai alla home BNDO">
-            <Image src="/Logo-BNDO-wordmark.svg" alt="BNDO" width={176} height={40} className="nav-brand-logo" priority />
+            <span className="nav-brand-wordmark">BNDO</span>
           </Link>
           <div className="nav-actions">
             <div className="notification-bell" id="notificationBell">
