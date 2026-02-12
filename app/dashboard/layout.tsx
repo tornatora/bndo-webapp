@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { requireUserProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { DashboardTabs } from '@/components/dashboard/DashboardTabs';
+import { MARKETING_URL } from '@/lib/site-urls';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUserProfile();
@@ -11,7 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="dashboard active">
       <header className="dashboard-header">
         <nav className="dashboard-nav">
-          <Link href="/" className="nav-brand" aria-label="Vai alla home BNDO">
+          <Link href={MARKETING_URL} className="nav-brand" aria-label="Vai alla home BNDO">
             <Image
               src="/Logo-BNDO-header.png"
               alt="BNDO"

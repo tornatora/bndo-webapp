@@ -1,17 +1,67 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import type { Database } from '@/lib/supabase/database.types';
+import { hasOpsAccess } from '@/lib/roles';
+import { ADMIN_URL, APP_URL, MARKETING_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
+
+function stripPort(host: string) {
+  return host.split(':')[0].toLowerCase();
+}
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  const host = (request.headers.get('host') ?? '').toLowerCase();
+  const host = stripPort(request.headers.get('host') ?? '');
 
-  if (host.startsWith('app.bndo.it') && path === '/') {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
+  const marketingHost = stripPort(hostFromBaseUrl(MARKETING_URL));
+  const appHost = stripPort(hostFromBaseUrl(APP_URL));
+  const adminHost = stripPort(hostFromBaseUrl(ADMIN_URL));
 
-  if (host.startsWith('admin.bndo.it') && path === '/') {
-    return NextResponse.redirect(new URL('/admin', request.url));
+  const isMarketingHost = host === marketingHost;
+  const isAppHost = host === appHost;
+  const isAdminHost = host === adminHost;
+  const hasDistinctDomainMapping = new Set([marketingHost, appHost, adminHost]).size >= 3;
+
+  const isDashboardPath = path.startsWith('/dashboard');
+  const isAdminPath = path.startsWith('/admin');
+  const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
+  const isAppDomainAuthPath = isAuthPath || path.startsWith('/reset-password');
+  const isQuizPath = path.startsWith('/quiz');
+  const hasAuthError = request.nextUrl.searchParams.has('error');
+
+  const search = request.nextUrl.search;
+  if (hasDistinctDomainMapping) {
+    if (isMarketingHost) {
+      if (isDashboardPath || isAppDomainAuthPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(APP_URL, path, search));
+      }
+      if (isAdminPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, path, search));
+      }
+    }
+
+    if (isAppHost) {
+      if (path === '/') {
+        return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/login', search));
+      }
+      if (isAdminPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, path, search));
+      }
+      if (isQuizPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(MARKETING_URL, path, search));
+      }
+    }
+
+    if (isAdminHost) {
+      if (path === '/') {
+        return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin', search));
+      }
+      if (isDashboardPath || isAppDomainAuthPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(APP_URL, path, search));
+      }
+      if (isQuizPath) {
+        return NextResponse.redirect(buildAbsoluteUrl(MARKETING_URL, path, search));
+      }
+    }
   }
 
   let response = NextResponse.next({
@@ -39,17 +89,22 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  const isDashboardPath = path.startsWith('/dashboard');
-  const isAdminPath = path.startsWith('/admin');
-  const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
-  const hasAuthError = request.nextUrl.searchParams.has('error');
-
   if ((isDashboardPath || isAdminPath) && !user) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/login'));
   }
 
   if (isAuthPath && user && !hasAuthError) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profile?.role && hasOpsAccess(profile.role)) {
+      return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin'));
+    }
+
+    return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/dashboard'));
   }
 
   return response;

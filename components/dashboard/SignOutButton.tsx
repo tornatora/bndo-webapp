@@ -2,6 +2,7 @@
 
 import { useTransition } from 'react';
 import { LogOut } from 'lucide-react';
+import { APP_URL } from '@/lib/site-urls';
 
 export function SignOutButton({
   className = 'btn btn-muted w-full',
@@ -18,7 +19,7 @@ export function SignOutButton({
       onClick={() => {
         startTransition(async () => {
           await fetch('/api/auth/logout', { method: 'POST' });
-          window.location.href = '/login';
+          window.location.href = `${APP_URL}/login`;
         });
       }}
       disabled={pending}

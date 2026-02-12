@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { slugify } from '@/lib/utils';
+import { APP_URL, buildAbsoluteUrl } from '@/lib/site-urls';
 
 const RegisterSchema = z
   .object({
@@ -16,8 +17,8 @@ const RegisterSchema = z
     path: ['confirmPassword']
   });
 
-function redirectWithMessage(request: NextRequest, path: string, key: 'error' | 'success', message: string) {
-  const url = new URL(path, request.url);
+function redirectWithMessage(path: string, key: 'error' | 'success', message: string) {
+  const url = buildAbsoluteUrl(APP_URL, path);
   url.searchParams.set(key, message);
   return NextResponse.redirect(url, { status: 303 });
 }
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
 
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message ?? 'Compila tutti i campi correttamente.';
-    return redirectWithMessage(request, '/register', 'error', message);
+    return redirectWithMessage('/register', 'error', message);
   }
 
   const { fullName, companyName, password } = parsed.data;
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profileByEmail } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
   if (profileByEmail) {
-    return redirectWithMessage(request, '/register', 'error', 'Email gia registrata. Accedi oppure recupera password.');
+    return redirectWithMessage('/register', 'error', 'Email gia registrata. Accedi oppure recupera password.');
   }
 
   let companyId: string | null = null;
@@ -119,7 +120,6 @@ export async function POST(request: NextRequest) {
     );
 
     return redirectWithMessage(
-      request,
       '/login',
       'success',
       `Registrazione completata. Ora accedi con username "${username}" o con la tua email.`
@@ -135,6 +135,6 @@ export async function POST(request: NextRequest) {
 
     const fallback = 'Registrazione non completata. Riprova tra pochi secondi.';
     const message = error instanceof Error ? error.message : fallback;
-    return redirectWithMessage(request, '/register', 'error', message);
+    return redirectWithMessage('/register', 'error', message);
   }
 }

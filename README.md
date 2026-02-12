@@ -50,8 +50,10 @@ Web app full-stack per acquisizione clienti, vendita servizio, provisioning auto
 
 ## Mapping domini (middleware)
 
-- `app.bndo.it` su `/` reindirizza a `/login`
-- `admin.bndo.it` su `/` reindirizza a `/admin`
+- `bndo.it`: landing + quiz
+- `app.bndo.it`: login/register/forgot/reset + dashboard cliente
+- `admin.bndo.it`: pannello `/admin`
+- Se si apre una rotta sul dominio sbagliato, il middleware reindirizza automaticamente al dominio corretto.
 
 ## Deploy consigliato
 
@@ -102,6 +104,12 @@ npm install
 ```bash
 npm run dev
 ```
+
+Variabili dominio consigliate in produzione:
+
+- `NEXT_PUBLIC_MARKETING_URL=https://bndo.it`
+- `NEXT_PUBLIC_APP_URL=https://app.bndo.it`
+- `NEXT_PUBLIC_ADMIN_URL=https://admin.bndo.it`
 
 7. (Locale webhook) inoltro eventi Stripe:
 

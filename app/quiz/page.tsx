@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Script from 'next/script';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
 import './quiz.css';
 
 declare global {
@@ -313,8 +314,8 @@ export default function QuizPage() {
         {step !== 'intro' ? (
           <>
             <div className="top-links">
-              <Link href="/">Torna al sito</Link>
-              <Link href="/login">Area clienti</Link>
+              <Link href={MARKETING_URL}>Torna al sito</Link>
+              <Link href={`${APP_URL}/login`}>Area clienti</Link>
             </div>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />

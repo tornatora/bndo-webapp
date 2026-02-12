@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { MARKETING_URL } from '@/lib/site-urls';
 
 type PracticeRequestPanelProps = {
   quizCompleted: boolean;
@@ -102,7 +103,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
           <div className="empty-text" style={{ marginBottom: 14 }}>
             Non hai ancora completato il quiz.
           </div>
-          <Link href="/quiz" className="btn-action primary">
+          <Link href={`${MARKETING_URL}/quiz`} className="btn-action primary">
             <span>✅</span>
             <span>Fai prima il quiz</span>
           </Link>
@@ -112,7 +113,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
           <div className="empty-text" style={{ marginBottom: 14 }}>
             Il tuo ultimo quiz risulta non idoneo. Completa nuovamente il quiz prima di richiedere una pratica.
           </div>
-          <Link href="/quiz" className="btn-action secondary">
+          <Link href={`${MARKETING_URL}/quiz`} className="btn-action secondary">
             <span>🔁</span>
             <span>Rifai il quiz</span>
           </Link>

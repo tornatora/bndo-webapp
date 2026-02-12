@@ -2,6 +2,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { requireOpsProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
+import { MARKETING_URL } from '@/lib/site-urls';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireOpsProfile();
@@ -11,7 +12,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <header className="dashboard-header">
         <nav className="dashboard-nav">
           <div className="nav-brand-admin">
-            <Link href="/" aria-label="Vai alla home BNDO" className="nav-brand">
+            <Link href={MARKETING_URL} aria-label="Vai alla home BNDO" className="nav-brand">
               <Image
                 src="/Logo-BNDO-header.png"
                 alt="BNDO"

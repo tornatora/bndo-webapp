@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { APP_URL } from '@/lib/site-urls';
 
 export default function ForbiddenPage({
   searchParams
@@ -25,10 +26,10 @@ export default function ForbiddenPage({
 
         <div className="login-form">
           <div className="action-buttons">
-            <Link href="/dashboard" className="btn-action secondary" style={{ width: '100%', justifyContent: 'center' }}>
+            <Link href={`${APP_URL}/dashboard`} className="btn-action secondary" style={{ width: '100%', justifyContent: 'center' }}>
               Vai alla dashboard cliente
             </Link>
-            <Link href="/login" className="btn-action primary" style={{ width: '100%', justifyContent: 'center' }}>
+            <Link href={`${APP_URL}/login`} className="btn-action primary" style={{ width: '100%', justifyContent: 'center' }}>
               Accedi con altro account
             </Link>
           </div>

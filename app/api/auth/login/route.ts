@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import { ADMIN_URL, APP_URL, buildAbsoluteUrl } from '@/lib/site-urls';
 
-function redirectWithError(request: NextRequest, error: string) {
-  const url = new URL('/login', request.url);
+function redirectWithError(error: string) {
+  const url = buildAbsoluteUrl(APP_URL, '/login');
   url.searchParams.set('error', error);
   return NextResponse.redirect(url, { status: 303 });
 }
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   const password = String(formData.get('password') ?? '');
 
   if (!identifier || !password) {
-    return redirectWithError(request, 'Credenziali obbligatorie');
+    return redirectWithError('Credenziali obbligatorie');
   }
 
   const supabaseAdmin = getSupabaseAdmin();
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (!profile?.email) {
-      return redirectWithError(request, 'Username non trovato');
+      return redirectWithError('Username non trovato');
     }
 
     email = profile.email;
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return redirectWithError(request, 'Credenziali non valide');
+    return redirectWithError('Credenziali non valide');
   }
 
   const {
@@ -54,9 +55,9 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (signedProfile?.role && hasOpsAccess(signedProfile.role)) {
-      return NextResponse.redirect(new URL('/admin', request.url), { status: 303 });
+      return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin'), { status: 303 });
     }
   }
 
-  return NextResponse.redirect(new URL('/dashboard', request.url), { status: 303 });
+  return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/dashboard'), { status: 303 });
 }
