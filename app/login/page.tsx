@@ -3,24 +3,38 @@ import Link from 'next/link';
 export default function LoginPage({
   searchParams
 }: {
-  searchParams?: { error?: string | string[]; success?: string | string[] };
+  searchParams?: { error?: string | string[]; success?: string | string[]; mode?: string | string[]; next?: string | string[] };
 }) {
   const errorParam = Array.isArray(searchParams?.error) ? searchParams?.error[0] : searchParams?.error;
   const successParam = Array.isArray(searchParams?.success) ? searchParams?.success[0] : searchParams?.success;
+  const modeParam = Array.isArray(searchParams?.mode) ? searchParams?.mode[0] : searchParams?.mode;
+  const nextParam = Array.isArray(searchParams?.next) ? searchParams?.next[0] : searchParams?.next;
+
+  const isAdminMode = modeParam === 'admin';
+  const badgeIcon = isAdminMode ? '🛡️' : '👤';
+  const badgeText = isAdminMode ? 'Area Admin' : 'Area Cliente';
+  const titleText = isAdminMode ? 'Accesso Admin' : 'Bentornato';
+  const subtitleText = isAdminMode
+    ? 'Accedi al pannello amministrativo BNDO'
+    : 'Accedi alla tua area personale BNDO';
+  const buttonText = isAdminMode ? 'Accedi al pannello Admin →' : 'Accedi alla Dashboard →';
 
   return (
     <section id="loginScreen" className="login-hero">
       <div className="login-content">
         <div className="login-header">
           <div className="login-badge">
-            <span>👤</span>
-            <span>Area Cliente</span>
+            <span>{badgeIcon}</span>
+            <span>{badgeText}</span>
           </div>
-          <h1 className="login-title">Bentornato</h1>
-          <p className="login-subtitle">Accedi alla tua area personale BNDO</p>
+          <h1 className="login-title">{titleText}</h1>
+          <p className="login-subtitle">{subtitleText}</p>
         </div>
 
         <form action="/api/auth/login" method="post" className="login-form">
+          <input type="hidden" name="mode" value={isAdminMode ? 'admin' : 'user'} />
+          {nextParam ? <input type="hidden" name="next" value={nextParam} /> : null}
+
           <div className="form-group">
             <label className="form-label" htmlFor="identifier">
               Username o Email
@@ -58,7 +72,7 @@ export default function LoginPage({
           ) : null}
 
           <button type="submit" className="btn-login">
-            <span>Accedi alla Dashboard →</span>
+            <span>{buttonText}</span>
           </button>
 
           <p style={{ marginTop: '12px', fontSize: '14px', color: 'var(--text-light)' }}>
@@ -69,12 +83,14 @@ export default function LoginPage({
             .
           </p>
 
-          <p style={{ marginTop: '16px', fontSize: '14px', color: 'var(--text-light)' }}>
-            Non hai ancora un account?{' '}
-            <Link href="/register" style={{ color: 'var(--navy)', fontWeight: 600 }}>
-              Registrati
-            </Link>
-          </p>
+          {!isAdminMode ? (
+            <p style={{ marginTop: '16px', fontSize: '14px', color: 'var(--text-light)' }}>
+              Non hai ancora un account?{' '}
+              <Link href="/register" style={{ color: 'var(--navy)', fontWeight: 600 }}>
+                Registrati
+              </Link>
+            </p>
+          ) : null}
         </form>
       </div>
     </section>

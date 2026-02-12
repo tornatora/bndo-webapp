@@ -89,7 +89,14 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if ((isDashboardPath || isAdminPath) && !user) {
+  if (isAdminPath && !user) {
+    const loginUrl = buildAbsoluteUrl(APP_URL, '/login');
+    loginUrl.searchParams.set('mode', 'admin');
+    loginUrl.searchParams.set('next', buildAbsoluteUrl(ADMIN_URL, path, request.nextUrl.search).toString());
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (isDashboardPath && !user) {
     return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/login'));
   }
 

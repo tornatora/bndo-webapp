@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { hasOpsAccess } from '@/lib/roles';
+import { APP_URL } from '@/lib/site-urls';
 import { createClient } from '@/lib/supabase/server';
 
 export async function requireUser() {
@@ -36,7 +37,9 @@ export async function requireOpsProfile() {
   const { user, profile } = await requireUserProfile();
 
   if (!hasOpsAccess(profile.role)) {
-    redirect('/forbidden?reason=admin_only');
+    const logoutUrl = new URL('/api/auth/logout', `${APP_URL}/`);
+    logoutUrl.searchParams.set('redirect', '/login?mode=admin&error=Serve un account admin');
+    redirect(logoutUrl.toString());
   }
 
   return { user, profile };
