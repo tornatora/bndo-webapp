@@ -22,6 +22,15 @@ export function DashboardTabs() {
   const pathname = usePathname();
   const [activeHash, setActiveHash] = useState('pratiche');
 
+  function activatePanel(tabKey: string) {
+    if (typeof window === 'undefined') return;
+    const panels = document.querySelectorAll<HTMLElement>('.tab-panel');
+    panels.forEach((panel) => panel.classList.remove('active'));
+
+    const target = document.getElementById(`tab-${tabKey}`) ?? document.getElementById('tab-pratiche');
+    target?.classList.add('active');
+  }
+
   useEffect(() => {
     if (pathname !== '/dashboard') {
       setActiveHash(pathname === '/dashboard/password' ? 'password' : 'pratiche');
@@ -30,7 +39,9 @@ export function DashboardTabs() {
 
     const syncHash = () => {
       const hash = window.location.hash.replace('#', '').trim();
-      setActiveHash(hash || 'pratiche');
+      const safeHash = hash === 'documenti' || hash === 'messaggi' || hash === 'pratiche' ? hash : 'pratiche';
+      setActiveHash(safeHash);
+      activatePanel(safeHash);
     };
 
     syncHash();

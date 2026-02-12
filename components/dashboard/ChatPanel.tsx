@@ -348,6 +348,12 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
       </div>
 
       <div className="chat-card">
+        <div className="chat-toolbar">
+          <div className="chat-toolbar-title">Chat Consulente</div>
+          <div className="chat-toolbar-status">
+            {unreadCount > 0 ? `${unreadCount} nuovo${unreadCount > 1 ? 'i' : ''} messaggio${unreadCount > 1 ? 'i' : ''}` : 'Canale attivo'}
+          </div>
+        </div>
         <div className="chat-container">
           <div ref={scrollRef} className="chat-messages" id="chatMessages">
             {messages.length === 0 ? (

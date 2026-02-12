@@ -192,7 +192,7 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      <div id="tab-documenti" className="tab-panel active">
+      <div id="tab-documenti" className="tab-panel">
         <div className="welcome-section" id="documenti">
           <h1 className="welcome-title">📄 I Tuoi Documenti</h1>
           <p className="welcome-subtitle">Gestisci i documenti dalle singole pratiche in modo guidato.</p>
@@ -205,7 +205,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div id="tab-messaggi" className="tab-panel active">
+      <div id="tab-messaggi" className="tab-panel">
         <div className="welcome-section" id="messaggi">
           <h1 className="welcome-title">💬 Messaggi</h1>
           <p className="welcome-subtitle">Chatta con il tuo consulente in tempo reale</p>
