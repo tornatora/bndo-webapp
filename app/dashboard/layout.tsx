@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { requireUserProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { DashboardTabs } from '@/components/dashboard/DashboardTabs';
@@ -11,7 +12,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <header className="dashboard-header">
         <nav className="dashboard-nav">
           <Link href="/" className="nav-brand" aria-label="Vai alla home BNDO">
-            <span className="nav-brand-wordmark">BNDO</span>
+            <Image
+              src="/Logo-BNDO-header.png"
+              alt="BNDO"
+              width={210}
+              height={60}
+              className="nav-brand-logo"
+              priority
+            />
           </Link>
           <div className="nav-actions">
             <div className="notification-bell" id="notificationBell">

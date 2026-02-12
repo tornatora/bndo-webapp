@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 
 export default function HomePage() {
@@ -18,7 +19,13 @@ export default function HomePage() {
       <header id="header" className={scrolled ? 'scrolled' : ''}>
         <nav>
           <div className="logo">
-            <span className="logo-wordmark">BNDO</span>
+            <Image
+              src="/Logo-BNDO-header.png"
+              alt="BNDO"
+              width={220}
+              height={64}
+              priority
+            />
           </div>
           <ul className="nav-menu">
             <li>

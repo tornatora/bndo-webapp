@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { requireOpsProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 
@@ -9,9 +10,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="dashboard active">
       <header className="dashboard-header">
         <nav className="dashboard-nav">
-          <div className="nav-brand nav-brand-admin">
-            <Link href="/" aria-label="Vai alla home BNDO">
-              <span className="nav-brand-wordmark">BNDO</span>
+          <div className="nav-brand-admin">
+            <Link href="/" aria-label="Vai alla home BNDO" className="nav-brand">
+              <Image
+                src="/Logo-BNDO-header.png"
+                alt="BNDO"
+                width={210}
+                height={60}
+                className="nav-brand-logo"
+                priority
+              />
             </Link>
             <span className="nav-brand-chip">Admin</span>
           </div>
