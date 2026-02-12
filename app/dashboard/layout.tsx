@@ -29,9 +29,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </nav>
       </header>
 
-      <DashboardTabs />
-
-      <main className="dashboard-content">{children}</main>
+      <div className="dashboard-shell-client">
+        <aside className="dashboard-sidebar-client">
+          <DashboardTabs />
+        </aside>
+        <main className="dashboard-content dashboard-content-client">{children}</main>
+      </div>
     </div>
   );
 }

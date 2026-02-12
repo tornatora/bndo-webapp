@@ -27,8 +27,7 @@ type ChatMessage = {
   created_at: string;
 };
 
-const AUTO_REPLY_BODY = 'Messaggio ricevuto: un consulente si connettera con te presto.';
-const AUTO_REPLY_WINDOW_MINUTES = 15;
+const AUTO_REPLY_BODY = 'Un nostro consulente ti rispondera il prima possibile.';
 
 async function getViewerProfile() {
   const supabase = createClient();
@@ -128,7 +127,7 @@ async function maybeCreateAutomaticReply(threadId: string, sender: ViewerProfile
     return { autoReplyNotice: null, autoReplyMessage: null };
   }
 
-  const autoReplyNotice = 'Un consulente si connettera con te presto.';
+  const autoReplyNotice = 'Un nostro consulente ti rispondera il prima possibile.';
   const opsSender = await findOpsSenderProfile(threadId);
 
   if (!opsSender) {
@@ -136,21 +135,6 @@ async function maybeCreateAutomaticReply(threadId: string, sender: ViewerProfile
   }
 
   const supabaseAdmin = getSupabaseAdmin();
-  const thresholdIso = new Date(Date.now() - AUTO_REPLY_WINDOW_MINUTES * 60_000).toISOString();
-
-  const { data: existingAck } = await supabaseAdmin
-    .from('consultant_messages')
-    .select('id')
-    .eq('thread_id', threadId)
-    .eq('sender_profile_id', opsSender.id)
-    .eq('body', AUTO_REPLY_BODY)
-    .gte('created_at', thresholdIso)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingAck?.id) {
-    return { autoReplyNotice, autoReplyMessage: null };
-  }
 
   await supabaseAdmin.from('consultant_thread_participants').upsert(
     {

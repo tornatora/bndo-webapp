@@ -1418,6 +1418,27 @@
             padding: 40px 24px;
         }
 
+        .dashboard-shell-client {
+            width: 100%;
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 28px 24px 40px;
+            display: grid;
+            grid-template-columns: 240px minmax(0, 1fr);
+            gap: 24px;
+            align-items: start;
+        }
+
+        .dashboard-sidebar-client {
+            min-width: 0;
+        }
+
+        .dashboard-content-client {
+            margin: 0;
+            max-width: none;
+            padding: 0;
+        }
+
         .tab-panel {
             display: none;
         }
@@ -1931,7 +1952,7 @@
                 padding-left: max(24px, env(safe-area-inset-left));
                 padding-right: max(24px, env(safe-area-inset-right));
             }
-            .main-tabs-container {
+            .dashboard-shell-client {
                 padding-left: max(24px, env(safe-area-inset-left));
                 padding-right: max(24px, env(safe-area-inset-right));
             }
@@ -1939,37 +1960,34 @@
                 padding-left: max(24px, env(safe-area-inset-left));
                 padding-right: max(24px, env(safe-area-inset-right));
             }
+            .dashboard-content-client {
+                padding-left: 0;
+                padding-right: 0;
+            }
         }
 
         .main-tabs {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-bottom: 0.5px solid var(--border);
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(16px) saturate(150%);
+            -webkit-backdrop-filter: blur(16px) saturate(150%);
+            border: 0.5px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 2px 8px rgba(11, 17, 54, 0.04);
             position: sticky;
-            top: 63px;
-            z-index: 90;
-            width: 100%;
+            top: 82px;
         }
 
         .main-tabs-container {
-            width: 100%;
-            padding: 10px 24px;
+            padding: 10px;
             display: flex;
-            align-items: center;
-            gap: 10px;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-
-        .main-tabs-container::-webkit-scrollbar {
-            display: none;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .main-tab {
-            flex: 0 0 auto;
-            min-width: 126px;
-            padding: 10px 14px;
+            width: 100%;
+            min-width: 0;
+            padding: 12px 14px;
             border: 0.5px solid transparent;
             border-radius: 10px;
             background: transparent;
@@ -1981,8 +1999,8 @@
             font-family: 'Inter', sans-serif;
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
+            justify-content: flex-start;
+            gap: 9px;
             letter-spacing: -0.01em;
             text-decoration: none;
         }
@@ -2009,34 +2027,46 @@
             border-color: rgba(11, 17, 54, 0.08);
         }
 
-        @media (max-width: 767px) {
+        @media (max-width: 1023px) {
+            .dashboard-shell-client {
+                display: block;
+                padding: 18px 20px 28px;
+            }
+
+            .dashboard-sidebar-client {
+                margin-bottom: 16px;
+            }
+
+            .dashboard-content-client {
+                padding: 0;
+            }
+
             .main-tabs {
-                top: 56px;
+                position: static;
             }
 
             .main-tabs-container {
-                padding: 10px 16px;
+                padding: 8px;
+                flex-direction: row;
                 gap: 8px;
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+
+            .main-tabs-container::-webkit-scrollbar {
+                display: none;
             }
 
             .main-tab {
+                flex: 0 0 auto;
                 min-width: 112px;
+                justify-content: center;
                 padding: 10px 12px;
                 font-size: 13px;
             }
 
             .main-tab span:first-child {
                 font-size: 14px;
-            }
-        }
-
-        @media (min-width: 768px) and (max-width: 1023px) {
-            .main-tabs-container {
-                padding: 10px 20px;
-            }
-
-            .main-tab {
-                min-width: 118px;
             }
         }
 
