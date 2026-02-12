@@ -16,8 +16,10 @@ const PersonalSchema = z.object({
 
 const BillingSchema = z.object({
   section: z.literal('billing'),
+  billingType: z.enum(['company', 'individual']).default('company'),
   companyName: z.string().trim().min(2).max(160),
   vatNumber: z.string().trim().max(40).optional(),
+  taxCode: z.string().trim().max(40).optional(),
   industry: z.string().trim().max(120).optional(),
   annualSpendTarget: z.number().min(0).max(1_000_000_000).nullable().optional()
 });
@@ -103,7 +105,10 @@ export async function POST(request: NextRequest) {
     .from('companies')
     .update({
       name: parsed.data.companyName,
-      vat_number: parsed.data.vatNumber?.trim() || null,
+      vat_number:
+        parsed.data.billingType === 'company'
+          ? parsed.data.vatNumber?.trim() || null
+          : parsed.data.taxCode?.trim() || null,
       industry: parsed.data.industry?.trim() || null,
       annual_spend_target: parsed.data.annualSpendTarget ?? null
     })

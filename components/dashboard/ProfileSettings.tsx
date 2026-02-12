@@ -15,6 +15,7 @@ type ProfileSettingsProps = {
     vatNumber: string | null;
     industry: string | null;
     annualSpendTarget: number | null;
+    billingType?: 'company' | 'individual';
   } | null;
 };
 
@@ -34,7 +35,9 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
   const [personalError, setPersonalError] = useState(false);
 
   const [companyName, setCompanyName] = useState(initialCompany?.name ?? '');
-  const [vatNumber, setVatNumber] = useState(initialCompany?.vatNumber ?? '');
+  const [billingType, setBillingType] = useState<'company' | 'individual'>(initialCompany?.billingType ?? 'company');
+  const [vatNumber, setVatNumber] = useState(initialCompany?.billingType === 'company' ? initialCompany?.vatNumber ?? '' : '');
+  const [taxCode, setTaxCode] = useState(initialCompany?.billingType === 'individual' ? initialCompany?.vatNumber ?? '' : '');
   const [industry, setIndustry] = useState(initialCompany?.industry ?? '');
   const [annualSpendTarget, setAnnualSpendTarget] = useState(
     initialCompany?.annualSpendTarget ? String(initialCompany.annualSpendTarget) : ''
@@ -97,7 +100,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
 
     if (!companyName.trim()) {
       setBillingError(true);
-      setBillingMessage('Il nome azienda è obbligatorio.');
+      setBillingMessage("Inserisci l'intestatario della fattura.");
       return;
     }
 
@@ -118,8 +121,10 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           section: 'billing',
+          billingType,
           companyName,
           vatNumber,
+          taxCode,
           industry,
           annualSpendTarget: parsedSpend
         })
@@ -262,9 +267,31 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
       <section className="section-card profile-card">
         <h2 className="section-title">🧾 Dati Fatturazione</h2>
         <form onSubmit={handleBillingSubmit} className="profile-form-grid">
+          <div className="profile-form-grid-full">
+            <label className="form-label" style={{ marginBottom: 8 }}>
+              Tipo intestatario
+            </label>
+            <div className="billing-switch">
+              <button
+                type="button"
+                className={`billing-switch-btn ${billingType === 'company' ? 'active' : ''}`}
+                onClick={() => setBillingType('company')}
+              >
+                Azienda
+              </button>
+              <button
+                type="button"
+                className={`billing-switch-btn ${billingType === 'individual' ? 'active' : ''}`}
+                onClick={() => setBillingType('individual')}
+              >
+                Persona fisica
+              </button>
+            </div>
+          </div>
+
           <div className="form-group profile-form-grid-full">
             <label className="form-label" htmlFor="billingCompanyName">
-              Ragione sociale
+              {billingType === 'company' ? 'Ragione sociale' : 'Nome e cognome intestatario'}
             </label>
             <input
               id="billingCompanyName"
@@ -276,19 +303,35 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="billingVatNumber">
-              Partita IVA
-            </label>
-            <input
-              id="billingVatNumber"
-              type="text"
-              className="form-input"
-              value={vatNumber}
-              onChange={(event) => setVatNumber(event.target.value)}
-              placeholder="IT12345678901"
-            />
-          </div>
+          {billingType === 'company' ? (
+            <div className="form-group">
+              <label className="form-label" htmlFor="billingVatNumber">
+                Partita IVA
+              </label>
+              <input
+                id="billingVatNumber"
+                type="text"
+                className="form-input"
+                value={vatNumber}
+                onChange={(event) => setVatNumber(event.target.value)}
+                placeholder="IT12345678901"
+              />
+            </div>
+          ) : (
+            <div className="form-group">
+              <label className="form-label" htmlFor="billingTaxCode">
+                Codice Fiscale
+              </label>
+              <input
+                id="billingTaxCode"
+                type="text"
+                className="form-input"
+                value={taxCode}
+                onChange={(event) => setTaxCode(event.target.value)}
+                placeholder="RSSMRA80A01H501U"
+              />
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="billingIndustry">

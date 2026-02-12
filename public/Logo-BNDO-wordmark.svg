@@ -1,17 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="96" viewBox="0 0 420 96" role="img" aria-labelledby="logoTitle">
   <title id="logoTitle">BNDO</title>
-  <defs>
-    <linearGradient id="bndoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#304889" />
-      <stop offset="55%" stop-color="#14255d" />
-      <stop offset="100%" stop-color="#0a143f" />
-    </linearGradient>
-  </defs>
   <text
     x="0"
-    y="70"
-    fill="url(#bndoGradient)"
-    font-family="Arial Black, Segoe UI, sans-serif"
+    y="72"
+    fill="#0b1a55"
+    font-family="Arial Black, Segoe UI, Helvetica, sans-serif"
     font-size="78"
     font-style="italic"
     font-weight="800"

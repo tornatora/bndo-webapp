@@ -21,6 +21,10 @@ export default async function DashboardProfilePage() {
         .maybeSingle()
     : { data: null };
 
+  const normalizedVat = (company?.vat_number ?? '').trim();
+  const isVatNumber = /^[a-zA-Z]{0,2}[0-9]{11}$/.test(normalizedVat.replace(/\s+/g, ''));
+  const billingType: 'company' | 'individual' = normalizedVat && !isVatNumber ? 'individual' : 'company';
+
   return (
     <>
       <section className="welcome-section">
@@ -40,7 +44,8 @@ export default async function DashboardProfilePage() {
                 name: company.name,
                 vatNumber: company.vat_number,
                 industry: company.industry,
-                annualSpendTarget: company.annual_spend_target
+                annualSpendTarget: company.annual_spend_target,
+                billingType
               }
             : null
         }

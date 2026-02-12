@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
+import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 
 type TenderMatchResult = {
@@ -98,6 +100,18 @@ export default async function DashboardPage() {
       new Date(message.created_at).getTime() > new Date(participant?.last_read_at ?? new Date(0).toISOString()).getTime()
   ).length;
 
+  const supabaseAdmin = getSupabaseAdmin();
+  const { data: latestQuiz } = await supabaseAdmin
+    .from('quiz_submissions')
+    .select('eligibility, bando_type, created_at')
+    .eq('email', profile.email.toLowerCase())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const quizCompleted = Boolean(latestQuiz);
+  const quizEligible = latestQuiz?.eligibility === 'eligible';
+
   return (
     <>
       <div className="welcome-section">
@@ -119,6 +133,13 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <PracticeRequestPanel
+        quizCompleted={quizCompleted}
+        quizEligible={quizEligible}
+        quizType={latestQuiz?.bando_type ?? null}
+        quizCompletedAt={latestQuiz?.created_at ?? null}
+      />
 
       {typedMatches.length === 0 ? (
         <div className="empty-state">

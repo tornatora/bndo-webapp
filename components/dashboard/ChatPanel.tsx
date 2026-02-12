@@ -35,7 +35,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   const [sending, setSending] = useState(false);
   const [lastReadAt, setLastReadAt] = useState<string>(initialLastReadAt ?? new Date(0).toISOString());
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [deliveryNotice, setDeliveryNotice] = useState<string | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -58,14 +57,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   useEffect(() => {
     setLastReadAt(initialLastReadAt ?? new Date(0).toISOString());
   }, [initialLastReadAt]);
-
-  useEffect(() => {
-    if (!deliveryNotice) return;
-    const timer = setTimeout(() => setDeliveryNotice(null), 6000);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [deliveryNotice]);
 
   function sortMessages(items: Message[]) {
     return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -257,7 +248,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
 
     setSending(true);
     setSyncError(null);
-    setDeliveryNotice(null);
 
     const optimistic: Message = {
       id: `temp-${Date.now()}`,
@@ -297,8 +287,15 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
         setMessages((previous) => mergeMessages(previous, [payload.autoReplyMessage as Message]));
       }
 
-      if (payload.autoReplyNotice) {
-        setDeliveryNotice(payload.autoReplyNotice);
+      if (!payload.autoReplyMessage && payload.autoReplyNotice) {
+        const syntheticReply: Message = {
+          id: `auto-${Date.now()}`,
+          thread_id: threadId,
+          sender_profile_id: 'assistant-auto',
+          body: payload.autoReplyNotice,
+          created_at: new Date().toISOString()
+        };
+        setMessages((previous) => mergeMessages(previous, [syntheticReply]));
       }
     } catch (error) {
       setMessages((previous) => previous.filter((msg) => msg.id !== optimistic.id));
@@ -390,10 +387,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
               {sending ? 'Invio...' : 'Invia'}
             </button>
           </form>
-
-          {deliveryNotice ? (
-            <p style={{ margin: '0 24px 14px', fontSize: '13px', fontWeight: 600, color: '#15803d' }}>{deliveryNotice}</p>
-          ) : null}
 
           {syncError ? (
             <p style={{ margin: '0 24px 14px', fontSize: '13px', fontWeight: 600, color: '#b91c1c' }}>{syncError}</p>
