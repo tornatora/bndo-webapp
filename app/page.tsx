@@ -18,7 +18,7 @@ export default function HomePage() {
       <header id="header" className={scrolled ? 'scrolled' : ''}>
         <nav>
           <div className="logo">
-            <img src="/Logo-BNDO.png" alt="BNDO" />
+            <img src="/Logo-BNDO-wordmark.svg" alt="BNDO" />
           </div>
           <ul className="nav-menu">
             <li>

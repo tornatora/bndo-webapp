@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 
 type ProfileSettingsProps = {
@@ -23,6 +24,7 @@ type ApiResponse = {
 
 export function ProfileSettings({ initialProfile, initialCompany }: ProfileSettingsProps) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
 
   const [fullName, setFullName] = useState(initialProfile.fullName);
   const [username, setUsername] = useState(initialProfile.username);
@@ -79,6 +81,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
 
       setPersonalMessage('Dati account aggiornati correttamente.');
       setPersonalError(false);
+      router.refresh();
     } catch (error) {
       setPersonalError(true);
       setPersonalMessage(error instanceof Error ? error.message : 'Errore salvataggio dati account.');
@@ -129,6 +132,7 @@ export function ProfileSettings({ initialProfile, initialCompany }: ProfileSetti
 
       setBillingMessage('Dati fatturazione aggiornati correttamente.');
       setBillingError(false);
+      router.refresh();
     } catch (error) {
       setBillingError(true);
       setBillingMessage(error instanceof Error ? error.message : 'Errore salvataggio dati fatturazione.');

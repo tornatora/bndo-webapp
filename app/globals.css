@@ -1334,7 +1334,7 @@
 
         .nav-brand-logo {
             width: auto;
-            height: 28px;
+            height: 34px;
             object-fit: contain;
         }
 
@@ -1433,6 +1433,7 @@
             min-width: 0;
             position: sticky;
             top: 92px;
+            align-self: start;
         }
 
         .dashboard-content-client {
@@ -1987,6 +1988,11 @@
         }
 
         .main-tabs {
+            display: block;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 0;
             background: #fff;
             border: 0.5px solid var(--border);
             border-radius: 16px;
@@ -1998,6 +2004,8 @@
             padding: 16px 0;
             display: flex;
             flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
             gap: 4px;
         }
 

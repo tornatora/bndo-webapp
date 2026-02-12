@@ -12,7 +12,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <nav className="dashboard-nav">
           <div className="nav-brand nav-brand-admin">
             <Link href="/" aria-label="Vai alla home BNDO">
-              <Image src="/Logo-BNDO.png" alt="BNDO" width={138} height={30} className="nav-brand-logo" priority />
+              <Image src="/Logo-BNDO-wordmark.svg" alt="BNDO" width={176} height={40} className="nav-brand-logo" priority />
             </Link>
             <span className="nav-brand-chip">Admin</span>
           </div>

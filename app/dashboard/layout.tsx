@@ -12,7 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <header className="dashboard-header">
         <nav className="dashboard-nav">
           <Link href="/" className="nav-brand" aria-label="Vai alla home BNDO">
-            <Image src="/Logo-BNDO.png" alt="BNDO" width={138} height={30} className="nav-brand-logo" priority />
+            <Image src="/Logo-BNDO-wordmark.svg" alt="BNDO" width={176} height={40} className="nav-brand-logo" priority />
           </Link>
           <div className="nav-actions">
             <div className="notification-bell" id="notificationBell">
