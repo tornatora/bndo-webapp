@@ -22,7 +22,9 @@ In Supabase:
 ## 3) Variabili ambiente su Netlify
 
 In Netlify -> `Site configuration -> Environment variables`, aggiungi:
-- `NEXT_PUBLIC_APP_URL` = `https://bndo.it`
+- `NEXT_PUBLIC_MARKETING_URL` = `https://bndo.it`
+- `NEXT_PUBLIC_APP_URL` = `https://app.bndo.it`
+- `NEXT_PUBLIC_ADMIN_URL` = `https://admin.bndo.it`
 - `NEXT_PUBLIC_SUPABASE_URL` = (Project URL Supabase)
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = (anon public key)
 - `SUPABASE_SERVICE_ROLE_KEY` = (service role key)
@@ -34,6 +36,11 @@ Se usi Stripe/Resend aggiungi anche:
 - `STRIPE_PRICE_ID`
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
+
+## 3-B) Stripe Success URL (post-pagamento)
+
+Se usi un Payment Link / Checkout di Stripe per l'anticipo dopo il quiz, imposta la `success_url` a:
+- `https://bndo.it/onboarding/after-payment?session_id={CHECKOUT_SESSION_ID}`
 
 ## 4) Domini custom
 
