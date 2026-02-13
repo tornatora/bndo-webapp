@@ -11,9 +11,9 @@ export const runtime = 'nodejs';
 
 const TextSchema = z.object({
   sessionId: z.string().trim().min(8),
-  pec: z.string().trim().max(160).optional().nullable(),
-  digitalSignature: z.enum(['yes', 'no']).optional().nullable(),
-  hasDid: z.enum(['yes', 'no']).optional().nullable(),
+  pec: z.string().trim().min(3).max(160),
+  digitalSignature: z.enum(['yes', 'no']),
+  quotesText: z.string().trim().max(2000).optional().nullable(),
   projectSummary: z.string().trim().max(2000).optional().nullable()
 });
 
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       sessionId: formData.get('sessionId'),
       pec: formData.get('pec'),
       digitalSignature: formData.get('digitalSignature'),
-      hasDid: formData.get('hasDid'),
+      quotesText: formData.get('quotesText'),
       projectSummary: formData.get('projectSummary')
     });
 
@@ -91,15 +91,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Carica documento identita e codice fiscale.' }, { status: 422 });
     }
 
-    if (parsed.data.hasDid === 'yes' && !(didDocument instanceof File)) {
-      return NextResponse.json({ error: 'Carica la certificazione DID (oppure seleziona "Non in possesso").' }, { status: 422 });
+    if (!(didDocument instanceof File)) {
+      return NextResponse.json({ error: 'Carica la certificazione DID.' }, { status: 422 });
     }
 
     const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'zip'];
     const filesToValidate = [
       idDocument,
       taxCodeDocument,
-      ...(didDocument instanceof File ? [didDocument] : []),
+      didDocument,
       ...quotes.filter((q) => q instanceof File)
     ] as File[];
 
@@ -150,6 +150,15 @@ export async function POST(request: Request) {
 
     const amountPaid = moneyFromStripe(session.amount_total, session.currency) ?? 0;
 
+    const quoteFiles = quotes.filter((q) => q instanceof File) as File[];
+    const quotesText = parsed.data.quotesText?.trim() ?? '';
+    if (!quoteFiles.length && !quotesText) {
+      return NextResponse.json(
+        { error: 'Carica almeno un preventivo oppure inserisci bene/servizio + prezzo + IVA.' },
+        { status: 422 }
+      );
+    }
+
     const provision = await provisionAccountFromCheckout({
       checkoutSessionId: session.id,
       customerEmail: normalizedEmail,
@@ -192,7 +201,7 @@ export async function POST(request: Request) {
     const nextFields: Record<string, unknown> = {
       ...currentFields,
       phone: quiz.phone ?? currentFields.phone ?? '',
-      pec: parsed.data.pec?.trim() || (currentFields.pec as string | undefined) || '',
+      pec: parsed.data.pec.trim(),
       project_summary: parsed.data.projectSummary?.trim() || (currentFields.project_summary as string | undefined) || '',
       firma_digitale:
         parsed.data.digitalSignature === 'yes'
@@ -200,12 +209,8 @@ export async function POST(request: Request) {
           : parsed.data.digitalSignature === 'no'
             ? 'no'
             : (currentFields.firma_digitale as string | undefined) || '',
-      certificazione_did:
-        parsed.data.hasDid === 'yes'
-          ? 'si'
-          : parsed.data.hasDid === 'no'
-            ? 'no'
-            : (currentFields.certificazione_did as string | undefined) || '',
+      certificazione_did: 'si',
+      preventivi_testo: quotesText || (currentFields.preventivi_testo as string | undefined) || '',
       onboarding_completed_at: new Date().toISOString()
     };
 
@@ -246,7 +251,7 @@ export async function POST(request: Request) {
     const baseDocs: Array<{ label: string; file: File }> = [
       { label: 'Documento di riconoscimento', file: idDocument },
       { label: 'Codice fiscale', file: taxCodeDocument },
-      ...(didDocument instanceof File ? [{ label: 'Certificazione DID', file: didDocument }] : [])
+      { label: 'Certificazione DID', file: didDocument }
     ];
 
     for (const doc of baseDocs) {
@@ -282,7 +287,6 @@ export async function POST(request: Request) {
       }
     }
 
-    const quoteFiles = quotes.filter((q) => q instanceof File) as File[];
     for (const file of quoteFiles) {
       const timestamp = Date.now();
       const safeOriginal = safeFileName(file.name);
@@ -339,10 +343,10 @@ export async function POST(request: Request) {
         '[AVVIO PRATICA]',
         `Pratica: ${practiceLabel}`,
         `Pagamento anticipo: ${amountPaid ? `${amountPaid} ${String(session.currency ?? '').toUpperCase()}` : 'OK'}`,
-        `Documenti base caricati: Documento di riconoscimento, Codice fiscale${didDocument instanceof File ? ', Certificazione DID' : ''}${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
-        parsed.data.pec ? `PEC: ${parsed.data.pec}` : null,
-        parsed.data.digitalSignature ? `Firma digitale: ${parsed.data.digitalSignature === 'yes' ? 'Si' : 'No'}` : null,
-        parsed.data.hasDid ? `Certificazione DID: ${parsed.data.hasDid === 'yes' ? 'Si' : 'No'}` : null,
+        `Documenti caricati: Documento di riconoscimento, Codice fiscale, Certificazione DID${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
+        `PEC: ${parsed.data.pec}`,
+        `Firma digitale: ${parsed.data.digitalSignature === 'yes' ? 'Si' : 'No'}`,
+        quotesText ? `Preventivi (testo):\n${quotesText}` : null,
         parsed.data.projectSummary ? `Sintesi progetto: ${parsed.data.projectSummary}` : null
       ].filter(Boolean) as string[];
 
