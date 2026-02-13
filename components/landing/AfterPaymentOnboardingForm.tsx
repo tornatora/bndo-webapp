@@ -52,10 +52,13 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
 
   const [pec, setPec] = useState('');
   const [digitalSignature, setDigitalSignature] = useState<'yes' | 'no'>('no');
+  const [hasDid, setHasDid] = useState<'yes' | 'no'>('no');
   const [projectSummary, setProjectSummary] = useState('');
 
   const [idDocument, setIdDocument] = useState<File | null>(null);
   const [taxCodeDocument, setTaxCodeDocument] = useState<File | null>(null);
+  const [didDocument, setDidDocument] = useState<File | null>(null);
+  const [quotes, setQuotes] = useState<File[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -99,8 +102,9 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
     if (submitting) return false;
     if (!session || session.payment_status !== 'paid') return false;
     if (!idDocument || !taxCodeDocument) return false;
+    if (hasDid === 'yes' && !didDocument) return false;
     return true;
-  }, [idDocument, session, submitting, taxCodeDocument]);
+  }, [didDocument, hasDid, idDocument, session, submitting, taxCodeDocument]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -109,14 +113,18 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
 
     try {
       if (!idDocument || !taxCodeDocument) throw new Error('Carica documento identita e codice fiscale.');
+      if (hasDid === 'yes' && !didDocument) throw new Error('Carica la certificazione DID (oppure seleziona "Non in possesso").');
 
       const fd = new FormData();
       fd.set('sessionId', sessionId);
       fd.set('pec', pec.trim());
       fd.set('digitalSignature', digitalSignature);
+      fd.set('hasDid', hasDid);
       fd.set('projectSummary', projectSummary.trim());
       fd.set('idDocument', idDocument);
       fd.set('taxCodeDocument', taxCodeDocument);
+      if (didDocument) fd.set('didDocument', didDocument);
+      for (const file of quotes) fd.append('quotes', file);
 
       const res = await fetch('/api/onboarding/after-payment/complete', {
         method: 'POST',
@@ -155,10 +163,14 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
 
   return (
     <form className="panel p-6 sm:p-8" onSubmit={onSubmit}>
-      <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand.steel">
+      <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-brand.steel">
         <ShieldCheck className="h-4 w-4 text-brand.mint" />
-        Carica documenti base
+        Attivazione pratica
       </div>
+      <h2 className="text-2xl font-extrabold text-brand.navy">Documenti iniziali</h2>
+      <p className="mt-2 text-sm text-slate-600">
+        Carica i documenti richiesti per iniziare. Se hai problemi con la documentazione, scrivici su WhatsApp.
+      </p>
 
       {loadingSession ? (
         <div className="flex items-center gap-3 text-sm text-slate-600">
@@ -208,6 +220,32 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
         </div>
       </div>
 
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="label" htmlFor="hasDid">
+            Certificazione DID
+          </label>
+          <select id="hasDid" className="input" value={hasDid} onChange={(e) => setHasDid(e.target.value as 'yes' | 'no')}>
+            <option value="no">Non in possesso</option>
+            <option value="yes">In possesso</option>
+          </select>
+        </div>
+        <div>
+          <label className="label" htmlFor="didDocument">
+            Allegato DID (se in possesso)
+          </label>
+          <input
+            id="didDocument"
+            className="input"
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*"
+            onChange={(e) => setDidDocument(e.target.files?.[0] ?? null)}
+            disabled={hasDid !== 'yes'}
+          />
+          {didDocument ? <div className="mt-2 text-xs text-slate-500">{didDocument.name}</div> : null}
+        </div>
+      </div>
+
       <div className="mt-4">
         <label className="label" htmlFor="projectSummary">
           Sintesi del progetto (facoltativa)
@@ -254,6 +292,40 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
         </div>
       </div>
 
+      <div className="mt-5">
+        <label className="label" htmlFor="quotes">
+          Preventivi di spesa (facoltativi, puoi allegarne piu di uno)
+        </label>
+        <input
+          id="quotes"
+          className="input"
+          type="file"
+          multiple
+          accept=".pdf,.png,.jpg,.jpeg,.zip,application/pdf,image/*,application/zip"
+          onChange={(e) => setQuotes(Array.from(e.target.files ?? []))}
+        />
+        {quotes.length ? (
+          <div className="mt-2 text-xs text-slate-500">
+            {quotes.length} file selezionati: {quotes.map((f) => f.name).join(', ')}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+        <div className="font-semibold text-brand.navy">Problemi con la documentazione?</div>
+        <div className="mt-1 text-slate-600">
+          Scrivici su WhatsApp e ti aiutiamo passo-passo.
+        </div>
+        <a
+          className="btn btn-muted mt-3 inline-flex"
+          href="https://wa.me/393477298671"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Scrivi su WhatsApp
+        </a>
+      </div>
+
       {submitError ? <p className="mt-4 text-sm font-semibold text-red-700">{submitError}</p> : null}
 
       <button className="btn btn-primary mt-6 w-full" type="submit" disabled={!canSubmit}>
@@ -273,4 +345,3 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
     </form>
   );
 }
-

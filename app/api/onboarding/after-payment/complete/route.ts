@@ -13,6 +13,7 @@ const TextSchema = z.object({
   sessionId: z.string().trim().min(8),
   pec: z.string().trim().max(160).optional().nullable(),
   digitalSignature: z.enum(['yes', 'no']).optional().nullable(),
+  hasDid: z.enum(['yes', 'no']).optional().nullable(),
   projectSummary: z.string().trim().max(2000).optional().nullable()
 });
 
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
       sessionId: formData.get('sessionId'),
       pec: formData.get('pec'),
       digitalSignature: formData.get('digitalSignature'),
+      hasDid: formData.get('hasDid'),
       projectSummary: formData.get('projectSummary')
     });
 
@@ -82,17 +84,30 @@ export async function POST(request: Request) {
 
     const idDocument = formData.get('idDocument');
     const taxCodeDocument = formData.get('taxCodeDocument');
+    const didDocument = formData.get('didDocument');
+    const quotes = formData.getAll('quotes');
 
     if (!(idDocument instanceof File) || !(taxCodeDocument instanceof File)) {
       return NextResponse.json({ error: 'Carica documento identita e codice fiscale.' }, { status: 422 });
     }
 
-    const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg'];
-    for (const file of [idDocument, taxCodeDocument]) {
+    if (parsed.data.hasDid === 'yes' && !(didDocument instanceof File)) {
+      return NextResponse.json({ error: 'Carica la certificazione DID (oppure seleziona "Non in possesso").' }, { status: 422 });
+    }
+
+    const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'zip'];
+    const filesToValidate = [
+      idDocument,
+      taxCodeDocument,
+      ...(didDocument instanceof File ? [didDocument] : []),
+      ...quotes.filter((q) => q instanceof File)
+    ] as File[];
+
+    for (const file of filesToValidate) {
       const extension = file.name.split('.').pop()?.toLowerCase();
       if (!extension || !allowedExtensions.includes(extension)) {
         return NextResponse.json(
-          { error: 'Formato file non consentito. Ammessi PDF, PNG, JPG.' },
+          { error: 'Formato file non consentito. Ammessi PDF, PNG, JPG, ZIP.' },
           { status: 422 }
         );
       }
@@ -185,6 +200,12 @@ export async function POST(request: Request) {
           : parsed.data.digitalSignature === 'no'
             ? 'no'
             : (currentFields.firma_digitale as string | undefined) || '',
+      certificazione_did:
+        parsed.data.hasDid === 'yes'
+          ? 'si'
+          : parsed.data.hasDid === 'no'
+            ? 'no'
+            : (currentFields.certificazione_did as string | undefined) || '',
       onboarding_completed_at: new Date().toISOString()
     };
 
@@ -224,7 +245,8 @@ export async function POST(request: Request) {
     // Upload base documents and create DB records.
     const baseDocs: Array<{ label: string; file: File }> = [
       { label: 'Documento di riconoscimento', file: idDocument },
-      { label: 'Codice fiscale', file: taxCodeDocument }
+      { label: 'Codice fiscale', file: taxCodeDocument },
+      ...(didDocument instanceof File ? [{ label: 'Certificazione DID', file: didDocument }] : [])
     ];
 
     for (const doc of baseDocs) {
@@ -260,6 +282,39 @@ export async function POST(request: Request) {
       }
     }
 
+    const quoteFiles = quotes.filter((q) => q instanceof File) as File[];
+    for (const file of quoteFiles) {
+      const timestamp = Date.now();
+      const safeOriginal = safeFileName(file.name);
+      const fileName = `Preventivo_spesa__${safeOriginal}`;
+      const storagePath = `${companyId}/${applicationId}/${timestamp}_${fileName}`;
+      const fileBuffer = Buffer.from(await file.arrayBuffer());
+
+      const { error: storageError } = await supabaseAdmin.storage
+        .from('application-documents')
+        .upload(storagePath, fileBuffer, {
+          contentType: file.type || 'application/octet-stream',
+          upsert: false
+        });
+
+      if (storageError) {
+        return NextResponse.json({ error: `Upload storage fallito: ${storageError.message}` }, { status: 500 });
+      }
+
+      const { error: docError } = await supabaseAdmin.from('application_documents').insert({
+        application_id: applicationId,
+        uploaded_by: userId,
+        file_name: fileName,
+        storage_path: storagePath,
+        file_size: file.size,
+        mime_type: file.type || 'application/octet-stream'
+      });
+
+      if (docError) {
+        return NextResponse.json({ error: `Inserimento documento fallito: ${docError.message}` }, { status: 500 });
+      }
+    }
+
     // Create chat thread and notify admin via message.
     const { data: ensuredThread } = await supabaseAdmin
       .from('consultant_threads')
@@ -284,9 +339,10 @@ export async function POST(request: Request) {
         '[AVVIO PRATICA]',
         `Pratica: ${practiceLabel}`,
         `Pagamento anticipo: ${amountPaid ? `${amountPaid} ${String(session.currency ?? '').toUpperCase()}` : 'OK'}`,
-        'Documenti base caricati: Documento di riconoscimento, Codice fiscale',
+        `Documenti base caricati: Documento di riconoscimento, Codice fiscale${didDocument instanceof File ? ', Certificazione DID' : ''}${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
         parsed.data.pec ? `PEC: ${parsed.data.pec}` : null,
         parsed.data.digitalSignature ? `Firma digitale: ${parsed.data.digitalSignature === 'yes' ? 'Si' : 'No'}` : null,
+        parsed.data.hasDid ? `Certificazione DID: ${parsed.data.hasDid === 'yes' ? 'Si' : 'No'}` : null,
         parsed.data.projectSummary ? `Sintesi progetto: ${parsed.data.projectSummary}` : null
       ].filter(Boolean) as string[];
 

@@ -12,7 +12,7 @@ export default function AfterPaymentPage({
   const sessionId = searchParams.session_id;
 
   return (
-    <main className="mx-auto min-h-screen max-w-3xl px-4 py-10">
+    <main className="mx-auto min-h-screen max-w-4xl px-4 py-10">
       <section className="mb-6">
         <div className="mb-3">
           <Link href={MARKETING_URL} className="text-sm font-semibold text-brand.steel">
@@ -21,7 +21,8 @@ export default function AfterPaymentPage({
         </div>
         <h1 className="text-3xl font-extrabold text-brand.navy">Completa la tua pratica</h1>
         <p className="mt-2 text-slate-600">
-          Carica i documenti base richiesti. Al termine riceverai le credenziali per accedere alla dashboard cliente.
+          Ultimo step: carica i documenti iniziali. Al termine ti inviamo le credenziali per entrare in dashboard e
+          seguire lo status della pratica.
         </p>
       </section>
 
@@ -35,4 +36,3 @@ export default function AfterPaymentPage({
     </main>
   );
 }
-
