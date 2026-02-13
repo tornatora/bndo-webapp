@@ -309,7 +309,8 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
         ) : null}
         <div className="mt-3">
           <label className="label" htmlFor="quotesText">
-            Se non hai ancora i preventivi ufficiali, inserisci qui: <span className="text-slate-500">bene/servizio + prezzo + IVA</span>
+            Se non hai ancora i preventivi ufficiali, inserisci qui <span className="text-slate-500">(uno per riga)</span>:{' '}
+            <span className="text-slate-500">bene/servizio + prezzo + IVA</span>
           </label>
           <textarea
             id="quotesText"
@@ -319,6 +320,9 @@ export function AfterPaymentOnboardingForm({ sessionId }: { sessionId: string })
             placeholder={"Esempio:\\n- PC portatile: 1.200 + IVA\\n- Sito web: 900 + IVA\\n- Arredi ufficio: 2.500 + IVA"}
             maxLength={2000}
           />
+          <div className="mt-2 text-xs text-slate-500">
+            Puoi inserire tutte le spese che vuoi. Basta una riga per ogni spesa.
+          </div>
         </div>
       </div>
 
