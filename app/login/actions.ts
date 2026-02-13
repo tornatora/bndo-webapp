@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { hasOpsAccess } from '@/lib/roles';
-import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 
 export async function loginAction(formData: FormData) {
@@ -13,10 +13,14 @@ export async function loginAction(formData: FormData) {
     redirect('/login?error=Credenziali%20obbligatorie');
   }
 
-  const supabaseAdmin = getSupabaseAdmin();
+  const supabaseAdmin = hasRealServiceRoleKey() ? getSupabaseAdmin() : null;
   let email = identifier;
 
   if (!identifier.includes('@')) {
+    if (!supabaseAdmin) {
+      redirect('/login?error=Inserisci%20email%20(non%20username)');
+    }
+
     const { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('email')
@@ -42,11 +46,9 @@ export async function loginAction(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (user) {
-    const { data: signedProfile } = await supabaseAdmin
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data: signedProfile } = supabaseAdmin
+      ? await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      : await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
     if (signedProfile?.role && hasOpsAccess(signedProfile.role)) {
       redirect('/admin');

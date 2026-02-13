@@ -1,104 +1,115 @@
-import { AdminInbox } from '@/components/admin/AdminInbox';
+import { ClientsList, type ClientListItem } from '@/components/admin/ClientsList';
 import { requireOpsProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
-
-type ThreadSummary = {
-  threadId: string;
-  companyId: string;
-  companyName: string;
-  lastMessage: string;
-  lastMessageAt: string | null;
-  unreadCount: number;
-};
+import { getMockClients } from '@/lib/mock/data';
 
 export default async function AdminPage() {
-  const { profile } = await requireOpsProfile();
-  const supabase = createClient();
+  const isMock = process.env.MOCK_BACKEND === 'true';
+  if (!isMock) {
+    await requireOpsProfile();
+  }
 
-  const { data: threads } = await supabase
-    .from('consultant_threads')
-    .select('id, company_id, created_at')
-    .order('created_at', { ascending: false })
-    .limit(250);
+  if (isMock) {
+    const clients: ClientListItem[] = getMockClients().map((client) => ({
+      companyId: client.companyId,
+      companyName: client.companyName,
+      vatNumber: client.vatNumber,
+      industry: client.industry,
+      createdAt: client.createdAt,
+      clientEmail: client.clientEmail,
+      clientFullName: client.clientFullName
+    }));
 
-  if (!threads || threads.length === 0) {
     return (
-      <section className="panel p-6">
-        <h1 className="text-2xl font-extrabold text-brand.navy">Pannello Admin</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Nessuna conversazione attiva. I thread appariranno qui appena i clienti iniziano a usare la dashboard.
-        </p>
+      <section className="section-card">
+        <div className="section-title">
+          <span>👥</span>
+          <span>Clienti (Mock)</span>
+        </div>
+        <ClientsList initialClients={clients} />
       </section>
     );
   }
 
-  const companyIds = [...new Set(threads.map((thread) => thread.company_id))];
+  const supabase = createClient();
 
-  const [{ data: companies }, { data: participants }] = await Promise.all([
-    supabase.from('companies').select('id, name').in('id', companyIds),
-    supabase
-      .from('consultant_thread_participants')
-      .select('thread_id, last_read_at')
-      .eq('profile_id', profile.id)
-  ]);
+  const { data: companies } = await supabase
+    .from('companies')
+    .select('id, name, vat_number, industry, created_at')
+    .order('created_at', { ascending: false })
+    .limit(250);
 
-  const companyById = new Map((companies ?? []).map((company) => [company.id, company.name]));
-  const lastReadByThread = new Map((participants ?? []).map((participant) => [participant.thread_id, participant.last_read_at]));
+  const companyIds = (companies ?? []).map((company) => company.id);
 
-  const threadSummaries = await Promise.all(
-    threads.map(async (thread): Promise<ThreadSummary> => {
-      const lastReadAt = lastReadByThread.get(thread.id) ?? new Date(0).toISOString();
+  const { data: clientAdmins } = companyIds.length
+    ? await supabase
+        .from('profiles')
+        .select('company_id, email, full_name, created_at')
+        .in('company_id', companyIds)
+        .eq('role', 'client_admin')
+        .order('created_at', { ascending: true })
+        .limit(1000)
+    : { data: [] as Array<{ company_id: string | null; email: string; full_name: string; created_at: string }> };
 
-      const [{ data: lastMessageRow }, { count: unreadCount }] = await Promise.all([
-        supabase
-          .from('consultant_messages')
-          .select('id, body, created_at')
-          .eq('thread_id', thread.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from('consultant_messages')
-          .select('id', { head: true, count: 'exact' })
-          .eq('thread_id', thread.id)
-          .gt('created_at', lastReadAt)
-          .neq('sender_profile_id', profile.id)
-      ]);
+  const clientAdminByCompanyId = new Map<
+    string,
+    {
+      email: string;
+      full_name: string;
+    }
+  >();
 
-      return {
-        threadId: thread.id,
-        companyId: thread.company_id,
-        companyName: companyById.get(thread.company_id) ?? 'Azienda senza nome',
-        lastMessage: lastMessageRow?.body ?? '',
-        lastMessageAt: lastMessageRow?.created_at ?? thread.created_at,
-        unreadCount: unreadCount ?? 0
-      };
-    })
-  );
+  for (const admin of clientAdmins ?? []) {
+    if (!admin.company_id) continue;
+    if (!clientAdminByCompanyId.has(admin.company_id)) {
+      clientAdminByCompanyId.set(admin.company_id, { email: admin.email, full_name: admin.full_name });
+    }
+  }
 
-  threadSummaries.sort((a, b) => {
-    const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
-    const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
-    return bTime - aTime;
+  const clients: ClientListItem[] = (companies ?? []).map((company) => {
+    const clientAdmin = clientAdminByCompanyId.get(company.id);
+    return {
+      companyId: company.id,
+      companyName: company.name,
+      vatNumber: company.vat_number,
+      industry: company.industry,
+      createdAt: company.created_at,
+      clientEmail: clientAdmin?.email ?? null,
+      clientFullName: clientAdmin?.full_name ?? null
+    };
   });
 
-  const initialThreadId = threadSummaries[0]?.threadId ?? null;
+  if (clients.length === 0) {
+    return (
+      <section className="section-card">
+        <div className="section-title">
+          <span>👥</span>
+          <span>Clienti</span>
+        </div>
 
-  const { data: initialMessages } = initialThreadId
-    ? await supabase
-        .from('consultant_messages')
-        .select('id, thread_id, sender_profile_id, body, created_at')
-        .eq('thread_id', initialThreadId)
-        .order('created_at', { ascending: true })
-        .limit(200)
-    : { data: [] };
+        <div className="empty-state">
+          <div className="empty-icon">🗂️</div>
+          <p className="empty-text">Nessun cliente presente.</p>
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#64748B', lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 800, color: '#0B1136', marginBottom: 8 }}>Dati di prova (locale)</div>
+          <div>1) Avvia l’app con `START-QUI.command`</div>
+          <div>2) Crea il cliente demo con `Crea-Cliente-Demo.command`</div>
+          <div>3) Aggiungi pratiche/documenti con `Crea-Pratiche-Documenti-Demo.command`</div>
+          <div style={{ marginTop: 8 }}>Se qualcosa non va, controlla `GET /api/health`.</div>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <AdminInbox
-      viewerProfileId={profile.id}
-      initialThreads={threadSummaries}
-      initialThreadId={initialThreadId}
-      initialMessages={initialMessages ?? []}
-    />
+    <section className="section-card">
+      <div className="section-title">
+        <span>👥</span>
+        <span>Clienti</span>
+      </div>
+      <ClientsList initialClients={clients} />
+    </section>
   );
 }

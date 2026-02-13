@@ -5,7 +5,8 @@ import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { MARKETING_URL } from '@/lib/site-urls';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { profile } = await requireOpsProfile();
+  const isMock = process.env.MOCK_BACKEND === 'true';
+  const profile = isMock ? { full_name: 'Admin (Mock)' } : (await requireOpsProfile()).profile;
 
   return (
     <div className="dashboard active">
@@ -34,7 +35,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span className="nav-user" id="uname">
               {profile.full_name}
             </span>
-            <SignOutButton className="btn-logout" compact />
+            {isMock ? null : <SignOutButton className="btn-logout" compact />}
           </div>
         </nav>
       </header>

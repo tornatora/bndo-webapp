@@ -3,10 +3,41 @@ import Image from 'next/image';
 import { requireUserProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { DashboardTabs } from '@/components/dashboard/DashboardTabs';
+import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import { MARKETING_URL } from '@/lib/site-urls';
+import { createClient } from '@/lib/supabase/server';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUserProfile();
+  const supabase = createClient();
+
+  let threadId: string | null = null;
+  if (profile.company_id) {
+    const { data: existingThread } = await supabase
+      .from('consultant_threads')
+      .select('id')
+      .eq('company_id', profile.company_id)
+      .maybeSingle();
+    threadId = existingThread?.id ?? null;
+
+    if (!threadId) {
+      const { data: createdThread } = await supabase
+        .from('consultant_threads')
+        .insert({ company_id: profile.company_id })
+        .select('id')
+        .single();
+      threadId = createdThread?.id ?? null;
+    }
+  }
+
+  const { data: participant } = threadId
+    ? await supabase
+        .from('consultant_thread_participants')
+        .select('last_read_at')
+        .eq('thread_id', threadId)
+        .eq('profile_id', profile.id)
+        .maybeSingle()
+    : { data: null };
 
   return (
     <div className="dashboard active">
@@ -23,12 +54,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             />
           </Link>
           <div className="nav-actions">
-            <div className="notification-bell" id="notificationBell">
-              <span>🔔</span>
-              <span className="notification-count" id="notificationCount" style={{ display: 'none' }}>
-                0
-              </span>
-            </div>
+            <NotificationsBell threadId={threadId} viewerProfileId={profile.id} initialLastReadAt={participant?.last_read_at ?? null} />
             <span className="nav-user" id="userName">
               @{profile.username}
             </span>

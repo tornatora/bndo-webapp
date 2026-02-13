@@ -35,7 +35,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   const [sending, setSending] = useState(false);
   const [lastReadAt, setLastReadAt] = useState<string>(initialLastReadAt ?? new Date(0).toISOString());
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMarkingRead, setIsMarkingRead] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const markReadTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,48 +88,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
       }
     }
   }
-
-  useEffect(() => {
-    const bell = document.getElementById('notificationBell');
-    if (!bell) return;
-
-    const onToggle = () => setIsNotificationsOpen((previous) => !previous);
-    bell.addEventListener('click', onToggle);
-
-    return () => {
-      bell.removeEventListener('click', onToggle);
-    };
-  }, []);
-
-  useEffect(() => {
-    const countElement = document.getElementById('notificationCount');
-    if (!countElement) return;
-
-    if (unreadCount > 0) {
-      countElement.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
-      countElement.style.display = 'flex';
-      return;
-    }
-
-    countElement.textContent = '0';
-    countElement.style.display = 'none';
-  }, [unreadCount]);
-
-  useEffect(() => {
-    const onDocumentClick = (event: MouseEvent) => {
-      const bell = document.getElementById('notificationBell');
-      const panel = document.getElementById('notificationsPanel');
-      const target = event.target as Node | null;
-      if (!target || !bell || !panel) return;
-      if (bell.contains(target) || panel.contains(target)) return;
-      setIsNotificationsOpen(false);
-    };
-
-    document.addEventListener('click', onDocumentClick);
-    return () => {
-      document.removeEventListener('click', onDocumentClick);
-    };
-  }, []);
 
   function scrollToBottom() {
     if (!scrollRef.current) return;
@@ -235,10 +192,10 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   }, [messages.length]);
 
   useEffect(() => {
-    if (!isNotificationsOpen) return;
+    // In the chat view we mark the thread as read when the user is actively here.
     void markThreadAsRead();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNotificationsOpen]);
+  }, []);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -312,38 +269,6 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
 
   return (
     <div>
-      <div className={`notifications-panel ${isNotificationsOpen ? 'active' : ''}`} id="notificationsPanel">
-        <div className="notifications-header">
-          <div className="notifications-title">🔔 Notifiche</div>
-        </div>
-        <div className="notifications-list" id="notificationsList">
-          {unreadCount === 0 ? (
-            <div className="notification-item">
-              <div className="notification-title">✅ Tutto letto</div>
-              <div className="notification-message">Nessun nuovo messaggio.</div>
-              <div className="notification-time">Adesso</div>
-            </div>
-          ) : (
-            unreadMessages
-              .slice(-8)
-              .reverse()
-              .map((notification) => (
-                <button
-                  key={notification.id}
-                  type="button"
-                  className="notification-item unread"
-                  style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
-                  onClick={() => void markThreadAsRead()}
-                >
-                  <div className="notification-title">💬 Nuovo messaggio consulente</div>
-                  <div className="notification-message">{notification.body}</div>
-                  <div className="notification-time">{new Date(notification.created_at).toLocaleString('it-IT')}</div>
-                </button>
-              ))
-          )}
-        </div>
-      </div>
-
       <div className="chat-card">
         <div className="chat-toolbar">
           <div className="chat-toolbar-title">Chat Consulente</div>

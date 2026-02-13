@@ -20,6 +20,43 @@ type ThreadSummary = {
   unreadCount: number;
 };
 
+type ClientSummary = {
+  company: {
+    id: string;
+    name: string;
+    vat_number: string | null;
+    industry: string | null;
+    annual_spend_target: number | null;
+    created_at: string;
+  } | null;
+  clientProfile: {
+    id: string;
+    email: string;
+    full_name: string;
+    username: string;
+    role: string;
+    created_at: string;
+  } | null;
+  applications: Array<{
+    id: string;
+    tender_id: string;
+    status: string;
+    supplier_registry_status: string;
+    notes: string | null;
+    updated_at: string;
+  }>;
+  documents: Array<{
+    id: string;
+    application_id: string;
+    file_name: string;
+    storage_path: string;
+    file_size: number;
+    mime_type: string;
+    created_at: string;
+    downloadUrl: string | null;
+  }>;
+};
+
 type AdminInboxProps = {
   viewerProfileId: string;
   initialThreads: ThreadSummary[];
@@ -37,10 +74,14 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [value, setValue] = useState('');
+  const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [clientSummary, setClientSummary] = useState<ClientSummary | null>(null);
+  const [loadingClient, setLoadingClient] = useState(false);
+  const [requestDocValue, setRequestDocValue] = useState('Visura camerale');
   const selectedThreadRef = useRef<string | null>(initialThreadId);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,6 +90,11 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     () => threads.find((thread) => thread.threadId === selectedThreadId) ?? null,
     [threads, selectedThreadId]
   );
+  const filteredThreads = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return threads;
+    return threads.filter((thread) => thread.companyName.toLowerCase().includes(q) || thread.lastMessage.toLowerCase().includes(q));
+  }, [threads, search]);
   const unreadTotal = useMemo(() => threads.reduce((sum, thread) => sum + thread.unreadCount, 0), [threads]);
 
   function scrollToBottom() {
@@ -142,6 +188,39 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     void loadMessages(selectedThreadId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    const companyId = selectedThread?.companyId ?? null;
+    if (!companyId) {
+      setClientSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingClient(true);
+
+    fetch(`/api/admin/client-summary?companyId=${companyId}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Impossibile caricare dettagli cliente.');
+        return (await res.json()) as ClientSummary;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setClientSummary(payload);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClientSummary(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingClient(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedThread?.companyId]);
 
   useEffect(() => {
     if (!selectedThreadId) return;
@@ -333,6 +412,12 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
     }
   }
 
+  async function requestDocument() {
+    if (!selectedThreadId) return;
+    const body = `Per favore carica questo documento: ${requestDocValue}. Se hai dubbi scrivimi qui e ti guido passo passo.`;
+    setValue(body);
+  }
+
   if (threads.length === 0) {
     return (
       <section className="welcome-section">
@@ -394,8 +479,17 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
             <span>Conversazioni</span>
           </div>
 
+          <div style={{ marginBottom: 12 }}>
+            <input
+              className="chat-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cerca cliente..."
+            />
+          </div>
+
           <div style={{ display: 'grid', gap: '14px', maxHeight: '68vh', overflowY: 'auto' }}>
-            {threads.map((thread) => {
+            {filteredThreads.map((thread) => {
               const isActive = thread.threadId === selectedThreadId;
               return (
                 <button
@@ -447,6 +541,79 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
               <span>🔄</span>
               <span>Aggiorna</span>
             </button>
+          </div>
+
+          <div style={{ display: 'grid', gap: 14, marginBottom: 14 }}>
+            <div className="stat-item" style={{ padding: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <div>
+                  <div className="stat-label">Cliente</div>
+                  <div className="stat-value" style={{ fontSize: 18 }}>
+                    {loadingClient ? 'Caricamento…' : clientSummary?.company?.name ?? selectedThread?.companyName ?? '—'}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#64748B', fontWeight: 600 }}>
+                    {clientSummary?.clientProfile?.email ? clientSummary.clientProfile.email : ''}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#64748B', fontWeight: 600 }}>
+                    {clientSummary?.clientProfile?.full_name ? clientSummary.clientProfile.full_name : ''}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select
+                    className="chat-input"
+                    value={requestDocValue}
+                    onChange={(e) => setRequestDocValue(e.target.value)}
+                    style={{ maxWidth: 260 }}
+                  >
+                    <option>Visura camerale</option>
+                    <option>Documento identita</option>
+                    <option>Codice fiscale</option>
+                    <option>Bilancio / Unico</option>
+                    <option>Estratto conto</option>
+                    <option>Altro (scrivi in chat)</option>
+                  </select>
+                  <button type="button" className="btn-action primary" onClick={requestDocument} disabled={!selectedThreadId}>
+                    <span>📎</span>
+                    <span>Richiedi documento</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 14, marginTop: 14, flexWrap: 'wrap' }}>
+                <div className="meta-tag">Pratiche: {clientSummary?.applications?.length ?? 0}</div>
+                <div className="meta-tag">Documenti: {clientSummary?.documents?.length ?? 0}</div>
+                {clientSummary?.company?.vat_number ? <div className="meta-tag">P.IVA: {clientSummary.company.vat_number}</div> : null}
+              </div>
+
+              {clientSummary?.documents?.length ? (
+                <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+                  {clientSummary.documents.slice(0, 6).map((doc) => (
+                    <div key={doc.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: '#0B1136', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {doc.file_name}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
+                          {new Date(doc.created_at).toLocaleString('it-IT')}
+                        </div>
+                      </div>
+                      {doc.downloadUrl ? (
+                        <a className="btn-doc" href={doc.downloadUrl} target="_blank" rel="noreferrer">
+                          <span>⬇</span>
+                          <span>Download</span>
+                        </a>
+                      ) : (
+                        <span className="btn-doc" style={{ opacity: 0.6, cursor: 'not-allowed' }}>
+                          <span>⚠</span>
+                          <span>Non disponibile</span>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="chat-card">

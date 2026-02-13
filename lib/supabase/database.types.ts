@@ -75,6 +75,50 @@ export type Database = {
         };
         Relationships: [];
       };
+      company_crm: {
+        Row: {
+          company_id: string;
+          internal_status: string | null;
+          priority: 'bassa' | 'media' | 'alta' | null;
+          tags: string[];
+          admin_notes: string;
+          admin_fields: Json;
+          next_action_at: string | null;
+          updated_at: string;
+          created_at: string;
+        };
+        Insert: {
+          company_id: string;
+          internal_status?: string | null;
+          priority?: 'bassa' | 'media' | 'alta' | null;
+          tags?: string[];
+          admin_notes?: string;
+          admin_fields?: Json;
+          next_action_at?: string | null;
+          updated_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          company_id?: string;
+          internal_status?: string | null;
+          priority?: 'bassa' | 'media' | 'alta' | null;
+          tags?: string[];
+          admin_notes?: string;
+          admin_fields?: Json;
+          next_action_at?: string | null;
+          updated_at?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'company_crm_company_id_fkey';
+            columns: ['company_id'];
+            isOneToOne: true;
+            referencedRelation: 'companies';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
       companies: {
         Row: {
           id: string;

@@ -2,15 +2,11 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/bandi';
 
 const payloadSchema = z.object({
   practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord'])
 });
-
-const practiceLabelMap: Record<'resto_sud_2_0' | 'autoimpiego_centro_nord', string> = {
-  resto_sud_2_0: 'Resto al Sud 2.0',
-  autoimpiego_centro_nord: 'Autoimpiego Centro Nord'
-};
 
 const AUTO_REPLY_BODY = 'Un nostro consulente ti rispondera il prima possibile.';
 
@@ -56,6 +52,7 @@ async function ensureOpsAutoReply(threadId: string) {
 export async function POST(request: Request) {
   try {
     const payload = payloadSchema.parse(await request.json());
+    const practiceType = payload.practiceType as PracticeType;
     const supabase = createClient();
 
     const {
@@ -113,7 +110,7 @@ export async function POST(request: Request) {
 
     const { data: company } = await admin.from('companies').select('name').eq('id', typedProfile.company_id).maybeSingle();
 
-    const practiceLabel = practiceLabelMap[payload.practiceType];
+    const practiceLabel = practiceTitle(practiceType);
     const challenge = `Richiesta nuova pratica dashboard: ${practiceLabel} | Quiz: ${latestQuiz.id}`;
 
     const { error: leadError } = await admin.from('leads').insert({
@@ -127,6 +124,9 @@ export async function POST(request: Request) {
     if (leadError) {
       return NextResponse.json({ error: 'Impossibile salvare la richiesta pratica.' }, { status: 500 });
     }
+
+    // Create or ensure the application exists so the admin sees it in "Pratiche richieste".
+    await ensureBandoApplication(admin, typedProfile.company_id, practiceType);
 
     const { data: existingThread } = await admin
       .from('consultant_threads')

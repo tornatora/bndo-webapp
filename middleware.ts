@@ -9,6 +9,10 @@ function stripPort(host: string) {
 }
 
 export async function middleware(request: NextRequest) {
+  if (process.env.MOCK_BACKEND === 'true') {
+    return NextResponse.next();
+  }
+
   const path = request.nextUrl.pathname;
   const host = stripPort(request.headers.get('host') ?? '');
 

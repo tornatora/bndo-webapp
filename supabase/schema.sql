@@ -47,6 +47,22 @@ create table if not exists public.quiz_submissions (
   created_at timestamptz not null default now()
 );
 
+-- -----------------------------------------------------
+-- Admin CRM fields (internal-only)
+-- -----------------------------------------------------
+
+create table if not exists public.company_crm (
+  company_id uuid primary key references public.companies(id) on delete cascade,
+  internal_status text,
+  priority text check (priority in ('bassa', 'media', 'alta')),
+  tags text[] not null default '{}'::text[],
+  admin_notes text not null default '',
+  admin_fields jsonb not null default '{}'::jsonb,
+  next_action_at timestamptz,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.service_orders (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id) on delete cascade,
