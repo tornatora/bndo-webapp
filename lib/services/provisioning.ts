@@ -16,12 +16,26 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
 
   const existingOrder = await supabaseAdmin
     .from('service_orders')
-    .select('id')
+    .select('id, company_id')
     .eq('checkout_session_id', payload.checkoutSessionId)
     .maybeSingle();
 
   if (existingOrder.data) {
-    return { alreadyProvisioned: true };
+    const { data: existingCredentials } = await supabaseAdmin
+      .from('onboarding_credentials')
+      .select('user_id, username, temp_password, emailed_at, email_delivery_error')
+      .eq('checkout_session_id', payload.checkoutSessionId)
+      .maybeSingle();
+
+    return {
+      alreadyProvisioned: true,
+      companyId: existingOrder.data.company_id,
+      userId: existingCredentials?.user_id ?? null,
+      username: existingCredentials?.username ?? null,
+      password: existingCredentials?.temp_password ?? null,
+      emailSent: Boolean(existingCredentials?.emailed_at),
+      emailError: existingCredentials?.email_delivery_error ?? null
+    };
   }
 
   const { data: company, error: companyError } = await supabaseAdmin
@@ -82,25 +96,6 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
 
   if (orderError || !order) {
     throw new Error(`Failed to create order: ${orderError?.message ?? 'unknown error'}`);
-  }
-
-  const { data: seedTenders } = await supabaseAdmin
-    .from('tenders')
-    .select('id')
-    .order('created_at', { ascending: false })
-    .limit(8);
-
-  if (seedTenders?.length) {
-    const matches = seedTenders.slice(0, 6).map((tender) => ({
-      company_id: company.id,
-      tender_id: tender.id,
-      relevance_score: 0.72 + Math.random() * 0.26,
-      status: 'new' as const
-    }));
-
-    await supabaseAdmin.from('tender_matches').upsert(matches, {
-      onConflict: 'company_id,tender_id'
-    });
   }
 
   await supabaseAdmin.from('consultant_threads').upsert(

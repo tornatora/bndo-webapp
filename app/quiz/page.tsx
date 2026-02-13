@@ -642,11 +642,13 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => window.open('https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00', '_blank')}
+                onClick={() => {
+                  window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.open('https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00', '_blank');
+                    window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
                   }
                 }}
               >

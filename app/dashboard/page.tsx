@@ -5,18 +5,23 @@ import { hasOpsAccess } from '@/lib/roles';
 import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import {
+  PROGRESS_STEPS,
+  computeDerivedProgressKey,
+  computeProgressBar,
+  extractProgressFromNotes,
+  progressBadge
+} from '@/lib/admin/practice-progress';
 
-type TenderMatchResult = {
+type ApplicationRow = {
   id: string;
-  relevance_score: number;
-  status: 'new' | 'in_review' | 'participating' | 'submitted';
-  tender: {
-    id: string;
-    authority_name: string;
-    title: string;
-    deadline_at: string;
-    procurement_value: number | null;
-  };
+  tender_id: string;
+  status: 'draft' | 'submitted' | 'reviewed';
+  supplier_registry_status: 'pending' | 'in_progress' | 'completed';
+  notes: string | null;
+  updated_at: string;
+  tender: { title: string; authority_name: string } | null;
 };
 
 export default async function DashboardPage() {
@@ -37,21 +42,45 @@ export default async function DashboardPage() {
 
   const supabase = createClient();
 
-  const [{ data: matches }, { data: companyApplications }, { data: thread }] = await Promise.all([
+  const [{ data: applications }, { data: thread }] = await Promise.all([
     supabase
-      .from('tender_matches')
-      .select('id, relevance_score, status, tender_id')
+      .from('tender_applications')
+      .select('id, tender_id, status, supplier_registry_status, notes, updated_at')
       .eq('company_id', profile.company_id)
-      .order('relevance_score', { ascending: false })
-      .limit(12),
-    supabase.from('tender_applications').select('id').eq('company_id', profile.company_id).limit(500),
+      .order('updated_at', { ascending: false })
+      .limit(50),
     supabase.from('consultant_threads').select('id').eq('company_id', profile.company_id).maybeSingle()
   ]);
 
-  const applicationIds = (companyApplications ?? []).map((application) => application.id);
-  const { count: docsCount } = applicationIds.length
-    ? await supabase.from('application_documents').select('id', { count: 'exact', head: true }).in('application_id', applicationIds)
-    : { count: 0 };
+  const tenderIds = [...new Set((applications ?? []).map((app) => app.tender_id).filter(Boolean))];
+  const { data: tenders } = tenderIds.length
+    ? await supabase.from('tenders').select('id, title, authority_name').in('id', tenderIds)
+    : { data: [] as Array<{ id: string; title: string; authority_name: string }> };
+
+  const tenderMap = new Map((tenders ?? []).map((t) => [t.id, t]));
+  const typedApplications: ApplicationRow[] =
+    (applications ?? []).map((app) => ({
+      id: app.id,
+      tender_id: app.tender_id,
+      status: app.status,
+      supplier_registry_status: app.supplier_registry_status,
+      notes: (app as unknown as { notes?: string | null }).notes ?? null,
+      updated_at: app.updated_at,
+      tender: tenderMap.get(app.tender_id) ?? null
+    })) ?? [];
+
+  const applicationIds = typedApplications.map((application) => application.id);
+
+  const { data: docs } = applicationIds.length
+    ? await supabase
+        .from('application_documents')
+        .select('id, application_id, file_name, created_at')
+        .in('application_id', applicationIds)
+        .order('created_at', { ascending: false })
+        .limit(500)
+    : { data: [] as Array<{ id: string; application_id: string; file_name: string; created_at: string }> };
+
+  const docsCount = docs?.length ?? 0;
 
   const { data: messages } = thread?.id
     ? await supabase
@@ -70,29 +99,6 @@ export default async function DashboardPage() {
         .eq('profile_id', profile.id)
         .maybeSingle()
     : { data: null };
-
-  const tenderIds = [...new Set((matches ?? []).map((match) => match.tender_id))];
-  const { data: tenders } = tenderIds.length
-    ? await supabase
-        .from('tenders')
-        .select('id, authority_name, title, deadline_at, procurement_value')
-        .in('id', tenderIds)
-    : { data: [] };
-
-  const tenderMap = new Map((tenders ?? []).map((tender) => [tender.id, tender]));
-  const typedMatches: TenderMatchResult[] = (matches ?? []).flatMap((match) => {
-    const tender = tenderMap.get(match.tender_id);
-    if (!tender) return [];
-
-    return [
-      {
-        id: match.id,
-        relevance_score: match.relevance_score,
-        status: match.status,
-        tender
-      }
-    ];
-  });
 
   const unreadCount = (messages ?? []).filter(
     (message) =>
@@ -120,11 +126,11 @@ export default async function DashboardPage() {
 
         <div className="stats-grid">
           <div className="stat-item">
-            <div className="stat-value">{typedMatches.length}</div>
+            <div className="stat-value">{typedApplications.length}</div>
             <div className="stat-label">Pratiche Attive</div>
           </div>
           <div className="stat-item">
-            <div className="stat-value">{docsCount ?? 0}</div>
+            <div className="stat-value">{docsCount}</div>
             <div className="stat-label">Documenti Caricati</div>
           </div>
           <div className="stat-item">
@@ -134,52 +140,78 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <PracticeRequestPanel
-        quizCompleted={quizCompleted}
-        quizEligible={quizEligible}
-        quizType={latestQuiz?.bando_type ?? null}
-        quizCompletedAt={latestQuiz?.created_at ?? null}
-      />
+      {typedApplications.length === 0 ? (
+        <PracticeRequestPanel
+          quizCompleted={quizCompleted}
+          quizEligible={quizEligible}
+          quizType={latestQuiz?.bando_type ?? null}
+          quizCompletedAt={latestQuiz?.created_at ?? null}
+        />
+      ) : null}
 
-      {typedMatches.length === 0 ? (
+      {typedApplications.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">📋</div>
           <p className="empty-text">Nessuna pratica disponibile al momento.</p>
+          <div className="action-buttons" style={{ justifyContent: 'center', marginTop: 20 }}>
+            <Link href="/dashboard/messages" className="btn-action secondary">
+              <span>💬</span>
+              <span>Apri chat</span>
+            </Link>
+          </div>
         </div>
       ) : (
-        typedMatches.map((match) => {
-          const statusClass = match.status === 'submitted' ? 'badge badge-success' : 'badge badge-info';
-          const statusLabel = match.status === 'submitted' ? 'Completata' : 'In corso';
-          const relevance = Math.round(match.relevance_score * 100);
+        typedApplications.map((application) => {
+          const title = application.tender?.title ?? 'Pratica';
+          const authority = application.tender?.authority_name ?? 'Invitalia';
+
+          const docsInApp = (docs ?? []).filter((d) => d.application_id === application.id);
+          const checklist = computeDocumentChecklist(
+            application.id,
+            title,
+            docsInApp.map((d) => ({ application_id: application.id, file_name: d.file_name }))
+          );
+          const missingCount = checklist.filter((c) => !c.uploaded).length;
+          const uploadedCount = docsInApp.length;
+
+          const step =
+            extractProgressFromNotes(application.notes ?? null) ??
+            computeDerivedProgressKey(application.status, missingCount);
+          const bar = computeProgressBar(step);
+          const stepLabel = PROGRESS_STEPS.find((s) => s.key === step)?.label ?? step;
+          const badge = progressBadge(step);
 
           return (
-            <article key={match.id} className="pratica-card">
+            <article key={application.id} className="pratica-card">
               <div className="pratica-header">
                 <div>
-                  <h2 className="pratica-title">{match.tender.title}</h2>
-                  <p className="pratica-type">{match.tender.authority_name}</p>
+                  <h2 className="pratica-title">{title}</h2>
+                  <p className="pratica-type">{authority}</p>
                 </div>
-                <span className={statusClass}>{statusLabel}</span>
+                <span className={badge.className}>{badge.label}</span>
               </div>
 
               <div className="progress-section">
                 <div className="progress-header">
-                  <span className="progress-label">Rilevanza pratica</span>
-                  <span className="progress-value">{relevance}%</span>
+                  <span className="progress-label">Avanzamento pratica</span>
+                  <span className="progress-value">{bar.pct}%</span>
                 </div>
                 <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${relevance}%` }} />
+                  <div className="progress-fill" style={{ width: `${bar.pct}%` }} />
+                </div>
+                <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
+                  {stepLabel} · Mancanti: <strong>{missingCount}</strong> · Caricati: <strong>{uploadedCount}</strong>
                 </div>
               </div>
 
               <div className="action-buttons" style={{ marginTop: 20 }}>
-                <Link href={`/dashboard/tenders/${match.tender.id}`} className="btn-action primary">
+                <Link href={`/dashboard/practices/${application.id}`} className="btn-action primary">
                   <span>📋</span>
-                  <span>Apri sintesi</span>
+                  <span>Apri pratica</span>
                 </Link>
-                <Link href={`/dashboard/tenders/${match.tender.id}/apply`} className="btn-action secondary">
-                  <span>📤</span>
-                  <span>Partecipa</span>
+                <Link href="/dashboard/messages" className="btn-action secondary">
+                  <span>💬</span>
+                  <span>Chat</span>
                 </Link>
               </div>
             </article>

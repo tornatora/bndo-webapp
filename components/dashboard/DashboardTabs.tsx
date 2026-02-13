@@ -23,7 +23,7 @@ const MOBILE_NAV_ITEMS: DashboardNavItem[] = [
 ];
 
 function getActiveKey(pathname: string) {
-  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/tenders')) return 'pratiche';
+  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/practices')) return 'pratiche';
   if (pathname.startsWith('/dashboard/documents')) return 'documenti';
   if (pathname.startsWith('/dashboard/messages')) return 'messaggi';
   if (pathname.startsWith('/dashboard/notifications')) return 'notifiche';

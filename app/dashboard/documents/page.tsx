@@ -130,12 +130,10 @@ export default async function DashboardDocumentsPage() {
                   </span>
                 )}
 
-                {document.tenderId ? (
-                  <Link className="btn-doc" href={`/dashboard/tenders/${document.tenderId}/apply`}>
-                    <span>↗</span>
-                    <span>Pratica</span>
-                  </Link>
-                ) : null}
+                <Link className="btn-doc" href={`/dashboard/practices/${document.application_id}`}>
+                  <span>↗</span>
+                  <span>Pratica</span>
+                </Link>
               </div>
             </article>
           ))}

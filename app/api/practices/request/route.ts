@@ -108,6 +108,20 @@ export async function POST(request: Request) {
       );
     }
 
+    const allowedPractice: PracticeType | null =
+      latestQuiz.bando_type === 'sud'
+        ? 'resto_sud_2_0'
+        : latestQuiz.bando_type === 'centro_nord'
+          ? 'autoimpiego_centro_nord'
+          : null;
+
+    if (allowedPractice && allowedPractice !== practiceType) {
+      return NextResponse.json(
+        { error: `In base al tuo quiz puoi richiedere solo: ${practiceTitle(allowedPractice)}.` },
+        { status: 403 }
+      );
+    }
+
     const { data: company } = await admin.from('companies').select('name').eq('id', typedProfile.company_id).maybeSingle();
 
     const practiceLabel = practiceTitle(practiceType);

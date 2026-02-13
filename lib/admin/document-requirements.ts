@@ -3,6 +3,7 @@ export type RequiredDocKey =
   | 'descrizione_iniziativa'
   | 'piano_impresa'
   | 'documento_riconoscimento'
+  | 'codice_fiscale'
   | 'dsan_requisiti_iniziativa'
   | 'dsan_requisiti_soggettivi'
   | 'dsan_antiriciclaggio'
@@ -32,6 +33,11 @@ export const REQUIRED_DOCS_PIA_BASE: RequiredDoc[] = [
     key: 'documento_riconoscimento',
     label: 'Documento di riconoscimento',
     keywords: ['documento di riconoscimento', 'documento riconoscimento', 'carta identita', 'passaporto']
+  },
+  {
+    key: 'codice_fiscale',
+    label: 'Codice fiscale / Tessera sanitaria',
+    keywords: ['codice fiscale', 'tessera sanitaria', 'cf']
   },
   {
     key: 'dsan_requisiti_iniziativa',

@@ -33,6 +33,20 @@ Avvio consigliato:
   - bypass auth su `/admin` e mostra clienti/pratiche/documenti finti
   - chat e richieste documenti salvate in `localStorage`
 
+## Onboarding Post-Pagamento (Quiz -> Stripe -> Upload Doc Base -> Credenziali)
+Pagina pubblica (marketing) dove l'utente arriva dopo il pagamento per caricare i documenti base e ricevere le credenziali:
+- Route: `/onboarding/after-payment?session_id={CHECKOUT_SESSION_ID}`
+
+Configurazione Stripe (Payment Link / Checkout success URL):
+- imposta la `success_url` verso la route sopra (con `{CHECKOUT_SESSION_ID}`)
+
+Cosa fa la pagina:
+- verifica pagamento Stripe
+- associa il cliente al quiz (via email)
+- crea account + credenziali (invio email)
+- crea la pratica corretta (Resto al Sud 2.0 o Autoimpiego Centro Nord)
+- carica Documento identita + Codice fiscale e li collega alla pratica
+
 ## Variabili ambiente richieste (Netlify)
 - `NEXT_PUBLIC_MARKETING_URL`
 - `NEXT_PUBLIC_APP_URL`

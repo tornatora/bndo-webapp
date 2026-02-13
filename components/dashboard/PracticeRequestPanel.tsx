@@ -84,6 +84,11 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
   }
 
   const quizDate = formatDate(quizCompletedAt);
+  const filteredPractices = quizType === 'sud'
+    ? PRACTICES.filter((p) => p.key === 'resto_sud_2_0')
+    : quizType === 'centro_nord'
+      ? PRACTICES.filter((p) => p.key === 'autoimpiego_centro_nord')
+      : PRACTICES;
 
   return (
     <section className="section-card">
@@ -120,7 +125,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
         </div>
       ) : (
         <div className="practice-request-grid">
-          {PRACTICES.map((practice) => (
+          {filteredPractices.map((practice) => (
             <article key={practice.key} className="practice-request-card">
               <h3 className="pratica-title" style={{ fontSize: 20, marginBottom: 6 }}>
                 {practice.title}
