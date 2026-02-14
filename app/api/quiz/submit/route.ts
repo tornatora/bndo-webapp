@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 
 const payloadSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -10,13 +11,30 @@ const payloadSchema = z.object({
   region: z.string().trim().max(120).nullable().optional(),
   bandoType: z.string().trim().max(60).nullable().optional(),
   eligibility: z.enum(['eligible', 'not_eligible']),
-  answers: z.record(z.string()).default({})
+  answers: z.record(z.string()).default({}),
+  consentPrivacy: z.boolean(),
+  consentTerms: z.boolean(),
+  consentDataProcessing: z.boolean()
 });
+
+function getClientIp(request: Request) {
+  const nf = request.headers.get('x-nf-client-connection-ip');
+  if (nf && nf.trim()) return nf.trim();
+  const xf = request.headers.get('x-forwarded-for');
+  if (xf && xf.trim()) return xf.split(',')[0].trim();
+  return null;
+}
 
 export async function POST(request: Request) {
   try {
     const payload = payloadSchema.parse(await request.json());
+    if (!payload.consentPrivacy || !payload.consentTerms || !payload.consentDataProcessing) {
+      return NextResponse.json({ error: 'Consensi obbligatori mancanti.' }, { status: 422 });
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
+    const ipAddress = getClientIp(request);
+    const userAgent = request.headers.get('user-agent');
 
     const fullName = `${payload.firstName} ${payload.lastName}`.trim();
     const region = payload.region ?? null;
@@ -55,6 +73,46 @@ export async function POST(request: Request) {
 
     if (leadError) {
       return NextResponse.json({ error: leadError.message }, { status: 500 });
+    }
+
+    // Store legal consents evidence (best-effort fallback when table isn't deployed yet).
+    const consents = {
+      privacy_accepted: true,
+      terms_accepted: true,
+      data_processing_accepted: true,
+      legal_version: LEGAL_LAST_UPDATED,
+      captured_at: new Date().toISOString(),
+      ip_address: ipAddress,
+      user_agent: userAgent ?? null
+    };
+
+    const { error: legalErr } = await supabaseAdmin.from('legal_consents').upsert(
+      {
+        context: 'quiz',
+        email: payload.email.toLowerCase(),
+        company_id: null,
+        user_id: null,
+        application_id: null,
+        checkout_session_id: null,
+        quiz_submission_id: quizSubmission.id,
+        consents,
+        ip_address: ipAddress,
+        user_agent: userAgent ?? null
+      },
+      { onConflict: 'context,quiz_submission_id' }
+    );
+
+    // Fallback: persist minimal evidence in the answers payload (hidden in admin).
+    if (legalErr) {
+      const fallbackAnswers = {
+        ...payload.answers,
+        _legal_privacy: 'yes',
+        _legal_terms: 'yes',
+        _legal_data_processing: 'yes',
+        _legal_version: LEGAL_LAST_UPDATED,
+        _legal_captured_at: new Date().toISOString()
+      };
+      await supabaseAdmin.from('quiz_submissions').update({ answers: fallbackAnswers }).eq('id', quizSubmission.id);
     }
 
     return NextResponse.json({ success: true, submissionId: quizSubmission.id }, { status: 201 });

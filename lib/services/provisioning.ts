@@ -38,6 +38,97 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     };
   }
 
+  // If the customer already exists (same email), reuse their company to avoid duplicates.
+  const { data: existingProfile } = await supabaseAdmin
+    .from('profiles')
+    .select('id, company_id, full_name, username, email')
+    .eq('email', payload.customerEmail)
+    .maybeSingle();
+
+  if (existingProfile?.id) {
+    let companyId = existingProfile.company_id ?? null;
+    if (!companyId) {
+      const { data: newCompany, error: companyError } = await supabaseAdmin
+        .from('companies')
+        .insert({ name: payload.companyName })
+        .select('id')
+        .single();
+      if (companyError || !newCompany?.id) {
+        throw new Error(`Failed to create company: ${companyError?.message ?? 'unknown error'}`);
+      }
+      companyId = newCompany.id;
+      const { error: profileUpdateError } = await supabaseAdmin
+        .from('profiles')
+        .update({ company_id: companyId })
+        .eq('id', existingProfile.id);
+      if (profileUpdateError) {
+        throw new Error(`Failed to attach company: ${profileUpdateError.message}`);
+      }
+    }
+
+    const password = randomPassword(10);
+    await supabaseAdmin.auth.admin.updateUserById(existingProfile.id, { password });
+
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from('service_orders')
+      .insert({
+        company_id: companyId,
+        status: 'active',
+        stripe_customer_id: payload.stripeCustomerId ?? null,
+        stripe_payment_intent_id: payload.stripePaymentIntentId ?? null,
+        checkout_session_id: payload.checkoutSessionId
+      })
+      .select('id')
+      .single();
+
+    if (orderError || !order) {
+      throw new Error(`Failed to create order: ${orderError?.message ?? 'unknown error'}`);
+    }
+
+    await supabaseAdmin.from('consultant_threads').upsert(
+      {
+        company_id: companyId
+      },
+      {
+        onConflict: 'company_id'
+      }
+    );
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const emailResult = await sendOnboardingCredentialsEmail({
+      toEmail: payload.customerEmail,
+      contactName: payload.contactName,
+      companyName: payload.companyName,
+      tempPassword: password,
+      loginUrl: `${appUrl}/login`
+    });
+
+    await supabaseAdmin.from('onboarding_credentials').upsert(
+      {
+        checkout_session_id: payload.checkoutSessionId,
+        company_id: companyId,
+        user_id: existingProfile.id,
+        username: existingProfile.username ?? (slugify(payload.companyName).slice(0, 18) || 'cliente'),
+        temp_password: password,
+        emailed_at: emailResult.sent ? new Date().toISOString() : null,
+        email_provider_message_id: emailResult.sent ? emailResult.providerMessageId ?? null : null,
+        email_delivery_error: emailResult.sent ? null : emailResult.error ?? 'Unknown delivery error.'
+      },
+      { onConflict: 'checkout_session_id' }
+    );
+
+    return {
+      alreadyProvisioned: false,
+      username: existingProfile.username ?? null,
+      password,
+      userId: existingProfile.id,
+      companyId,
+      orderId: order.id,
+      emailSent: emailResult.sent,
+      emailError: emailResult.sent ? null : emailResult.error ?? null
+    };
+  }
+
   const { data: company, error: companyError } = await supabaseAdmin
     .from('companies')
     .insert({
@@ -52,7 +143,8 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
 
   const usernameBase = slugify(payload.companyName).slice(0, 18) || 'cliente';
   const username = `${usernameBase}-${Math.floor(Math.random() * 900000) + 100000}`;
-  const password = randomPassword(15);
+  // Keep it reasonably short for usability (still random).
+  const password = randomPassword(10);
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: payload.customerEmail,
@@ -124,7 +216,6 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     toEmail: payload.customerEmail,
     contactName: payload.contactName,
     companyName: payload.companyName,
-    username,
     tempPassword: password,
     loginUrl: `${appUrl}/login`
   });

@@ -63,7 +63,7 @@ export function DocReminderButton({ threadId, toEmail, companyName, practiceTitl
   }
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div className="admin-inline-actions">
       <button
         type="button"
         className="admin-reminder-btn"

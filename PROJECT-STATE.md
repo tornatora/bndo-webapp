@@ -82,6 +82,12 @@ Implementazione attuale:
 - Campanella in tutte le pagine dashboard: `components/dashboard/NotificationsBell.tsx`
 - Layout dashboard cliente: `app/dashboard/layout.tsx`
 - Chat: `components/dashboard/ChatPanel.tsx` (solo chat, senza logica campanella duplicata)
+- Navigazione: nessuna voce "Notifiche" nel menu mobile; accesso solo dalla campanella (con link "Vedi tutte").
+
+## Quiz (scalabile)
+Le domande/risposte del quiz hanno 1 sola sorgente: `lib/quiz/quiz-map.ts`.
+- Pagina quiz: `app/quiz/page.tsx` usa `getQuizQuestions(...)` per titoli/opzioni.
+- Admin: `components/admin/AdminQuizViewer.tsx` usa la stessa mappa (e mostra anche risposte "extra" per compatibilita se il quiz cambia).
 
 ## Admin (stato attuale e direzione)
 Obiettivo:

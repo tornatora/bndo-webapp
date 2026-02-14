@@ -46,7 +46,7 @@ export function AdminUploadDocButton({
   const disabled = Boolean(disabledReason) || uploading;
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div className="admin-inline-actions">
       <input
         ref={inputRef}
         type="file"
@@ -69,4 +69,3 @@ export function AdminUploadDocButton({
     </div>
   );
 }
-

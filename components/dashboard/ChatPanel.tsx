@@ -29,6 +29,20 @@ type SendMessageResponse = {
   autoReplyNotice?: string;
 };
 
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function formatChatTimestamp(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  if (isSameDay(d, now)) return time;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const date = d.toLocaleDateString('it-IT', sameYear ? { day: '2-digit', month: '2-digit' } : undefined);
+  return `${date} ${time}`;
+}
+
 export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialLastReadAt }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [value, setValue] = useState('');
@@ -292,7 +306,7 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
                     <div className="message-avatar">{getInitials(message.sender_profile_id)}</div>
                     <div className="message-content">
                       <div className="message-bubble">{message.body}</div>
-                      <div className="message-time">{new Date(message.created_at).toLocaleString('it-IT')}</div>
+                      <div className="message-time">{formatChatTimestamp(message.created_at)}</div>
                     </div>
                   </div>
                 );

@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
+import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { DocumentsPracticeCard } from '@/components/dashboard/DocumentsPracticeCard';
 
 type DocumentRow = {
   id: string;
@@ -13,22 +16,6 @@ type DocumentRow = {
   mime_type: string;
   created_at: string;
 };
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('it-IT', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value));
-}
 
 export default async function DashboardDocumentsPage() {
   const { profile } = await requireUserProfile();
@@ -65,25 +52,68 @@ export default async function DashboardDocumentsPage() {
     : { data: [] as DocumentRow[] };
 
   const tenderIds = [...new Set((applications ?? []).map((item) => item.tender_id))];
-  const { data: tenders } = tenderIds.length
-    ? await supabase.from('tenders').select('id, title, authority_name').in('id', tenderIds)
-    : { data: [] as Array<{ id: string; title: string; authority_name: string }> };
+  // Note: client RLS may block reading tenders. In that case, we fallback to admin client server-side
+  // so the UI can still show the correct practice labels.
+  let tenders: Array<{ id: string; title: string; authority_name: string }> = [];
+  if (tenderIds.length) {
+    const { data } = await supabase.from('tenders').select('id, title, authority_name').in('id', tenderIds);
+    tenders = (data ?? []) as typeof tenders;
 
-  const applicationMap = new Map((applications ?? []).map((item) => [item.id, item]));
+    const missingTitles = tenders.length === 0 || tenders.some((t) => !t.title);
+    if (missingTitles && hasRealServiceRoleKey()) {
+      try {
+        const admin = getSupabaseAdmin();
+        const { data: adminTenders } = await admin
+          .from('tenders')
+          .select('id, title, authority_name')
+          .in('id', tenderIds);
+        tenders = ((adminTenders ?? []) as typeof tenders) || tenders;
+      } catch {
+        // Ignore: keep best-effort tenders list.
+      }
+    }
+  }
+
   const tenderMap = new Map((tenders ?? []).map((item) => [item.id, item]));
 
-  const docsWithContext = await Promise.all(
-    (documents ?? []).map(async (document) => {
-      const application = applicationMap.get(document.application_id);
-      const tender = application ? tenderMap.get(application.tender_id) : null;
-      const signed = await supabase.storage.from('application-documents').createSignedUrl(document.storage_path, 3600);
+  const documentsByApplicationId = new Map<string, DocumentRow[]>();
+  for (const doc of documents ?? []) {
+    const prev = documentsByApplicationId.get(doc.application_id) ?? [];
+    prev.push(doc);
+    documentsByApplicationId.set(doc.application_id, prev);
+  }
+
+  const applicationsWithContext = await Promise.all(
+    (applications ?? []).map(async (application) => {
+      const tender = tenderMap.get(application.tender_id) ?? null;
+      const practiceTitle = tender?.title ?? application.tender_id ?? 'Pratica';
+      const docsInApp = documentsByApplicationId.get(application.id) ?? [];
+
+      const checklist = computeDocumentChecklist(
+        application.id,
+        practiceTitle,
+        docsInApp.map((d) => ({ application_id: application.id, file_name: d.file_name }))
+      );
+      const missing = checklist.filter((c) => !c.uploaded);
+
+      const docsWithUrl = await Promise.all(
+        docsInApp.map(async (doc) => {
+          const signed = await supabase.storage.from('application-documents').createSignedUrl(doc.storage_path, 3600);
+          return { ...doc, downloadUrl: signed.error ? null : signed.data.signedUrl };
+        })
+      );
 
       return {
-        ...document,
-        tenderId: application?.tender_id ?? null,
-        tenderTitle: tender?.title ?? 'Pratica senza titolo',
-        authorityName: tender?.authority_name ?? 'Ente non disponibile',
-        downloadUrl: signed.error ? null : signed.data.signedUrl
+        applicationId: application.id,
+        practiceTitle,
+        missing: missing.map((m) => ({ key: m.key, label: m.label })),
+        uploaded: docsWithUrl.map((d) => ({
+          id: d.id,
+          fileName: d.file_name,
+          createdAt: d.created_at,
+          fileSize: d.file_size,
+          downloadUrl: d.downloadUrl
+        }))
       };
     })
   );
@@ -92,13 +122,15 @@ export default async function DashboardDocumentsPage() {
     <>
       <section className="welcome-section">
         <h1 className="welcome-title">I tuoi documenti</h1>
-        <p className="welcome-subtitle">Tutti i file caricati nelle pratiche, con download immediato.</p>
+        <p className="welcome-subtitle">
+          Per ogni pratica trovi la lista documenti richiesta: quali sono gia caricati e quali mancano.
+        </p>
       </section>
 
-      {docsWithContext.length === 0 ? (
+      {applicationsWithContext.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">📂</div>
-          <p className="empty-text">Non hai ancora caricato documenti. Apri una pratica per iniziare.</p>
+          <p className="empty-text">Non hai ancora pratiche attive. Avvia una pratica per vedere la documentazione richiesta.</p>
           <div className="action-buttons" style={{ justifyContent: 'center', marginTop: 20 }}>
             <Link href="/dashboard" className="btn-action secondary">
               <span>↗</span>
@@ -107,35 +139,15 @@ export default async function DashboardDocumentsPage() {
           </div>
         </div>
       ) : (
-        <section className="documents-grid">
-          {docsWithContext.map((document) => (
-            <article key={document.id} className="document-card">
-              <div className="document-icon">📎</div>
-              <h2 className="document-name">{document.file_name}</h2>
-              <p className="document-date">{document.tenderTitle}</p>
-              <p className="document-date">{document.authorityName}</p>
-              <p className="document-date">Caricato: {formatDate(document.created_at)}</p>
-              <p className="document-date">Dimensione: {formatFileSize(document.file_size)}</p>
-
-              <div className="document-actions">
-                {document.downloadUrl ? (
-                  <a className="btn-doc" href={document.downloadUrl} target="_blank" rel="noreferrer">
-                    <span>⬇</span>
-                    <span>Download</span>
-                  </a>
-                ) : (
-                  <span className="btn-doc" style={{ opacity: 0.6, cursor: 'not-allowed' }}>
-                    <span>⚠</span>
-                    <span>Non disponibile</span>
-                  </span>
-                )}
-
-                <Link className="btn-doc" href={`/dashboard/practices/${document.application_id}`}>
-                  <span>↗</span>
-                  <span>Pratica</span>
-                </Link>
-              </div>
-            </article>
+        <section className="space-y-4">
+          {applicationsWithContext.map((app) => (
+            <DocumentsPracticeCard
+              key={app.applicationId}
+              applicationId={app.applicationId}
+              practiceTitle={app.practiceTitle}
+              missing={app.missing}
+              uploaded={app.uploaded}
+            />
           ))}
         </section>
       )}

@@ -1,38 +1,34 @@
 import Link from 'next/link';
-import { AfterPaymentOnboardingForm } from '@/components/landing/AfterPaymentOnboardingForm';
+import { OnboardingWelcomeClient } from '@/components/landing/OnboardingWelcomeClient';
 import { MARKETING_URL } from '@/lib/site-urls';
+import type { PracticeType } from '@/lib/bandi';
 
 export const dynamic = 'force-dynamic';
+
+function parsePracticeType(value: string | undefined): PracticeType | undefined {
+  const v = (value ?? '').trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === 'resto_sud_2_0') return 'resto_sud_2_0';
+  if (v === 'autoimpiego_centro_nord') return 'autoimpiego_centro_nord';
+  return undefined;
+}
 
 export default function AfterPaymentPage({
   searchParams
 }: {
-  searchParams: { session_id?: string };
+  searchParams: { session_id?: string; bando?: string; practice?: string; pratica?: string };
 }) {
   const sessionId = searchParams.session_id;
+  const practiceType = parsePracticeType(searchParams.bando ?? searchParams.practice ?? searchParams.pratica);
 
   return (
-    <main className="mx-auto min-h-screen max-w-4xl px-4 py-10">
-      <section className="mb-6">
-        <div className="mb-3">
-          <Link href={MARKETING_URL} className="text-sm font-semibold text-brand.steel">
-            Torna al sito
-          </Link>
-        </div>
-        <h1 className="text-3xl font-extrabold text-brand.navy">Completa la tua pratica</h1>
-        <p className="mt-2 text-slate-600">
-          Ultimo step: carica i documenti iniziali. Al termine ti inviamo le credenziali per entrare in dashboard e
-          seguire lo status della pratica.
-        </p>
-      </section>
-
-      {sessionId ? (
-        <AfterPaymentOnboardingForm sessionId={sessionId} />
-      ) : (
-        <div className="panel p-6 text-sm text-red-700">
-          Sessione checkout mancante. Torna al checkout Stripe oppure contatta il supporto.
-        </div>
-      )}
-    </main>
+    <>
+      <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 50 }}>
+        <Link href={MARKETING_URL} className="onboarding2030-back">
+          Torna al sito
+        </Link>
+      </div>
+      <OnboardingWelcomeClient sessionId={sessionId} practiceType={practiceType} />
+    </>
   );
 }

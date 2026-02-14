@@ -5,16 +5,23 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { provisionAccountFromCheckout } from '@/lib/services/provisioning';
 import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/bandi';
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
+import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import type { Json } from '@/lib/supabase/database.types';
+import { randomUUID } from 'crypto';
 
 export const runtime = 'nodejs';
 
 const TextSchema = z.object({
-  sessionId: z.string().trim().min(8),
+  sessionId: z.string().trim().min(8).optional().nullable(),
+  practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord']).optional().nullable(),
+  email: z.string().trim().email().optional().nullable(),
   pec: z.string().trim().min(3).max(160),
   digitalSignature: z.enum(['yes', 'no']),
   quotesText: z.string().trim().max(2000).optional().nullable(),
-  projectSummary: z.string().trim().max(2000).optional().nullable()
+  projectSummary: z.string().trim().max(2000).optional().nullable(),
+  acceptPrivacy: z.enum(['yes']),
+  acceptTerms: z.enum(['yes']),
+  consentStorage: z.enum(['yes'])
 });
 
 function safeFileName(name: string) {
@@ -25,6 +32,14 @@ function moneyFromStripe(amountTotal: number | null | undefined, currency: strin
   if (!amountTotal || !currency) return null;
   const isZeroDecimal = new Set(['jpy', 'krw', 'vnd']).has(currency.toLowerCase());
   return isZeroDecimal ? amountTotal : amountTotal / 100;
+}
+
+function getClientIp(request: Request) {
+  const nf = request.headers.get('x-nf-client-connection-ip');
+  if (nf && nf.trim()) return nf.trim();
+  const xf = request.headers.get('x-forwarded-for');
+  if (xf && xf.trim()) return xf.split(',')[0].trim();
+  return null;
 }
 
 async function ensureOpsAutoReply(threadId: string) {
@@ -66,20 +81,33 @@ function practiceTypeFromQuiz(bandoType: string | null | undefined): PracticeTyp
 export async function POST(request: Request) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
-    const stripe = getStripeClient();
+    // Stripe is optional for manual onboarding flows.
 
     const formData = await request.formData();
+    const ipAddress = getClientIp(request);
+    const userAgent = request.headers.get('user-agent');
 
     const parsed = TextSchema.safeParse({
       sessionId: formData.get('sessionId'),
+      practiceType: formData.get('practiceType'),
+      email: formData.get('email'),
       pec: formData.get('pec'),
       digitalSignature: formData.get('digitalSignature'),
       quotesText: formData.get('quotesText'),
-      projectSummary: formData.get('projectSummary')
+      projectSummary: formData.get('projectSummary'),
+      acceptPrivacy: formData.get('acceptPrivacy'),
+      acceptTerms: formData.get('acceptTerms'),
+      consentStorage: formData.get('consentStorage')
     });
 
     if (!parsed.success) {
       return NextResponse.json({ error: 'Dati non validi.' }, { status: 422 });
+    }
+
+    const providedSessionId = (parsed.data.sessionId ?? '').trim();
+    const providedEmail = (parsed.data.email ?? '').trim();
+    if (!providedSessionId && !providedEmail) {
+      return NextResponse.json({ error: 'Inserisci la tua email.' }, { status: 422 });
     }
 
     const idDocument = formData.get('idDocument');
@@ -116,17 +144,37 @@ export async function POST(request: Request) {
       }
     }
 
-    const session = await stripe.checkout.sessions.retrieve(parsed.data.sessionId);
-    if (session.payment_status !== 'paid') {
-      return NextResponse.json({ error: 'Pagamento non completato.' }, { status: 403 });
+    // Determine email and Stripe metadata (best effort).
+    let normalizedEmail = providedEmail ? providedEmail.toLowerCase() : '';
+    let checkoutSessionId: string | null = null;
+    let stripeCustomerId: string | null = null;
+    let stripePaymentIntentId: string | null = null;
+    let currency: string | null = null;
+    let amountPaid = 0;
+
+    if (providedSessionId) {
+      try {
+        const stripe = getStripeClient();
+        const session = await stripe.checkout.sessions.retrieve(providedSessionId);
+        if (session.payment_status && session.payment_status !== 'paid') {
+          return NextResponse.json({ error: 'Pagamento non completato.' }, { status: 403 });
+        }
+        checkoutSessionId = session.id;
+        stripeCustomerId = typeof session.customer === 'string' ? session.customer : null;
+        stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+        currency = session.currency ?? null;
+        amountPaid = moneyFromStripe(session.amount_total, session.currency) ?? 0;
+
+        const stripeEmail = session.customer_details?.email ?? session.customer_email ?? null;
+        if (stripeEmail) normalizedEmail = stripeEmail.toLowerCase();
+      } catch {
+        // Ignore Stripe errors and proceed with manual flow.
+      }
     }
 
-    const email = session.customer_details?.email ?? session.customer_email ?? null;
-    if (!email) {
-      return NextResponse.json({ error: 'Email non disponibile dalla sessione Stripe.' }, { status: 422 });
+    if (!normalizedEmail) {
+      return NextResponse.json({ error: 'Inserisci una email valida.' }, { status: 422 });
     }
-
-    const normalizedEmail = email.toLowerCase();
     const { data: quiz } = await supabaseAdmin
       .from('quiz_submissions')
       .select('id, full_name, phone, region, bando_type, eligibility, created_at')
@@ -135,20 +183,18 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle();
 
-    if (!quiz) {
-      return NextResponse.json({ error: 'Quiz non trovato. Completa prima il quiz requisiti.' }, { status: 404 });
-    }
+    // Quiz is optional: onboarding can be used as a manual link to collect documents and create access.
+    // If present, use it to infer practice; otherwise use practiceType from URL/form if provided, else default.
+    const practiceType: PracticeType =
+      (parsed.data.practiceType as PracticeType | null | undefined) ??
+      practiceTypeFromQuiz(quiz?.bando_type) ??
+      'resto_sud_2_0';
+    const displayName =
+      quiz?.full_name?.trim() ||
+      normalizedEmail.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim() ||
+      'Cliente BNDO';
 
-    if (quiz.eligibility !== 'eligible') {
-      return NextResponse.json({ error: 'Quiz non idoneo. Contatta il supporto.' }, { status: 403 });
-    }
-
-    const practiceType = practiceTypeFromQuiz(quiz.bando_type);
-    if (!practiceType) {
-      return NextResponse.json({ error: 'Impossibile determinare la pratica dal quiz.' }, { status: 422 });
-    }
-
-    const amountPaid = moneyFromStripe(session.amount_total, session.currency) ?? 0;
+    const effectiveCheckoutSessionId = checkoutSessionId ?? `manual_${randomUUID()}`;
 
     const quoteFiles = quotes.filter((q) => q instanceof File) as File[];
     const quotesText = parsed.data.quotesText?.trim() ?? '';
@@ -160,12 +206,12 @@ export async function POST(request: Request) {
     }
 
     const provision = await provisionAccountFromCheckout({
-      checkoutSessionId: session.id,
+      checkoutSessionId: effectiveCheckoutSessionId,
       customerEmail: normalizedEmail,
-      companyName: quiz.full_name,
-      contactName: quiz.full_name,
-      stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
-      stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null
+      companyName: displayName,
+      contactName: displayName,
+      stripeCustomerId,
+      stripePaymentIntentId
     });
 
     const companyId = provision.companyId;
@@ -190,6 +236,44 @@ export async function POST(request: Request) {
 
     const { applicationId } = await ensureBandoApplication(supabaseAdmin, companyId, practiceType);
 
+    const consentSnapshot = {
+      privacy_accepted: true,
+      terms_accepted: true,
+      data_and_documents_storage_authorized: true,
+      legal_version: LEGAL_LAST_UPDATED,
+      captured_at: new Date().toISOString(),
+      ip_address: ipAddress,
+      user_agent: userAgent ?? null
+    };
+
+    // Persist legal consent evidence (best-effort fallback when table isn't deployed yet).
+    let legalStored = false;
+    try {
+      const { error: legalErr } = await supabaseAdmin.from('legal_consents').upsert(
+        {
+          context: 'after_payment_onboarding',
+          email: normalizedEmail,
+          company_id: companyId,
+          user_id: userId,
+          application_id: applicationId,
+          checkout_session_id: effectiveCheckoutSessionId,
+          quiz_submission_id: quiz?.id ?? null,
+          consents: consentSnapshot as unknown as Json,
+          ip_address: ipAddress,
+          user_agent: userAgent ?? null
+        },
+        { onConflict: 'context,checkout_session_id' }
+      );
+      if (!legalErr) {
+        legalStored = true;
+      } else if ((legalErr as { code?: string })?.code !== '42P01') {
+        // Unexpected error: keep going only if we can store a consent fallback in CRM.
+        legalStored = false;
+      }
+    } catch {
+      legalStored = false;
+    }
+
     // Update CRM fields (used in Admin "Scheda cliente").
     const { data: existingCrm } = await supabaseAdmin
       .from('company_crm')
@@ -198,9 +282,22 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     const currentFields = (existingCrm?.admin_fields ?? {}) as Record<string, unknown>;
+    const currentLegalConsents = Array.isArray(currentFields.legal_consents) ? (currentFields.legal_consents as unknown[]) : [];
+    const nextLegalConsents = [
+      {
+        context: 'after_payment_onboarding',
+        session_id: effectiveCheckoutSessionId,
+        quiz_id: quiz?.id ?? null,
+        legal_version: LEGAL_LAST_UPDATED,
+        captured_at: new Date().toISOString(),
+        ip_address: ipAddress,
+        user_agent: userAgent ?? null
+      },
+      ...currentLegalConsents
+    ].slice(0, 20);
     const nextFields: Record<string, unknown> = {
       ...currentFields,
-      phone: quiz.phone ?? currentFields.phone ?? '',
+      phone: quiz?.phone ?? currentFields.phone ?? '',
       pec: parsed.data.pec.trim(),
       project_summary: parsed.data.projectSummary?.trim() || (currentFields.project_summary as string | undefined) || '',
       firma_digitale:
@@ -211,7 +308,12 @@ export async function POST(request: Request) {
             : (currentFields.firma_digitale as string | undefined) || '',
       certificazione_did: 'si',
       preventivi_testo: quotesText || (currentFields.preventivi_testo as string | undefined) || '',
-      onboarding_completed_at: new Date().toISOString()
+      onboarding_completed_at: new Date().toISOString(),
+      legal_consents: nextLegalConsents,
+      legal: {
+        ...(typeof currentFields.legal === 'object' && currentFields.legal && !Array.isArray(currentFields.legal) ? (currentFields.legal as Record<string, unknown>) : {}),
+        after_payment_onboarding: consentSnapshot
+      }
     };
 
     // Initialize billing state for this practice (500 total, paid = Stripe amount).
@@ -238,7 +340,7 @@ export async function POST(request: Request) {
       invoices: currentInvoices
     };
 
-    await supabaseAdmin.from('company_crm').upsert(
+    const { error: crmErr } = await supabaseAdmin.from('company_crm').upsert(
       {
         company_id: companyId,
         admin_fields: nextFields as unknown as Json,
@@ -246,6 +348,15 @@ export async function POST(request: Request) {
       },
       { onConflict: 'company_id' }
     );
+    const crmStored = !crmErr;
+
+    // If the dedicated table isn't available, at least ensure we stored a fallback record in CRM.
+    if (!legalStored && !crmStored) {
+      return NextResponse.json(
+        { error: 'Impossibile salvare i consensi legali. Contatta il supporto e riprova.' },
+        { status: 500 }
+      );
+    }
 
     // Upload base documents and create DB records.
     const baseDocs: Array<{ label: string; file: File }> = [
@@ -342,7 +453,7 @@ export async function POST(request: Request) {
       const lines = [
         '[AVVIO PRATICA]',
         `Pratica: ${practiceLabel}`,
-        `Pagamento anticipo: ${amountPaid ? `${amountPaid} ${String(session.currency ?? '').toUpperCase()}` : 'OK'}`,
+        `Pagamento anticipo: ${amountPaid ? `${amountPaid} ${String(currency ?? '').toUpperCase()}` : 'OK'}`,
         `Documenti caricati: Documento di riconoscimento, Codice fiscale, Certificazione DID${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
         `PEC: ${parsed.data.pec}`,
         `Firma digitale: ${parsed.data.digitalSignature === 'yes' ? 'Si' : 'No'}`,
@@ -374,17 +485,17 @@ export async function POST(request: Request) {
 
     // Store a lead entry (useful for ops tracking).
     await supabaseAdmin.from('leads').insert({
-      full_name: quiz.full_name,
+      full_name: displayName,
       email: normalizedEmail,
-      company_name: quiz.full_name,
-      phone: quiz.phone ?? null,
-      challenge: `Pagamento anticipo + onboarding base docs | Pratica: ${practiceTitle(practiceType)} | Quiz: ${quiz.id}`
+      company_name: displayName,
+      phone: quiz?.phone ?? null,
+      challenge: `Pagamento anticipo + onboarding base docs | Pratica: ${practiceTitle(practiceType)} | Quiz: ${quiz?.id ?? 'N/D'}`
     });
 
     return NextResponse.json(
       {
         ok: true,
-        sessionId: session.id,
+        sessionId: effectiveCheckoutSessionId,
         companyId,
         userId,
         applicationId,

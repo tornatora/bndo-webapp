@@ -3,11 +3,10 @@ import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
-import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
 import {
-  PROGRESS_STEPS,
   computeDerivedProgressKey,
   computeProgressBar,
   extractProgressFromNotes,
@@ -53,9 +52,27 @@ export default async function DashboardPage() {
   ]);
 
   const tenderIds = [...new Set((applications ?? []).map((app) => app.tender_id).filter(Boolean))];
-  const { data: tenders } = tenderIds.length
-    ? await supabase.from('tenders').select('id, title, authority_name').in('id', tenderIds)
-    : { data: [] as Array<{ id: string; title: string; authority_name: string }> };
+  // Note: client RLS may block reading tenders. Fallback server-side with service role so we can
+  // still show the practice title instead of raw IDs.
+  let tenders: Array<{ id: string; title: string; authority_name: string }> = [];
+  if (tenderIds.length) {
+    const { data } = await supabase.from('tenders').select('id, title, authority_name').in('id', tenderIds);
+    tenders = (data ?? []) as typeof tenders;
+
+    const missingTitles = tenders.length === 0 || tenders.some((t) => !t.title);
+    if (missingTitles && hasRealServiceRoleKey()) {
+      try {
+        const admin = getSupabaseAdmin();
+        const { data: adminTenders } = await admin
+          .from('tenders')
+          .select('id, title, authority_name')
+          .in('id', tenderIds);
+        tenders = ((adminTenders ?? []) as typeof tenders) || tenders;
+      } catch {
+        // Ignore: best-effort title resolution.
+      }
+    }
+  }
 
   const tenderMap = new Map((tenders ?? []).map((t) => [t.id, t]));
   const typedApplications: ApplicationRow[] =
@@ -153,17 +170,10 @@ export default async function DashboardPage() {
         <div className="empty-state">
           <div className="empty-icon">📋</div>
           <p className="empty-text">Nessuna pratica disponibile al momento.</p>
-          <div className="action-buttons" style={{ justifyContent: 'center', marginTop: 20 }}>
-            <Link href="/dashboard/messages" className="btn-action secondary">
-              <span>💬</span>
-              <span>Apri chat</span>
-            </Link>
-          </div>
         </div>
       ) : (
         typedApplications.map((application) => {
           const title = application.tender?.title ?? 'Pratica';
-          const authority = application.tender?.authority_name ?? 'Invitalia';
 
           const docsInApp = (docs ?? []).filter((d) => d.application_id === application.id);
           const checklist = computeDocumentChecklist(
@@ -178,15 +188,13 @@ export default async function DashboardPage() {
             extractProgressFromNotes(application.notes ?? null) ??
             computeDerivedProgressKey(application.status, missingCount);
           const bar = computeProgressBar(step);
-          const stepLabel = PROGRESS_STEPS.find((s) => s.key === step)?.label ?? step;
           const badge = progressBadge(step);
 
           return (
-            <article key={application.id} className="pratica-card">
+            <Link key={application.id} href={`/dashboard/practices/${application.id}`} className="pratica-card pratica-card-link">
               <div className="pratica-header">
                 <div>
                   <h2 className="pratica-title">{title}</h2>
-                  <p className="pratica-type">{authority}</p>
                 </div>
                 <span className={badge.className}>{badge.label}</span>
               </div>
@@ -200,21 +208,10 @@ export default async function DashboardPage() {
                   <div className="progress-fill" style={{ width: `${bar.pct}%` }} />
                 </div>
                 <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
-                  {stepLabel} · Mancanti: <strong>{missingCount}</strong> · Caricati: <strong>{uploadedCount}</strong>
+                  Mancanti: <strong>{missingCount}</strong> · Caricati: <strong>{uploadedCount}</strong>
                 </div>
               </div>
-
-              <div className="action-buttons" style={{ marginTop: 20 }}>
-                <Link href={`/dashboard/practices/${application.id}`} className="btn-action primary">
-                  <span>📋</span>
-                  <span>Apri pratica</span>
-                </Link>
-                <Link href="/dashboard/messages" className="btn-action secondary">
-                  <span>💬</span>
-                  <span>Chat</span>
-                </Link>
-              </div>
-            </article>
+            </Link>
           );
         })
       )}

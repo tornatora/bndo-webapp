@@ -119,6 +119,51 @@ export type Database = {
           }
         ];
       };
+      legal_consents: {
+        Row: {
+          id: string;
+          context: 'quiz' | 'after_payment_onboarding';
+          email: string;
+          company_id: string | null;
+          user_id: string | null;
+          application_id: string | null;
+          checkout_session_id: string | null;
+          quiz_submission_id: string | null;
+          consents: Json;
+          ip_address: string | null;
+          user_agent: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          context: 'quiz' | 'after_payment_onboarding';
+          email: string;
+          company_id?: string | null;
+          user_id?: string | null;
+          application_id?: string | null;
+          checkout_session_id?: string | null;
+          quiz_submission_id?: string | null;
+          consents?: Json;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          context?: 'quiz' | 'after_payment_onboarding';
+          email?: string;
+          company_id?: string | null;
+          user_id?: string | null;
+          application_id?: string | null;
+          checkout_session_id?: string | null;
+          quiz_submission_id?: string | null;
+          consents?: Json;
+          ip_address?: string | null;
+          user_agent?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       companies: {
         Row: {
           id: string;

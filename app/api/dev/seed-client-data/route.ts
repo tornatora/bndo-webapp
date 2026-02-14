@@ -58,14 +58,42 @@ export async function POST(request: Request) {
       .eq('email', payload.email)
       .maybeSingle();
 
-    if (!clientProfile?.company_id) {
-      return NextResponse.json(
-        { error: 'Cliente non trovato. Prima crea il cliente demo.' },
-        { status: 404 }
-      );
+    if (!clientProfile) {
+      return NextResponse.json({ error: 'Cliente non trovato. Prima crea il cliente demo.' }, { status: 404 });
     }
 
-    const companyId = clientProfile.company_id;
+    // Some local accounts may exist without a company_id (e.g. created via alternative onboarding).
+    // For dev seeding we auto-provision a minimal company and attach it to the profile.
+    let companyId: string | null = clientProfile.company_id;
+    if (!companyId) {
+      const companyName = `Cliente demo (${payload.email.split('@')[0] ?? 'utente'})`;
+      const { data: company, error: companyError } = await supabaseAdmin
+        .from('companies')
+        .insert({ name: companyName })
+        .select('id')
+        .single();
+
+      if (companyError || !company?.id) {
+        return NextResponse.json(
+          { error: `Creazione azienda fallita: ${companyError?.message ?? 'errore sconosciuto'}` },
+          { status: 500 }
+        );
+      }
+
+      companyId = company.id;
+      const { error: profileUpdateError } = await supabaseAdmin
+        .from('profiles')
+        .update({ company_id: companyId })
+        .eq('id', clientProfile.id);
+
+      if (profileUpdateError) {
+        return NextResponse.json(
+          { error: `Aggiornamento profilo fallito: ${profileUpdateError.message}` },
+          { status: 500 }
+        );
+      }
+    }
+
     const clientProfileId = clientProfile.id;
 
     // Ensure a thread exists so admin can chat even if the client never opened the dashboard.
@@ -89,7 +117,50 @@ export async function POST(request: Request) {
     }
 
     if (!candidateTenderIds.length) {
-      return NextResponse.json({ error: 'Nessun bando disponibile per creare pratiche demo.' }, { status: 409 });
+      // Fresh Supabase project: create our 2 in-scope tenders so demo seeding always works.
+      const deadline = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
+      const defaultTenders = [
+        {
+          authority_name: 'Invitalia',
+          title: 'Resto al Sud 2.0',
+          deadline_at: deadline,
+          summary: 'Bando demo per finanza agevolata (seed locale).'
+        },
+        {
+          authority_name: 'Invitalia',
+          title: 'Autoimpiego Centro Nord',
+          deadline_at: deadline,
+          summary: 'Bando demo per finanza agevolata (seed locale).'
+        }
+      ];
+
+      const { data: existingDefaults } = await supabaseAdmin
+        .from('tenders')
+        .select('id, title')
+        .in(
+          'title',
+          defaultTenders.map((t) => t.title)
+        );
+
+      const existingTitles = new Set((existingDefaults ?? []).map((t) => t.title));
+      const toInsert = defaultTenders.filter((t) => !existingTitles.has(t.title));
+
+      if (toInsert.length) {
+        const { error: insertError } = await supabaseAdmin.from('tenders').insert(toInsert);
+        if (insertError) {
+          return NextResponse.json({ error: insertError.message }, { status: 500 });
+        }
+      }
+
+      const { data: ensuredDefaults } = await supabaseAdmin
+        .from('tenders')
+        .select('id, title')
+        .in(
+          'title',
+          defaultTenders.map((t) => t.title)
+        );
+
+      candidateTenderIds = (ensuredDefaults ?? []).map((t) => t.id);
     }
 
     const tenderIdsToUse = [...new Set(candidateTenderIds)].slice(0, practicesTarget);

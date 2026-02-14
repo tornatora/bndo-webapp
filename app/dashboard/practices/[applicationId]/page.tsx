@@ -67,7 +67,6 @@ export default async function ClientPracticePage({
     .maybeSingle();
 
   const practiceTitle = tender?.title ?? 'Pratica';
-  const authorityName = tender?.authority_name ?? 'Invitalia';
 
   const { data: docs } = await supabase
     .from('application_documents')
@@ -124,7 +123,7 @@ export default async function ClientPracticePage({
       <article className="panel p-5 sm:p-6">
         <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="pratica-type">{authorityName}</p>
+            <p className="pratica-type">Pratica</p>
             <h1 className="pratica-title" style={{ marginTop: 6 }}>
               {practiceTitle}
             </h1>
@@ -137,25 +136,20 @@ export default async function ClientPracticePage({
           <span className={badge.className}>{badge.label}</span>
         </div>
 
-        <div className="admin-progress">
-          <div className="admin-progress-header">
-            <div className="admin-progress-title">Avanzamento lavori</div>
-            <div className="admin-progress-step">
-              Step {bar.stepIndex + 1}/{PROGRESS_STEPS.length}: {stepLabel}
-            </div>
+        <div className="progress-section" style={{ marginTop: 18 }}>
+          <div className="progress-header">
+            <span className="progress-label">Avanzamento pratica</span>
+            <span className="progress-value">{bar.pct}%</span>
           </div>
-          <div className="admin-progress-bar">
-            <div className="admin-progress-fill" style={{ width: `${bar.pct}%` }} />
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${bar.pct}%` }} />
           </div>
-          <div className="admin-progress-legend">
-            <span>{PROGRESS_STEPS[0].label}</span>
-            <span>{PROGRESS_STEPS[2].label}</span>
-            <span>{PROGRESS_STEPS[4].label}</span>
-            <span>{PROGRESS_STEPS[5].label}</span>
+          <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
+            {stepLabel}
           </div>
         </div>
 
-        <div className="admin-practice-crm-top" style={{ marginTop: 18 }}>
+        <div className="client-practice-kpis" style={{ marginTop: 18 }}>
           <Link className="admin-kpi admin-kpi-link" href={`/dashboard/practices/${application.id}?docs=missing`}>
             <div className="admin-kpi-label">Documenti mancanti</div>
             <div className={`admin-kpi-value ${missingCount > 0 ? 'is-warn' : 'is-ok'}`}>{missingCount}</div>
@@ -164,15 +158,10 @@ export default async function ClientPracticePage({
             <div className="admin-kpi-label">Documenti caricati</div>
             <div className="admin-kpi-value">{uploadedCount}</div>
           </Link>
-          <div style={{ marginLeft: 'auto' }}>
-            <Link className="btn-action secondary" href="/dashboard/messages">
-              💬 Apri chat
-            </Link>
-          </div>
         </div>
 
         {docsView !== 'all' ? (
-          <section className="admin-docs-panel">
+          <section className="admin-docs-panel client-docs-panel">
             <div className="admin-docs-panel-head">
               <div className="admin-docs-title">
                 {docsView === 'missing' ? 'Documenti mancanti' : 'Documenti caricati'}

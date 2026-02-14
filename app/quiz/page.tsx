@@ -4,6 +4,8 @@ import Link from 'next/link';
 import Script from 'next/script';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
+import { getQuizQuestions } from '@/lib/quiz/quiz-map';
+import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
 import './quiz.css';
 
 declare global {
@@ -102,6 +104,9 @@ export default function QuizPage() {
   const [, setHistory] = useState<StepId[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [contact, setContact] = useState<ContactData>(defaultContact);
+  const [consentPrivacy, setConsentPrivacy] = useState(false);
+  const [consentTerms, setConsentTerms] = useState(false);
+  const [consentDataProcessing, setConsentDataProcessing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [blockedFromStep, setBlockedFromStep] = useState<StepId | null>(null);
@@ -111,21 +116,9 @@ export default function QuizPage() {
   const bandoType = region ? (southRegions.includes(region) ? 'sud' : 'centro_nord') : null;
   const isSouth = bandoType === 'sud';
 
-  const investmentOptions = useMemo(
-    () =>
-      isSouth
-        ? [
-            { value: 'A', text: '0 - 50.000 EUR' },
-            { value: 'B', text: '50.000 - 120.000 EUR' },
-            { value: 'C', text: '120.000 - 200.000 EUR' }
-          ]
-        : [
-            { value: 'A', text: '0 - 40.000 EUR' },
-            { value: 'B', text: '40.000 - 120.000 EUR' },
-            { value: 'C', text: '120.000 - 200.000 EUR' }
-          ],
-    [isSouth]
-  );
+  const questions = useMemo(() => getQuizQuestions(bandoType), [bandoType]);
+  const questionById = useMemo(() => new Map(questions.map((q) => [q.id, q])), [questions]);
+  const q = (id: string) => questionById.get(id);
 
   useEffect(() => {
     if (step !== 'intro') return;
@@ -268,6 +261,10 @@ export default function QuizPage() {
       setSubmissionError('Compila tutti i campi obbligatori.');
       return;
     }
+    if (!consentPrivacy || !consentTerms || !consentDataProcessing) {
+      setSubmissionError('Devi accettare i consensi obbligatori per procedere.');
+      return;
+    }
 
     setSubmitting(true);
 
@@ -285,7 +282,10 @@ export default function QuizPage() {
           region,
           bandoType,
           eligibility: 'eligible',
-          answers
+          answers,
+          consentPrivacy,
+          consentTerms,
+          consentDataProcessing
         })
       });
 
@@ -359,39 +359,38 @@ export default function QuizPage() {
             <div className="tag">Domanda 1 di 12</div>
             <h1>Requisiti Bandi Invitalia</h1>
             <p className="subtitle">Iniziamo con le informazioni di base</p>
-            <div className="question">Quanti anni hai?</div>
+            <div className="question">{q('q1')?.title ?? 'Quanti anni hai?'}</div>
             <div className="input-group">
-              <OptionButton text="Meno di 18 anni" value="A" onPick={(value) => handleAnswer('q1', value)} />
-              <OptionButton text="Tra 18 e 34 anni (inclusi)" value="B" onPick={(value) => handleAnswer('q1', value)} />
-              <OptionButton text="35 anni o piu" value="C" onPick={(value) => handleAnswer('q1', value)} />
+              {(q('q1')?.options ?? []).map((opt) => (
+                <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q1', value)} />
+              ))}
             </div>
           </div>
         ) : null}
 
         {step === 'q1b' ? (
-          <QuestionLayout title="Puoi costituire una societa con un socio 18-34 anni al 51%?" subtitle="Domanda 1-B">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q1b', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q1b', value)} />
+          <QuestionLayout
+            title={q('q1b')?.title ?? 'Puoi costituire una societa con un socio 18-34 anni al 51%?'}
+            subtitle="Domanda 1-B"
+          >
+            {(q('q1b')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q1b', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q2' ? (
-          <QuestionLayout title="Qual e la tua cittadinanza?" subtitle="Domanda 2 di 12">
-            <OptionButton text="Italiana" value="A" onPick={(value) => handleAnswer('q2', value)} />
-            <OptionButton text="UE" value="B" onPick={(value) => handleAnswer('q2', value)} />
-            <OptionButton
-              text="Extra UE con permesso di soggiorno valido"
-              value="C"
-              onPick={(value) => handleAnswer('q2', value)}
-            />
-            <OptionButton text="Extra UE senza permesso" value="D" onPick={(value) => handleAnswer('q2', value)} />
+          <QuestionLayout title={q('q2')?.title ?? 'Qual e la tua cittadinanza?'} subtitle="Domanda 2 di 12">
+            {(q('q2')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q2', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q3' ? (
-          <QuestionLayout title="In quale regione aprirai l&apos;attivita?" subtitle="Domanda 3 di 12">
+          <QuestionLayout title={q('q3')?.title ?? "In quale regione aprirai l'attivita?"} subtitle="Domanda 3 di 12">
             <select value={answers.q3 ?? ''} onChange={(event) => setAnswers((previous) => ({ ...previous, q3: event.target.value }))}>
               <option value="">Seleziona una regione...</option>
               {[
@@ -433,122 +432,134 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q4' ? (
-          <QuestionLayout title="Sei residente nella regione in cui aprirai l&apos;attivita?" subtitle="Domanda 4 di 12">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q4', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q4', value)} />
+          <QuestionLayout
+            title={q('q4')?.title ?? "Sei residente nella regione in cui aprirai l'attivita?"}
+            subtitle="Domanda 4 di 12"
+          >
+            {(q('q4')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q4', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q4b' ? (
-          <QuestionLayout title="Sei disposto a trasferire la residenza prima dell&apos;erogazione?" subtitle="Domanda 4-B">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q4b', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q4b', value)} />
+          <QuestionLayout
+            title={q('q4b')?.title ?? "Sei disposto a trasferire la residenza prima dell'erogazione?"}
+            subtitle="Domanda 4-B"
+          >
+            {(q('q4b')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q4b', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q5' ? (
-          <QuestionLayout title="Qual e la tua situazione lavorativa attuale?" subtitle="Domanda 5 di 12">
-            <OptionButton text="Disoccupato" value="A" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Inoccupato" value="B" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Iscritto Programma GOL" value="C" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Working poor" value="D" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Lavoratore a tempo determinato" value="E" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Lavoratore a tempo indeterminato" value="F" onPick={(value) => handleAnswer('q5', value)} />
-            <OptionButton text="Libero professionista / Partita IVA" value="G" onPick={(value) => handleAnswer('q5', value)} />
+          <QuestionLayout title={q('q5')?.title ?? 'Qual e la tua situazione lavorativa attuale?'} subtitle="Domanda 5 di 12">
+            {(q('q5')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q5', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q5b' ? (
-          <QuestionLayout title="Sei disposto a chiudere P.IVA o contratto prima dell&apos;erogazione?" subtitle="Domanda 5-B">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q5b', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q5b', value)} />
+          <QuestionLayout
+            title={q('q5b')?.title ?? "Sei disposto a chiudere P.IVA o contratto prima dell'erogazione?"}
+            subtitle="Domanda 5-B"
+          >
+            {(q('q5b')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q5b', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q5c' ? (
-          <QuestionLayout title="Sei disposto a dimetterti prima dell&apos;erogazione?" subtitle="Domanda 5-C">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q5c', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q5c', value)} />
+          <QuestionLayout title={q('q5c')?.title ?? "Sei disposto a dimetterti prima dell'erogazione?"} subtitle="Domanda 5-C">
+            {(q('q5c')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q5c', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q6' ? (
-          <QuestionLayout title="Hai una Partita IVA attiva o chiusa di recente?" subtitle="Domanda 6 di 12">
-            <OptionButton text="No, mai avuta" value="A" onPick={(value) => handleAnswer('q6', value)} />
-            <OptionButton text="Si, ma e chiusa" value="B" onPick={(value) => handleAnswer('q6', value)} />
-            <OptionButton text="Si, e attiva" value="C" onPick={(value) => handleAnswer('q6', value)} />
+          <QuestionLayout title={q('q6')?.title ?? 'Hai una Partita IVA attiva o chiusa di recente?'} subtitle="Domanda 6 di 12">
+            {(q('q6')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q6', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q6b' ? (
           <QuestionLayout
-            title="La nuova attivita ha progetto diverso o primi 3 numeri ATECO diversi?"
+            title={q('q6b')?.title ?? 'La nuova attivita ha progetto diverso o primi 3 numeri ATECO diversi?'}
             subtitle="Domanda 6-B"
           >
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q6b', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q6b', value)} />
+            {(q('q6b')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q6b', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q7' ? (
-          <QuestionLayout title="Come intendi avviare l&apos;attivita?" subtitle="Domanda 7 di 12">
-            <OptionButton text="Ditta individuale" value="A" onPick={(value) => handleAnswer('q7', value)} />
-            <OptionButton text="Societa" value="B" onPick={(value) => handleAnswer('q7', value)} />
-            <OptionButton text="Attivita professionale" value="C" onPick={(value) => handleAnswer('q7', value)} />
+          <QuestionLayout title={q('q7')?.title ?? "Come intendi avviare l'attivita?"} subtitle="Domanda 7 di 12">
+            {(q('q7')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q7', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q8' ? (
-          <QuestionLayout title="Sono presenti soci con 35 anni o piu?" subtitle="Domanda 8 di 12">
-            <OptionButton text="No" value="A" onPick={(value) => handleAnswer('q8', value)} />
-            <OptionButton text="Si" value="B" onPick={(value) => handleAnswer('q8', value)} />
+          <QuestionLayout title={q('q8')?.title ?? 'Sono presenti soci con 35 anni o piu?'} subtitle="Domanda 8 di 12">
+            {(q('q8')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q8', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q8b' ? (
-          <QuestionLayout title="Il socio 18-34 anni deterra almeno il 51%?" subtitle="Domanda 8-B">
-            <OptionButton text="Si" value="A" onPick={(value) => handleAnswer('q8b', value)} />
-            <OptionButton text="No" value="B" onPick={(value) => handleAnswer('q8b', value)} />
+          <QuestionLayout title={q('q8b')?.title ?? 'Il socio 18-34 anni deterra almeno il 51%?'} subtitle="Domanda 8-B">
+            {(q('q8b')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q8b', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q9' ? (
-          <QuestionLayout title="Qual e lo stato dell&apos;attivita?" subtitle="Domanda 9 di 12">
-            <OptionButton text="Non ancora avviata" value="A" onPick={(value) => handleAnswer('q9', value)} />
-            <OptionButton text="Avviata da meno di 1 mese" value="B" onPick={(value) => handleAnswer('q9', value)} />
-            <OptionButton text="Avviata da piu di 1 mese" value="C" onPick={(value) => handleAnswer('q9', value)} />
+          <QuestionLayout title={q('q9')?.title ?? "Qual e lo stato dell'attivita?"} subtitle="Domanda 9 di 12">
+            {(q('q9')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q9', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q10' ? (
-          <QuestionLayout title="Qual e l&apos;investimento complessivo previsto?" subtitle="Domanda 10 di 12">
-            {investmentOptions.map((option) => (
-              <OptionButton key={option.value} text={option.text} value={option.value} onPick={(value) => handleAnswer('q10', value)} />
+          <QuestionLayout title={q('q10')?.title ?? "Qual e l'investimento complessivo previsto?"} subtitle="Domanda 10 di 12">
+            {(q('q10')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q10', value)} />
             ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
 
         {step === 'q11' ? (
-          <QuestionLayout title="Quante risorse personali puoi dimostrare di avere disponibili?" subtitle="Domanda 11 di 12">
+          <QuestionLayout title={q('q11')?.title ?? 'Quante risorse personali puoi dimostrare di avere disponibili?'} subtitle="Domanda 11 di 12">
             <p className="info-box">
               ⚠️ <strong>Attenzione:</strong> non dovrai spendere questo importo. E richiesto solo come titolo di garanzia
               (min. 10%) e potra essere svincolato dopo i pagamenti ai fornitori.
             </p>
-            <OptionButton text="Meno del 10%" value="A" onPick={(value) => handleAnswer('q11', value)} />
-            <OptionButton text="Circa il 10%" value="B" onPick={(value) => handleAnswer('q11', value)} />
-            <OptionButton text="Oltre il 10%" value="C" onPick={(value) => handleAnswer('q11', value)} />
+            {(q('q11')?.options ?? []).map((opt) => (
+              <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q11', value)} />
+            ))}
             <BackRow onBack={goBack} />
           </QuestionLayout>
         ) : null}
@@ -583,6 +594,33 @@ export default function QuizPage() {
                 value={contact.phone}
                 onChange={(event) => setContact((previous) => ({ ...previous, phone: event.target.value }))}
               />
+            </div>
+
+            <div className="quiz-consents">
+              <div className="quiz-consents-title">Consensi obbligatori</div>
+              <label className="quiz-consent-row">
+                <input type="checkbox" checked={consentPrivacy} onChange={(e) => setConsentPrivacy(e.target.checked)} />
+                <span>
+                  Ho letto e accetto la <Link href="/privacy">Privacy Policy</Link>.
+                </span>
+              </label>
+              <label className="quiz-consent-row">
+                <input type="checkbox" checked={consentTerms} onChange={(e) => setConsentTerms(e.target.checked)} />
+                <span>
+                  Accetto i <Link href="/termini">Termini e Condizioni</Link>.
+                </span>
+              </label>
+              <label className="quiz-consent-row">
+                <input
+                  type="checkbox"
+                  checked={consentDataProcessing}
+                  onChange={(e) => setConsentDataProcessing(e.target.checked)}
+                />
+                <span>Acconsento al trattamento dei dati per la verifica requisiti e per essere ricontattato.</span>
+              </label>
+              <div className="quiz-consents-note">
+                Maggiori informazioni: <Link href="/gdpr">GDPR</Link> e <Link href="/cookie-policy">Cookie</Link>.
+              </div>
             </div>
 
             <div className="buttons">
@@ -622,7 +660,7 @@ export default function QuizPage() {
               <button
                 type="button"
                 className="btn-next"
-                onClick={() => window.open('https://wa.me/393471234567', '_blank')}
+                onClick={() => window.open(SUPPORT_WHATSAPP_URL, '_blank')}
               >
                 Contattaci
               </button>
@@ -669,11 +707,11 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => window.open('https://wa.me/393471234567', '_blank')}
+                onClick={() => window.open(SUPPORT_WHATSAPP_URL, '_blank')}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.open('https://wa.me/393471234567', '_blank');
+                    window.open(SUPPORT_WHATSAPP_URL, '_blank');
                   }
                 }}
               >

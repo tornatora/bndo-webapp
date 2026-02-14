@@ -94,44 +94,19 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle();
 
-    if (!latestQuiz) {
-      return NextResponse.json(
-        { error: 'Completa prima il quiz requisiti per poter richiedere una nuova pratica.' },
-        { status: 403 }
-      );
-    }
-
-    if (latestQuiz.eligibility !== 'eligible') {
-      return NextResponse.json(
-        { error: 'Il tuo ultimo quiz risulta non idoneo. Completa nuovamente il quiz prima di richiedere la pratica.' },
-        { status: 403 }
-      );
-    }
-
-    const allowedPractice: PracticeType | null =
-      latestQuiz.bando_type === 'sud'
-        ? 'resto_sud_2_0'
-        : latestQuiz.bando_type === 'centro_nord'
-          ? 'autoimpiego_centro_nord'
-          : null;
-
-    if (allowedPractice && allowedPractice !== practiceType) {
-      return NextResponse.json(
-        { error: `In base al tuo quiz puoi richiedere solo: ${practiceTitle(allowedPractice)}.` },
-        { status: 403 }
-      );
-    }
+    // Quiz is optional: users can request a practice even without completing the quiz.
+    // If present, we still attach it for context (ops/admin), but we do not block.
 
     const { data: company } = await admin.from('companies').select('name').eq('id', typedProfile.company_id).maybeSingle();
 
     const practiceLabel = practiceTitle(practiceType);
-    const challenge = `Richiesta nuova pratica dashboard: ${practiceLabel} | Quiz: ${latestQuiz.id}`;
+    const challenge = `Richiesta nuova pratica dashboard: ${practiceLabel} | Quiz: ${latestQuiz?.id ?? 'N/D'}`;
 
     const { error: leadError } = await admin.from('leads').insert({
       full_name: typedProfile.full_name,
       email,
       company_name: company?.name ?? 'Cliente BNDO',
-      phone: latestQuiz.phone ?? null,
+      phone: latestQuiz?.phone ?? null,
       challenge
     });
 
@@ -177,7 +152,7 @@ export async function POST(request: Request) {
     await admin.from('consultant_messages').insert({
       thread_id: threadId,
       sender_profile_id: typedProfile.id,
-      body: `Richiesta nuova pratica: ${practiceLabel}. Ho completato il quiz e desidero avviare la pratica.`
+      body: `Richiesta nuova pratica: ${practiceLabel}. Desidero avviare la pratica.`
     });
 
     await ensureOpsAutoReply(threadId);

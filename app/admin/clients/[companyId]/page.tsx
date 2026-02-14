@@ -17,6 +17,8 @@ import { AdminPracticeStatusBadge } from '@/components/admin/AdminPracticeStatus
 import { AdminQuizViewer } from '@/components/admin/AdminQuizViewer';
 import { AdminClientCoreInfoForm } from '@/components/admin/AdminClientCoreInfoForm';
 import { AdminBillingPanel } from '@/components/admin/AdminBillingPanel';
+import { AdminMobileTabs } from '@/components/admin/AdminMobileTabs';
+import { AdminPracticeSwitch } from '@/components/admin/AdminPracticeSwitch';
 
 const ParamsSchema = z.object({
   companyId: z.string().uuid()
@@ -96,7 +98,7 @@ export default async function AdminClientDetailPage({
     const selectedPractice = selectedPracticeId ? detail.practices.find((p) => p.id === selectedPracticeId) ?? null : null;
 
     return (
-      <div className="dashboard-shell-client">
+      <div className="dashboard-shell-client admin-shell-admin">
         <aside className="dashboard-sidebar-client">
           <nav className="main-tabs" aria-label="Menu cliente">
             <div className="main-tabs-container">
@@ -187,62 +189,86 @@ export default async function AdminClientDetailPage({
                 const missingCount = checklist.filter((item) => !item.uploaded).length;
                 const initialStep = computeDerivedProgressKey(selectedPractice.status, missingCount);
                 const title = displayPracticeTitle(selectedPractice);
+                const selectedDocsLabel = docsView === 'missing' ? 'Documenti mancanti' : 'Documenti caricati';
 
                 return (
                   <article className="pratica-card">
-                    <div className="pratica-header">
-                      <div>
-                        <h2 className="pratica-title">{title}</h2>
-                        <p className="pratica-type">
-                          Aggiornata: {new Date(selectedPractice.updated_at).toLocaleString('it-IT')}
-                          {selectedPractice.notes ? ` · ${selectedPractice.notes}` : ''}
-                        </p>
-                      </div>
-                      <AdminPracticeStatusBadge applicationId={selectedPractice.id} initialStep={initialStep} />
-                    </div>
+                    <AdminPracticeSwitch
+                      companyId={companyId}
+                      selectedPracticeId={selectedPractice.id}
+                      practices={detail.practices.map((p) => ({ id: p.id, title: displayPracticeTitle(p) }))}
+                    />
+                    {docsView === 'all' ? (
+                      <>
+                        <div className="pratica-header">
+                          <div>
+                            <h2 className="pratica-title">{title}</h2>
+                            <p className="pratica-type">
+                              Aggiornata: {new Date(selectedPractice.updated_at).toLocaleString('it-IT')}
+                              {selectedPractice.notes ? ` · ${selectedPractice.notes}` : ''}
+                            </p>
+                          </div>
+                          <AdminPracticeStatusBadge applicationId={selectedPractice.id} initialStep={initialStep} />
+                        </div>
 
-                    <div className="admin-practice-crm">
-                      <div className="admin-practice-crm-top">
-                        <Link className="admin-kpi admin-kpi-link" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=missing`}>
-                          <div className="admin-kpi-label">Mancanti</div>
-                          <div className={`admin-kpi-value ${missingCount > 0 ? 'is-warn' : 'is-ok'}`}>{missingCount}</div>
-                        </Link>
-                      <Link className="admin-kpi admin-kpi-link" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=uploaded`}>
-                        <div className="admin-kpi-label">Caricati</div>
-                        <div className="admin-kpi-value">{appDocs.length}</div>
-                      </Link>
+                        <div className="admin-practice-crm">
+                          <div className="admin-practice-crm-top">
+                            <Link
+                              className="admin-kpi admin-kpi-link"
+                              href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=missing`}
+                            >
+                              <div className="admin-kpi-label">Mancanti</div>
+                              <div className={`admin-kpi-value ${missingCount > 0 ? 'is-warn' : 'is-ok'}`}>{missingCount}</div>
+                            </Link>
+                            <Link
+                              className="admin-kpi admin-kpi-link"
+                              href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=uploaded`}
+                            >
+                              <div className="admin-kpi-label">Caricati</div>
+                              <div className="admin-kpi-value">{appDocs.length}</div>
+                            </Link>
 
-                      <div style={{ marginLeft: 'auto' }}>
-                        <RequestDocumentsModal
-                          threadId={detail.threadId}
-                          context={`Bando: ${title}`}
-                          buttonLabel="Nuova richiesta"
+                            <div style={{ marginLeft: 'auto' }}>
+                              <RequestDocumentsModal
+                                threadId={detail.threadId}
+                                context={`Bando: ${title}`}
+                                buttonLabel="Nuova richiesta"
+                              />
+                            </div>
+                          </div>
+
+                          <AdminPracticeProgress
+                            applicationId={selectedPractice.id}
+                            initialStep={initialStep}
+                            threadId={detail.threadId}
+                            toEmail={client.clientEmail}
+                            companyName={client.companyName}
+                            practiceTitle={title}
+                            isMock
                           />
                         </div>
-                      </div>
+                      </>
+                    ) : (
+                      (() => {
+                        const missingAll = checklist.filter((c) => !c.uploaded);
+                        const missingFiltered = qNorm ? missingAll.filter((r) => r.label.toLowerCase().includes(qNorm)) : missingAll;
+                        const docsFiltered = qNorm ? appDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : appDocs;
 
-                      {docsView === 'all' ? (
-                        <AdminPracticeProgress
-                          applicationId={selectedPractice.id}
-                          initialStep={initialStep}
-                          threadId={detail.threadId}
-                          toEmail={client.clientEmail}
-                          companyName={client.companyName}
-                          practiceTitle={title}
-                          isMock
-                        />
-                      ) : null}
+                        return (
+                          <>
+                            <div className="admin-docs-only-head">
+                              <div>
+                                <div className="admin-docs-only-title">{title}</div>
+                                <div className="admin-docs-only-sub">{selectedDocsLabel}</div>
+                              </div>
+                              <Link className="admin-docs-only-back" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}`}>
+                                ← Torna
+                              </Link>
+                            </div>
 
-                      {docsView !== 'all' ? (
-                        (() => {
-                          const missingAll = checklist.filter((c) => !c.uploaded);
-                          const missingFiltered = qNorm ? missingAll.filter((r) => r.label.toLowerCase().includes(qNorm)) : missingAll;
-                          const docsFiltered = qNorm ? appDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : appDocs;
-
-                          return (
                             <section className="admin-docs-panel">
                               <div className="admin-docs-panel-head">
-                                <div className="admin-docs-title">{docsView === 'missing' ? 'Documenti mancanti' : 'Documenti caricati'}</div>
+                                <div className="admin-docs-title">{selectedDocsLabel}</div>
                                 <Link className="admin-docs-back" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}`}>
                                   Chiudi
                                 </Link>
@@ -251,12 +277,7 @@ export default async function AdminClientDetailPage({
                               <div className="admin-docs-search">
                                 <span className="admin-docs-search-icon">⌕</span>
                                 <form>
-                                  <input
-                                    className="admin-docs-search-input"
-                                    name="q"
-                                    placeholder="Cerca documento…"
-                                    defaultValue={q}
-                                  />
+                                  <input className="admin-docs-search-input" name="q" placeholder="Cerca documento…" defaultValue={q} />
                                   <input type="hidden" name="tab" value={`practice:${selectedPractice.id}`} />
                                   <input type="hidden" name="docs" value={docsView} />
                                 </form>
@@ -272,20 +293,24 @@ export default async function AdminClientDetailPage({
                                       {missingFiltered.map((req) => (
                                         <li key={req.key} className="admin-checklist-item is-missing">
                                           <span className="admin-check is-missing" aria-hidden="true" />
-                                          <span style={{ flex: 1 }}>{req.label}</span>
-                                          <DocReminderButton
-                                            threadId={detail.threadId}
-                                            toEmail={client.clientEmail}
-                                            companyName={client.companyName}
-                                            practiceTitle={title}
-                                            documentLabel={req.label}
-                                          />
-                                          <AdminUploadDocButton
-                                            applicationId={selectedPractice.id}
-                                            companyId={client.companyId}
-                                            documentLabel={req.label}
-                                            disabledReason="Upload admin (mock) non attivo"
-                                          />
+                                          <div className="admin-checklist-body">
+                                            <div className="admin-checklist-label">{req.label}</div>
+                                            <div className="admin-checklist-actions">
+                                              <DocReminderButton
+                                                threadId={detail.threadId}
+                                                toEmail={client.clientEmail}
+                                                companyName={client.companyName}
+                                                practiceTitle={title}
+                                                documentLabel={req.label}
+                                              />
+                                              <AdminUploadDocButton
+                                                applicationId={selectedPractice.id}
+                                                companyId={client.companyId}
+                                                documentLabel={req.label}
+                                                disabledReason="Upload admin (mock) non attivo"
+                                              />
+                                            </div>
+                                          </div>
                                         </li>
                                       ))}
                                     </ul>
@@ -320,10 +345,10 @@ export default async function AdminClientDetailPage({
                                 </div>
                               )}
                             </section>
-                          );
-                        })()
-                      ) : null}
-                    </div>
+                          </>
+                        );
+                      })()
+                    )}
                   </article>
                 );
               })()
@@ -336,7 +361,7 @@ export default async function AdminClientDetailPage({
           ) : null}
 
           {activeTab === 'chat' ? (
-            <section className="section-card">
+            <section className="section-card admin-chat-page">
               <div className="section-title">
                 <span>💬</span>
                 <span>Chat con Cliente</span>
@@ -356,6 +381,12 @@ export default async function AdminClientDetailPage({
             />
           ) : null}
         </main>
+
+        <AdminMobileTabs
+          companyId={companyId}
+          activeTab={activeTab}
+          practices={detail.practices.map((p) => ({ id: p.id, title: displayPracticeTitle(p) }))}
+        />
       </div>
     );
   }
@@ -418,7 +449,7 @@ export default async function AdminClientDetailPage({
   const selectedPractice = selectedPracticeId ? summary.applications.find((p) => p.id === selectedPracticeId) ?? null : null;
 
   return (
-    <div className="dashboard-shell-client">
+    <div className="dashboard-shell-client admin-shell-admin">
       <aside className="dashboard-sidebar-client">
         <nav className="main-tabs" aria-label="Menu cliente">
           <div className="main-tabs-container">
@@ -513,62 +544,82 @@ export default async function AdminClientDetailPage({
               const missingCount = checklist.filter((item) => !item.uploaded).length;
               const initialStep = extractProgressFromNotes(selectedPractice.notes) ?? computeDerivedProgressKey(selectedPractice.status, missingCount);
               const title = displayPracticeTitle(selectedPractice);
+              const selectedDocsLabel = docsView === 'missing' ? 'Documenti mancanti' : 'Documenti caricati';
 
               return (
                 <article className="pratica-card">
-                  <div className="pratica-header">
-                    <div>
-                      <h2 className="pratica-title">{title}</h2>
-                      <p className="pratica-type">
-                        Aggiornata: {new Date(selectedPractice.updated_at).toLocaleString('it-IT')}
-                        {selectedPractice.notes ? ` · ${selectedPractice.notes}` : ''}
-                      </p>
-                    </div>
-                    <AdminPracticeStatusBadge applicationId={selectedPractice.id} initialStep={initialStep} />
-                  </div>
+                  <AdminPracticeSwitch
+                    companyId={companyId}
+                    selectedPracticeId={selectedPractice.id}
+                    practices={summary.applications.map((p) => ({ id: p.id, title: displayPracticeTitle(p) }))}
+                  />
+                  {docsView === 'all' ? (
+                    <>
+                      <div className="pratica-header">
+                        <div>
+                          <h2 className="pratica-title">{title}</h2>
+                          <p className="pratica-type">
+                            Aggiornata: {new Date(selectedPractice.updated_at).toLocaleString('it-IT')}
+                            {selectedPractice.notes ? ` · ${selectedPractice.notes}` : ''}
+                          </p>
+                        </div>
+                        <AdminPracticeStatusBadge applicationId={selectedPractice.id} initialStep={initialStep} />
+                      </div>
 
-                  <div className="admin-practice-crm">
-                    <div className="admin-practice-crm-top">
-                      <Link className="admin-kpi admin-kpi-link" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=missing`}>
-                        <div className="admin-kpi-label">Mancanti</div>
-                        <div className={`admin-kpi-value ${missingCount > 0 ? 'is-warn' : 'is-ok'}`}>{missingCount}</div>
-                      </Link>
-                    <Link className="admin-kpi admin-kpi-link" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=uploaded`}>
-                      <div className="admin-kpi-label">Caricati</div>
-                      <div className="admin-kpi-value">{appDocs.length}</div>
-                    </Link>
+                      <div className="admin-practice-crm">
+                        <div className="admin-practice-crm-top">
+                          <Link
+                            className="admin-kpi admin-kpi-link"
+                            href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=missing`}
+                          >
+                            <div className="admin-kpi-label">Mancanti</div>
+                            <div className={`admin-kpi-value ${missingCount > 0 ? 'is-warn' : 'is-ok'}`}>{missingCount}</div>
+                          </Link>
+                          <Link
+                            className="admin-kpi admin-kpi-link"
+                            href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}&docs=uploaded`}
+                          >
+                            <div className="admin-kpi-label">Caricati</div>
+                            <div className="admin-kpi-value">{appDocs.length}</div>
+                          </Link>
 
-                    <div style={{ marginLeft: 'auto' }}>
-                      <RequestDocumentsModal
-                        threadId={threadId}
-                        context={`Bando: ${title}`}
-                        buttonLabel="Nuova richiesta"
+                          <div style={{ marginLeft: 'auto' }}>
+                            <RequestDocumentsModal threadId={threadId} context={`Bando: ${title}`} buttonLabel="Nuova richiesta" />
+                          </div>
+                        </div>
+
+                        <AdminPracticeProgress
+                          applicationId={selectedPractice.id}
+                          initialStep={initialStep}
+                          threadId={threadId}
+                          toEmail={summary.clientProfile?.email ?? null}
+                          companyName={summary.company?.name ?? 'Cliente'}
+                          practiceTitle={title}
+                          isMock={false}
                         />
                       </div>
-                    </div>
+                    </>
+                  ) : (
+                    (() => {
+                      const missingAll = checklist.filter((c) => !c.uploaded);
+                      const missingFiltered = qNorm ? missingAll.filter((r) => r.label.toLowerCase().includes(qNorm)) : missingAll;
+                      const docsFiltered = qNorm ? appDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : appDocs;
 
-                    {docsView === 'all' ? (
-                      <AdminPracticeProgress
-                        applicationId={selectedPractice.id}
-                        initialStep={initialStep}
-                        threadId={threadId}
-                        toEmail={summary.clientProfile?.email ?? null}
-                        companyName={summary.company?.name ?? 'Cliente'}
-                        practiceTitle={title}
-                        isMock={false}
-                      />
-                    ) : null}
+                      return (
+                        <>
+                          <div className="admin-docs-only-head">
+                            <div>
+                              <div className="admin-docs-only-title">{title}</div>
+                              <div className="admin-docs-only-sub">{selectedDocsLabel}</div>
+                            </div>
+                            <Link className="admin-docs-only-back" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}`}>
+                              ← Torna
+                            </Link>
+                          </div>
 
-                    {docsView !== 'all' ? (
-                      (() => {
-                        const missingAll = checklist.filter((c) => !c.uploaded);
-                        const missingFiltered = qNorm ? missingAll.filter((r) => r.label.toLowerCase().includes(qNorm)) : missingAll;
-                        const docsFiltered = qNorm ? appDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : appDocs;
-
-                        return (
                           <section className="admin-docs-panel">
                             <div className="admin-docs-panel-head">
-                              <div className="admin-docs-title">{docsView === 'missing' ? 'Documenti mancanti' : 'Documenti caricati'}</div>
+                              <div className="admin-docs-title">{selectedDocsLabel}</div>
                               <Link className="admin-docs-back" href={`/admin/clients/${companyId}?tab=practice:${selectedPractice.id}`}>
                                 Chiudi
                               </Link>
@@ -577,12 +628,7 @@ export default async function AdminClientDetailPage({
                             <div className="admin-docs-search">
                               <span className="admin-docs-search-icon">⌕</span>
                               <form>
-                                <input
-                                  className="admin-docs-search-input"
-                                  name="q"
-                                  placeholder="Cerca documento…"
-                                  defaultValue={q}
-                                />
+                                <input className="admin-docs-search-input" name="q" placeholder="Cerca documento…" defaultValue={q} />
                                 <input type="hidden" name="tab" value={`practice:${selectedPractice.id}`} />
                                 <input type="hidden" name="docs" value={docsView} />
                               </form>
@@ -598,19 +644,19 @@ export default async function AdminClientDetailPage({
                                     {missingFiltered.map((req) => (
                                       <li key={req.key} className="admin-checklist-item is-missing">
                                         <span className="admin-check is-missing" aria-hidden="true" />
-                                        <span style={{ flex: 1 }}>{req.label}</span>
-                                        <DocReminderButton
-                                          threadId={threadId}
-                                          toEmail={summary.clientProfile?.email ?? null}
-                                          companyName={summary.company?.name ?? 'Cliente'}
-                                          practiceTitle={title}
-                                          documentLabel={req.label}
-                                        />
-                                        <AdminUploadDocButton
-                                          applicationId={selectedPractice.id}
-                                          companyId={companyId}
-                                          documentLabel={req.label}
-                                        />
+                                        <div className="admin-checklist-body">
+                                          <div className="admin-checklist-label">{req.label}</div>
+                                          <div className="admin-checklist-actions">
+                                            <DocReminderButton
+                                              threadId={threadId}
+                                              toEmail={summary.clientProfile?.email ?? null}
+                                              companyName={summary.company?.name ?? 'Cliente'}
+                                              practiceTitle={title}
+                                              documentLabel={req.label}
+                                            />
+                                            <AdminUploadDocButton applicationId={selectedPractice.id} companyId={companyId} documentLabel={req.label} />
+                                          </div>
+                                        </div>
                                       </li>
                                     ))}
                                   </ul>
@@ -648,10 +694,10 @@ export default async function AdminClientDetailPage({
                               </div>
                             )}
                           </section>
-                        );
-                      })()
-                    ) : null}
-                  </div>
+                        </>
+                      );
+                    })()
+                  )}
                 </article>
               );
             })()
@@ -664,7 +710,7 @@ export default async function AdminClientDetailPage({
         ) : null}
 
         {activeTab === 'chat' ? (
-          <section className="section-card">
+          <section className="section-card admin-chat-page">
             <div className="section-title">
               <span>💬</span>
               <span>Chat con Cliente</span>
@@ -697,6 +743,12 @@ export default async function AdminClientDetailPage({
           />
         ) : null}
       </main>
+
+      <AdminMobileTabs
+        companyId={companyId}
+        activeTab={activeTab}
+        practices={summary.applications.map((p) => ({ id: p.id, title: displayPracticeTitle(p) }))}
+      />
     </div>
   );
 }

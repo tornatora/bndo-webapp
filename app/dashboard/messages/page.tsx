@@ -74,17 +74,19 @@ export default async function DashboardMessagesPage() {
 
   return (
     <>
-      <section className="welcome-section">
+      <section className="welcome-section chat-hero">
         <h1 className="welcome-title">Messaggi</h1>
         <p className="welcome-subtitle">Chat diretta con il consulente. Risposta automatica immediata attiva.</p>
       </section>
 
-      <ChatPanel
-        threadId={threadId}
-        viewerProfileId={profile.id}
-        initialMessages={messages ?? []}
-        initialLastReadAt={participant?.last_read_at ?? null}
-      />
+      <div className="chat-page">
+        <ChatPanel
+          threadId={threadId}
+          viewerProfileId={profile.id}
+          initialMessages={messages ?? []}
+          initialLastReadAt={participant?.last_read_at ?? null}
+        />
+      </div>
     </>
   );
 }

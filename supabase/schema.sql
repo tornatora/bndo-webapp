@@ -63,6 +63,29 @@ create table if not exists public.company_crm (
   created_at timestamptz not null default now()
 );
 
+-- -----------------------------------------------------
+-- Legal consent evidence (internal)
+-- -----------------------------------------------------
+create table if not exists public.legal_consents (
+  id uuid primary key default gen_random_uuid(),
+  context text not null check (context in ('quiz', 'after_payment_onboarding')),
+  email text not null,
+  company_id uuid references public.companies(id) on delete set null,
+  user_id uuid references public.profiles(id) on delete set null,
+  application_id uuid references public.tender_applications(id) on delete set null,
+  checkout_session_id text,
+  quiz_submission_id uuid references public.quiz_submissions(id) on delete set null,
+  consents jsonb not null default '{}'::jsonb,
+  ip_address text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_legal_consents_email on public.legal_consents (email);
+create index if not exists idx_legal_consents_company on public.legal_consents (company_id);
+create unique index if not exists idx_legal_consents_context_quiz on public.legal_consents (context, quiz_submission_id);
+create unique index if not exists idx_legal_consents_context_checkout on public.legal_consents (context, checkout_session_id);
+
 create table if not exists public.service_orders (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id) on delete cascade,
@@ -233,6 +256,8 @@ alter table public.companies enable row level security;
 alter table public.profiles enable row level security;
 alter table public.leads enable row level security;
 alter table public.quiz_submissions enable row level security;
+alter table public.company_crm enable row level security;
+alter table public.legal_consents enable row level security;
 alter table public.service_orders enable row level security;
 alter table public.onboarding_credentials enable row level security;
 alter table public.tenders enable row level security;
@@ -261,6 +286,19 @@ create policy "companies_select_member"
 on public.companies
 for select
 using (public.is_company_member(id) or public.is_ops_user());
+
+drop policy if exists "company_crm_ops_only" on public.company_crm;
+create policy "company_crm_ops_only"
+on public.company_crm
+for all
+using (public.is_ops_user())
+with check (public.is_ops_user());
+
+drop policy if exists "legal_consents_select_ops" on public.legal_consents;
+create policy "legal_consents_select_ops"
+on public.legal_consents
+for select
+using (public.is_ops_user());
 
 drop policy if exists "service_orders_select_member" on public.service_orders;
 create policy "service_orders_select_member"

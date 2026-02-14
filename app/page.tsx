@@ -430,13 +430,21 @@ export default function HomePage() {
             <h4>Supporto</h4>
             <ul>
               <li>
-                <a href="#">Contatti</a>
+                <a href="https://wa.me/393477298671" target="_blank" rel="noreferrer">
+                  Contatti
+                </a>
               </li>
               <li>
-                <a href="#">Privacy</a>
+                <Link href="/privacy">Privacy</Link>
               </li>
               <li>
-                <a href="#">Termini</a>
+                <Link href="/cookie-policy">Cookie</Link>
+              </li>
+              <li>
+                <Link href="/gdpr">GDPR</Link>
+              </li>
+              <li>
+                <Link href="/termini">Termini</Link>
               </li>
             </ul>
           </div>

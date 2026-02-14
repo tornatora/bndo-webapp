@@ -72,6 +72,32 @@ export function AdminQuizViewer({
 
   const questions = useMemo(() => getQuizQuestions(data?.bando_type ?? null), [data?.bando_type]);
   const answersRecord = useMemo(() => (data ? safeAnswersRecord(data.answers as unknown as Json) : {}), [data]);
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const knownIds = new Set(questions.map((q) => q.id));
+    const out: Array<{ key: string; question: string; answer: string }> = [];
+
+    for (const question of questions) {
+      const raw = answersRecord[question.id];
+      const value = formatQuizAnswerValue(question, raw);
+      if (!value) continue;
+      out.push({ key: question.id, question: question.title, answer: value });
+    }
+
+    // Forward/backward compatibility: show any stored answers not present in the current quiz map.
+    for (const [key, raw] of Object.entries(answersRecord)) {
+      if (knownIds.has(key)) continue;
+      if (key.startsWith('_legal_')) continue;
+      if (raw == null || raw === '') continue;
+      const answer =
+        typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean'
+          ? String(raw)
+          : JSON.stringify(raw);
+      out.push({ key, question: key, answer });
+    }
+
+    return out;
+  }, [answersRecord, data, questions]);
 
   async function open(key: QuizKey) {
     setActive(key);
@@ -149,17 +175,16 @@ export function AdminQuizViewer({
               </div>
 
               <div className="admin-quiz-qa">
-                {questions.map((q) => {
-                  const raw = answersRecord[q.id];
-                  const value = formatQuizAnswerValue(q, raw);
-                  if (!value) return null;
-                  return (
-                    <div key={q.id} className="admin-quiz-row">
-                      <div className="admin-quiz-q">{q.title}</div>
-                      <div className="admin-quiz-a">{value}</div>
+                {rows.length === 0 ? (
+                  <div className="admin-panel-empty">Nessuna risposta disponibile.</div>
+                ) : (
+                  rows.map((row) => (
+                    <div key={row.key} className="admin-quiz-row">
+                      <div className="admin-quiz-q">{row.question}</div>
+                      <div className="admin-quiz-a">{row.answer}</div>
                     </div>
-                  );
-                })}
+                  ))
+                )}
               </div>
             </>
           ) : null}

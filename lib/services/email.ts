@@ -2,7 +2,6 @@ type SendOnboardingCredentialsEmailInput = {
   toEmail: string;
   contactName: string;
   companyName: string;
-  username: string;
   tempPassword: string;
   loginUrl: string;
 };
@@ -55,36 +54,36 @@ export async function sendOnboardingCredentialsEmail(
     };
   }
 
-  const subject = `Credenziali accesso BidPilot - ${input.companyName}`;
+  const subject = `Credenziali accesso BNDO - ${input.companyName}`;
 
   const text = [
     `Ciao ${input.contactName},`,
     '',
-    'il tuo account BidPilot e stato attivato con successo.',
+    'il tuo account BNDO e stato attivato con successo.',
     '',
     `Azienda: ${input.companyName}`,
-    `Username: ${input.username}`,
+    `Email (login): ${input.toEmail}`,
     `Password temporanea: ${input.tempPassword}`,
     '',
     `Accedi qui: ${input.loginUrl}`,
     '',
     'Ti consigliamo di modificare la password al primo accesso.',
     '',
-    'Team BidPilot'
+    'Team BNDO'
   ].join('\n');
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10243a;max-width:640px;margin:0 auto;padding:24px;">
-      <h1 style="font-size:20px;margin:0 0 12px;">Account BidPilot attivato</h1>
+      <h1 style="font-size:20px;margin:0 0 12px;">Account BNDO attivato</h1>
       <p style="margin:0 0 16px;">Ciao ${escapeHtml(input.contactName)}, il tuo account e pronto.</p>
       <div style="background:#f2f6fa;border:1px solid #d8e2ec;border-radius:12px;padding:16px;margin-bottom:16px;">
         <p style="margin:0 0 8px;"><strong>Azienda:</strong> ${escapeHtml(input.companyName)}</p>
-        <p style="margin:0 0 8px;"><strong>Username:</strong> ${escapeHtml(input.username)}</p>
+        <p style="margin:0 0 8px;"><strong>Email (login):</strong> ${escapeHtml(input.toEmail)}</p>
         <p style="margin:0;"><strong>Password temporanea:</strong> ${escapeHtml(input.tempPassword)}</p>
       </div>
       <p style="margin:0 0 16px;">Ti consigliamo di modificare la password al primo accesso.</p>
       <a href="${escapeHtml(input.loginUrl)}" style="display:inline-block;background:#0a2540;color:#ffffff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:600;">Accedi alla dashboard</a>
-      <p style="margin:16px 0 0;font-size:12px;color:#5f7388;">Team BidPilot</p>
+      <p style="margin:16px 0 0;font-size:12px;color:#5f7388;">Team BNDO</p>
     </div>
   `;
 

@@ -3,13 +3,14 @@ import Image from 'next/image';
 import { requireOpsProfile } from '@/lib/auth';
 import { SignOutButton } from '@/components/dashboard/SignOutButton';
 import { MARKETING_URL } from '@/lib/site-urls';
+import { AdminNotificationsBell } from '@/components/admin/AdminNotificationsBell';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const isMock = process.env.MOCK_BACKEND === 'true';
   const profile = isMock ? { full_name: 'Admin (Mock)' } : (await requireOpsProfile()).profile;
 
   return (
-    <div className="dashboard active">
+    <div className="dashboard active admin-dashboard">
       <header className="dashboard-header">
         <nav className="dashboard-nav">
           <div className="nav-brand-admin">
@@ -26,12 +27,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <span className="nav-brand-chip">Admin</span>
           </div>
           <div className="nav-actions">
-            <div className="notification-bell" id="adminNotificationBell">
-              <span>🔔</span>
-              <span className="notification-count" id="ncount" style={{ display: 'none' }}>
-                0
-              </span>
-            </div>
+            <AdminNotificationsBell />
             <span className="nav-user" id="uname">
               {profile.full_name}
             </span>
@@ -40,7 +36,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </nav>
       </header>
 
-      <main className="dashboard-content">{children}</main>
+      <main className="dashboard-content admin-dashboard-content">{children}</main>
     </div>
   );
 }

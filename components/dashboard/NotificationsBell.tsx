@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
 
@@ -25,6 +27,7 @@ export function NotificationsBell({
   viewerProfileId: string;
   initialLastReadAt: string | null;
 }) {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [lastReadAt, setLastReadAt] = useState<string>(initialLastReadAt ?? new Date(0).toISOString());
@@ -121,9 +124,20 @@ export function NotificationsBell({
 
   useEffect(() => {
     if (!isOpen) return;
-    void markRead();
+    void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  async function onOpenChat() {
+    setIsOpen(false);
+    router.push('/dashboard/messages');
+  }
+
+  async function onNotificationTap() {
+    // Mark as read but don't block navigation.
+    void markRead();
+    await onOpenChat();
+  }
 
   return (
     <div style={{ position: 'relative' }}>
@@ -132,6 +146,7 @@ export function NotificationsBell({
         className="notification-bell"
         id="bndoNotificationBell"
         aria-label="Notifiche"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen((p) => !p)}
       >
         <span aria-hidden="true">🔔</span>
@@ -145,13 +160,19 @@ export function NotificationsBell({
       <div className={`notifications-panel ${isOpen ? 'active' : ''}`} id="bndoNotificationsPanel">
         <div className="notifications-header">
           <div className="notifications-title">🔔 Notifiche</div>
+          <Link className="notifications-all-link" href="/dashboard/notifications" onClick={() => setIsOpen(false)}>
+            Vedi tutte
+          </Link>
         </div>
         <div className="notifications-list">
           {unreadCount === 0 ? (
             <div className="notification-item">
-              <div className="notification-title">✅ Tutto letto</div>
-              <div className="notification-message">Nessun nuovo messaggio.</div>
+              <div className="notification-title">✅ Nessuna nuova notifica</div>
+              <div className="notification-message">Non ci sono nuovi messaggi da leggere.</div>
               <div className="notification-time">Adesso</div>
+              <button type="button" className="notifications-cta" onClick={() => void onOpenChat()}>
+                Apri chat
+              </button>
             </div>
           ) : (
             unreadMessages
@@ -163,7 +184,7 @@ export function NotificationsBell({
                   type="button"
                   className="notification-item unread"
                   style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
-                  onClick={() => void markRead()}
+                  onClick={() => void onNotificationTap()}
                 >
                   <div className="notification-title">💬 Nuovo messaggio consulente</div>
                   <div className="notification-message">{notification.body}</div>
@@ -176,4 +197,3 @@ export function NotificationsBell({
     </div>
   );
 }
-

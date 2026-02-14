@@ -84,69 +84,56 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
   }
 
   const quizDate = formatDate(quizCompletedAt);
-  const filteredPractices = quizType === 'sud'
-    ? PRACTICES.filter((p) => p.key === 'resto_sud_2_0')
-    : quizType === 'centro_nord'
-      ? PRACTICES.filter((p) => p.key === 'autoimpiego_centro_nord')
-      : PRACTICES;
+  const preferred: PracticeType | null =
+    quizType === 'sud' ? 'resto_sud_2_0' : quizType === 'centro_nord' ? 'autoimpiego_centro_nord' : null;
+  const orderedPractices = [...PRACTICES].sort((a, b) => {
+    if (!preferred) return 0;
+    if (a.key === preferred) return -1;
+    if (b.key === preferred) return 1;
+    return 0;
+  });
 
   return (
     <section className="section-card">
       <h2 className="section-title">Richiedi una nuova pratica</h2>
       <p className="welcome-subtitle" style={{ marginBottom: 12 }}>
-        Per aprire una pratica devi prima completare il quiz requisiti.
+        Scegli il bando che vuoi avviare. Il quiz requisiti è consigliato, ma non è obbligatorio.
       </p>
 
       {quizCompleted ? (
         <p className="document-date" style={{ marginBottom: 18 }}>
-          Ultimo quiz: {quizType ?? 'N/D'}{quizDate ? ` - ${quizDate}` : ''}
+          Ultimo quiz: {quizType ?? 'N/D'}{quizDate ? ` · ${quizDate}` : ''}{!quizEligible ? ' · esito: non idoneo' : ''}
         </p>
       ) : null}
 
-      {!quizCompleted ? (
-        <div className="empty-state" style={{ padding: '22px 16px', border: '0.5px solid var(--border)', borderRadius: 12 }}>
-          <div className="empty-text" style={{ marginBottom: 14 }}>
-            Non hai ancora completato il quiz.
-          </div>
-          <Link href={`${MARKETING_URL}/quiz`} className="btn-action primary">
-            <span>✅</span>
-            <span>Fai prima il quiz</span>
-          </Link>
-        </div>
-      ) : !quizEligible ? (
-        <div className="empty-state" style={{ padding: '22px 16px', border: '0.5px solid var(--border)', borderRadius: 12 }}>
-          <div className="empty-text" style={{ marginBottom: 14 }}>
-            Il tuo ultimo quiz risulta non idoneo. Completa nuovamente il quiz prima di richiedere una pratica.
-          </div>
-          <Link href={`${MARKETING_URL}/quiz`} className="btn-action secondary">
-            <span>🔁</span>
-            <span>Rifai il quiz</span>
-          </Link>
-        </div>
-      ) : (
-        <div className="practice-request-grid">
-          {filteredPractices.map((practice) => (
-            <article key={practice.key} className="practice-request-card">
-              <h3 className="pratica-title" style={{ fontSize: 20, marginBottom: 6 }}>
-                {practice.title}
-              </h3>
-              <p className="pratica-type" style={{ marginBottom: 14 }}>
-                {practice.subtitle}
-              </p>
+      <div className="practice-request-grid">
+        {orderedPractices.map((practice) => (
+          <article key={practice.key} className="practice-request-card">
+            <h3 className="pratica-title" style={{ fontSize: 20, marginBottom: 6 }}>
+              {practice.title}
+            </h3>
+            <p className="pratica-type" style={{ marginBottom: 14 }}>
+              {practice.subtitle}
+            </p>
 
-              <button
-                type="button"
-                className="btn-action primary"
-                onClick={() => void requestPractice(practice.key)}
-                disabled={loadingType !== null}
-              >
-                <span>{loadingType === practice.key ? '⏳' : '📨'}</span>
-                <span>{loadingType === practice.key ? 'Invio richiesta...' : 'Richiedi pratica'}</span>
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
+            <button
+              type="button"
+              className="btn-action primary"
+              onClick={() => void requestPractice(practice.key)}
+              disabled={loadingType !== null}
+            >
+              <span>{loadingType === practice.key ? '⏳' : '📨'}</span>
+              <span>{loadingType === practice.key ? 'Invio richiesta...' : 'Richiedi pratica'}</span>
+            </button>
+
+            {!quizCompleted ? (
+              <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
+                Consigliato: <Link href={`${MARKETING_URL}/quiz`}>compila il quiz requisiti</Link>
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
 
       {feedback ? (
         <p
