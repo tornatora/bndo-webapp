@@ -6,6 +6,8 @@ import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { DashboardStatsClient } from '@/components/dashboard/DashboardStatsClient';
 import { DashboardApplicationsClient } from '@/components/dashboard/DashboardApplicationsClient';
+import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeProgressBar, computeDerivedProgressKey, extractProgressFromNotes, progressBadge } from '@/lib/admin/practice-progress';
 
 type ApplicationRow = {
   id: string;
@@ -79,9 +81,76 @@ export default async function DashboardPage() {
       tender: tenderMap.get(app.tender_id) ?? null
     })) ?? [];
 
-  // NOTE: Keep server work minimal here for fast navigation. Counts are refreshed client-side.
-  const docsCount = 0;
-  const unreadCount = 0;
+  // Render "real" initial content server-side (better perceived performance), but keep layout thin.
+  // We only compute lightweight stats + practice summary; deeper lists (documents/chat) stay lazy.
+  const applicationIds = typedApplications.map((a) => a.id);
+  const { data: docs } = applicationIds.length
+    ? await supabase
+        .from('application_documents')
+        .select('application_id, file_name')
+        .in('application_id', applicationIds)
+        .order('created_at', { ascending: false })
+        .limit(500)
+    : { data: [] as Array<{ application_id: string; file_name: string }> };
+
+  const docsByApp = new Map<string, Array<{ application_id: string; file_name: string }>>();
+  for (const d of docs ?? []) {
+    const prev = docsByApp.get(d.application_id) ?? [];
+    prev.push(d);
+    docsByApp.set(d.application_id, prev);
+  }
+
+  // Stats (client-side will still refresh in background, but these should be good enough immediately).
+  const docsCount = (docs ?? []).length;
+
+  const { data: thread } = await supabase
+    .from('consultant_threads')
+    .select('id')
+    .eq('company_id', profile.company_id)
+    .maybeSingle();
+
+  let unreadCount = 0;
+  if (thread?.id) {
+    const { data: participant } = await supabase
+      .from('consultant_thread_participants')
+      .select('last_read_at')
+      .eq('thread_id', thread.id)
+      .eq('profile_id', profile.id)
+      .maybeSingle();
+    const lastReadAt = participant?.last_read_at ?? new Date(0).toISOString();
+    const { count } = await supabase
+      .from('consultant_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('thread_id', thread.id)
+      .gt('created_at', lastReadAt)
+      .neq('sender_profile_id', profile.id);
+    unreadCount = count ?? 0;
+  }
+
+  const initialItems = typedApplications.map((application) => {
+    const title = application.tender?.title ?? 'Pratica';
+    const appDocs = docsByApp.get(application.id) ?? [];
+    const checklist = computeDocumentChecklist(application.id, title, appDocs);
+    const missingCount = checklist.filter((c) => !c.uploaded).length;
+    const uploadedCount = appDocs.length;
+
+    const step =
+      extractProgressFromNotes(application.notes ?? null) ??
+      computeDerivedProgressKey(application.status, missingCount);
+    const bar = computeProgressBar(step);
+    const badge = progressBadge(step);
+
+    return {
+      applicationId: application.id,
+      title,
+      updatedAt: application.updated_at,
+      missingCount,
+      uploadedCount,
+      progressPct: bar.pct,
+      statusLabel: badge.label,
+      statusClassName: badge.className
+    };
+  });
 
   const supabaseAdmin = getSupabaseAdmin();
   const { data: latestQuiz } = await supabaseAdmin
@@ -127,7 +196,7 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      <DashboardApplicationsClient initialCount={typedApplications.length} />
+      <DashboardApplicationsClient initialCount={typedApplications.length} initialItems={initialItems} />
     </>
   );
 }

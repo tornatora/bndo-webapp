@@ -20,9 +20,15 @@ type SummaryPayload = {
   error?: string;
 };
 
-export function DashboardApplicationsClient({ initialCount }: { initialCount: number }) {
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<SummaryItem[]>([]);
+export function DashboardApplicationsClient({
+  initialCount,
+  initialItems
+}: {
+  initialCount: number;
+  initialItems?: SummaryItem[];
+}) {
+  const [loading, setLoading] = useState(!initialItems);
+  const [items, setItems] = useState<SummaryItem[]>(initialItems ?? []);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,18 +40,18 @@ export function DashboardApplicationsClient({ initialCount }: { initialCount: nu
         if (cancelled) return;
         setItems(json.items ?? []);
       } catch {
-        if (!cancelled) setItems([]);
+        if (!cancelled && !initialItems) setItems([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-    // allow immediate navigation; fetch after render
-    const t = setTimeout(run, 150);
+    // If we have SSR items, refresh in the background; otherwise fetch immediately.
+    const t = setTimeout(run, initialItems ? 400 : 0);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, []);
+  }, [initialItems]);
 
   if (loading) {
     // Keep layout stable: render a couple of skeleton cards.
@@ -104,4 +110,3 @@ export function DashboardApplicationsClient({ initialCount }: { initialCount: nu
     </>
   );
 }
-

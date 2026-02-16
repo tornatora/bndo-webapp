@@ -72,6 +72,27 @@ export function AdminNotificationsBell() {
   }, []);
 
   useEffect(() => {
+    // Fallback polling: Supabase Realtime might be disabled/misconfigured in production.
+    // Poll lightly so admin sees notifications even without realtime.
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refresh(true);
+    };
+
+    const id = setInterval(tick, 12_000);
+    const onFocus = () => tick();
+    const onVis = () => tick();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     void refresh(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
