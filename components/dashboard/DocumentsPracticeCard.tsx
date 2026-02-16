@@ -134,14 +134,22 @@ export function DocumentsPracticeCard({
                       className="docs-link"
                       disabled={openingId === doc.id}
                       onClick={async () => {
+                        // Avoid popup blockers on mobile Safari: open a blank tab synchronously,
+                        // then navigate it after the async signed-url fetch completes.
+                        const win = window.open('', '_blank', 'noreferrer');
                         try {
                           setOpenError(null);
                           setOpeningId(doc.id);
                           const res = await fetch(`/api/documents/signed-url?documentId=${doc.id}`, { cache: 'no-store' });
                           const json = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; error?: string };
                           if (!res.ok || !json.url) throw new Error(json.error ?? 'Impossibile aprire il documento.');
-                          window.open(json.url, '_blank', 'noreferrer');
+                          if (win) {
+                            win.location.href = json.url;
+                          } else {
+                            window.location.href = json.url;
+                          }
                         } catch (e) {
+                          if (win) win.close();
                           setOpenError(e instanceof Error ? e.message : 'Errore apertura documento.');
                         } finally {
                           setOpeningId(null);

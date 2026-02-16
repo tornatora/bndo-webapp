@@ -36,9 +36,10 @@ async function ensureOpsAutoReply(threadId: string) {
       thread_id: threadId,
       profile_id: opsProfile.id,
       participant_role: opsProfile.role,
-      last_read_at: new Date().toISOString()
+      // Do not mark messages as read just because we add an ops participant or send an auto-reply.
+      last_read_at: new Date(0).toISOString()
     },
-    { onConflict: 'thread_id,profile_id' }
+    { onConflict: 'thread_id,profile_id', ignoreDuplicates: true }
   );
 
   await admin.from('consultant_messages').insert({

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { isAutoReplyMessage } from '@/lib/chat/constants';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,10 +51,12 @@ export async function GET(request: Request) {
   const parsed = QuerySchema.safeParse({ limit: url.searchParams.get('limit') ?? undefined });
   const limit = parsed.success ? (parsed.data.limit ?? 20) : 20;
 
+  const db = hasRealServiceRoleKey() ? getSupabaseAdmin() : supabase;
+
   // Fast path: fetch recent messages across all threads (RLS allows ops users),
   // then filter by per-thread last_read_at. This avoids N queries (one per thread),
   // which can be slow/unreliable on serverless.
-  const { data: recentMessages, error: msgErr } = await supabase
+  const { data: recentMessages, error: msgErr } = await db
     .from('consultant_messages')
     .select('id, thread_id, sender_profile_id, body, created_at')
     .order('created_at', { ascending: false })
@@ -66,14 +69,14 @@ export async function GET(request: Request) {
 
   const [{ data: participants, error: participantError }, { data: threads, error: threadsError }] = await Promise.all([
     threadIds.length
-      ? supabase
+      ? db
           .from('consultant_thread_participants')
           .select('thread_id, last_read_at')
           .eq('profile_id', user.id)
           .in('thread_id', threadIds)
       : Promise.resolve({ data: [] as ParticipantRow[], error: null }),
     threadIds.length
-      ? supabase.from('consultant_threads').select('id, company_id, companies(name)').in('id', threadIds)
+      ? db.from('consultant_threads').select('id, company_id, companies(name)').in('id', threadIds)
       : Promise.resolve({ data: [] as ThreadRow[], error: null })
   ]);
 

@@ -6,6 +6,8 @@ import { ChatPanel } from '@/components/dashboard/ChatPanel';
 type ThreadContextPayload = {
   threadId: string | null;
   lastReadAt: string | null;
+  messages?: Message[];
+  error?: string;
 };
 
 type Message = {
@@ -14,11 +16,6 @@ type Message = {
   sender_profile_id: string;
   body: string;
   created_at: string;
-};
-
-type ChatSyncResponse = {
-  messages?: Message[];
-  lastReadAt?: string;
 };
 
 export function MessagesPageClient({ viewerProfileId }: { viewerProfileId: string }) {
@@ -31,19 +28,15 @@ export function MessagesPageClient({ viewerProfileId }: { viewerProfileId: strin
     let cancelled = false;
     const run = async () => {
       try {
-        const ctxRes = await fetch('/api/chat/thread-context', { cache: 'no-store' });
-        const ctxJson = (await ctxRes.json().catch(() => ({}))) as ThreadContextPayload & { error?: string };
-        if (!ctxRes.ok) throw new Error(ctxJson.error ?? 'Impossibile inizializzare la chat.');
-        if (!ctxJson.threadId) throw new Error('Thread non disponibile.');
-
-        const msgRes = await fetch(`/api/chat/messages?threadId=${ctxJson.threadId}`, { cache: 'no-store' });
-        const msgJson = (await msgRes.json().catch(() => ({}))) as ChatSyncResponse & { error?: string };
-        if (!msgRes.ok) throw new Error((msgJson as { error?: string }).error ?? 'Impossibile caricare i messaggi.');
+        const res = await fetch('/api/chat/sync', { cache: 'no-store' });
+        const json = (await res.json().catch(() => ({}))) as ThreadContextPayload;
+        if (!res.ok) throw new Error(json.error ?? 'Impossibile inizializzare la chat.');
+        if (!json.threadId) throw new Error('Thread non disponibile.');
 
         if (cancelled) return;
-        setThreadId(ctxJson.threadId);
-        setInitialLastReadAt(ctxJson.lastReadAt ?? msgJson.lastReadAt ?? null);
-        setInitialMessages(msgJson.messages ?? []);
+        setThreadId(json.threadId);
+        setInitialLastReadAt(json.lastReadAt ?? null);
+        setInitialMessages(json.messages ?? []);
         setError(null);
       } catch (e) {
         if (cancelled) return;
@@ -86,4 +79,3 @@ export function MessagesPageClient({ viewerProfileId }: { viewerProfileId: strin
     </div>
   );
 }
-

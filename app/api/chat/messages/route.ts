@@ -11,7 +11,8 @@ const payloadSchema = z.object({
 });
 
 const querySchema = z.object({
-  threadId: z.string().uuid()
+  threadId: z.string().uuid(),
+  limit: z.coerce.number().int().min(1).max(200).optional()
 });
 
 type ViewerProfile = {
@@ -135,14 +136,18 @@ async function maybeCreateAutomaticReply(threadId: string, sender: ViewerProfile
 
   const supabaseAdmin = getSupabaseAdmin();
 
+  // IMPORTANT:
+  // Do not bump ops/admin last_read_at when sending an automatic reply.
+  // If we set last_read_at to "now", admin notifications will consider the client's message as "already read"
+  // (because the client message was inserted just before the auto-reply).
   await supabaseAdmin.from('consultant_thread_participants').upsert(
     {
       thread_id: threadId,
       profile_id: opsSender.id,
       participant_role: opsSender.role,
-      last_read_at: new Date().toISOString()
+      last_read_at: new Date(0).toISOString()
     },
-    { onConflict: 'thread_id,profile_id' }
+    { onConflict: 'thread_id,profile_id', ignoreDuplicates: true }
   );
 
   const { data: autoReplyMessage, error } = await supabaseAdmin
@@ -169,8 +174,10 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const parsed = querySchema.parse({
-      threadId: url.searchParams.get('threadId')
+      threadId: url.searchParams.get('threadId'),
+      limit: url.searchParams.get('limit') ?? undefined
     });
+    const limit = parsed.limit ?? 80;
 
     const viewer = await getViewerProfile();
     if ('error' in viewer) return viewer.error;
@@ -187,7 +194,7 @@ export async function GET(request: Request) {
       .select('id, thread_id, sender_profile_id, body, created_at')
       .eq('thread_id', parsed.threadId)
       .order('created_at', { ascending: true })
-      .limit(200);
+      .limit(limit);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

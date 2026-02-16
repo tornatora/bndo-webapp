@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,28 +27,34 @@ export async function GET(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: 'Parametri non validi.' }, { status: 422 });
 
   // RLS on application_documents already enforces access for company members / ops users.
-  // We still do an explicit check for non-ops users: the document must belong to their company.
   const { data: doc, error: docErr } = await supabase
     .from('application_documents')
-    .select('id, storage_path, application_id, tender_applications(company_id)')
+    .select('id, storage_path, application_id')
     .eq('id', parsed.data.documentId)
     .maybeSingle();
 
   if (docErr) return NextResponse.json({ error: docErr.message }, { status: 500 });
   if (!doc?.storage_path) return NextResponse.json({ error: 'Documento non trovato.' }, { status: 404 });
 
-  const docCompanyId = (doc as unknown as { tender_applications?: { company_id: string } | null }).tender_applications?.company_id ?? null;
   if (!hasOpsAccess(profile.role)) {
-    if (!profile.company_id || !docCompanyId || profile.company_id !== docCompanyId) {
+    // Defensive check: ensure the application belongs to the viewer company.
+    const { data: app } = await supabase
+      .from('tender_applications')
+      .select('company_id')
+      .eq('id', doc.application_id)
+      .maybeSingle();
+    if (!profile.company_id || !app?.company_id || profile.company_id !== app.company_id) {
       return NextResponse.json({ error: 'Forbidden.' }, { status: 403 });
     }
   }
 
-  const signed = await supabase.storage.from('application-documents').createSignedUrl(doc.storage_path, 60 * 60);
+  // Use service role to sign URLs for maximum reliability (storage policies won't block),
+  // but only after RLS has proven the caller can see the document row.
+  const signer = hasRealServiceRoleKey() ? getSupabaseAdmin() : supabase;
+  const signed = await signer.storage.from('application-documents').createSignedUrl(doc.storage_path, 60 * 60);
   if (signed.error || !signed.data?.signedUrl) {
     return NextResponse.json({ error: signed.error?.message ?? 'Impossibile generare URL.' }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, url: signed.data.signedUrl }, { status: 200 });
 }
-
