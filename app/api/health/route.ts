@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { publicError } from '@/lib/security/http';
 
 type CheckResult = {
   name: string;
@@ -55,12 +56,24 @@ async function runSupabaseChecks(): Promise<CheckResult[]> {
   ];
 }
 
-export async function GET() {
-  const requiredEnv = [
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SUPABASE_SERVICE_ROLE_KEY'
-  ];
+export async function GET(request: Request) {
+  const now = new Date().toISOString();
+  const requiredKey = process.env.HEALTHCHECK_SECRET?.trim() || '';
+  const isProd = process.env.NODE_ENV === 'production';
+
+  if (isProd) {
+    if (!requiredKey) {
+      return NextResponse.json({ ok: true, timestamp: now }, { status: 200 });
+    }
+
+    const url = new URL(request.url);
+    const provided = (request.headers.get('x-healthcheck-secret') ?? url.searchParams.get('key') ?? '').trim();
+    if (provided !== requiredKey) {
+      return NextResponse.json({ ok: true, timestamp: now }, { status: 200 });
+    }
+  }
+
+  const requiredEnv = ['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
 
   const missing = requiredEnv.filter((key) => {
     const value = process.env[key];
@@ -72,7 +85,7 @@ export async function GET() {
       ok: false,
       missing,
       checks: [],
-      timestamp: new Date().toISOString()
+      timestamp: now
     });
   }
 
@@ -84,7 +97,7 @@ export async function GET() {
       ok: failures.length === 0,
       missing,
       checks,
-      timestamp: new Date().toISOString()
+      timestamp: now
     });
   } catch (error) {
     return NextResponse.json(
@@ -92,10 +105,11 @@ export async function GET() {
         ok: false,
         missing,
         checks: [],
-        error: error instanceof Error ? error.message : 'Health check fallito.',
-        timestamp: new Date().toISOString()
+        error: publicError(error, 'Health check fallito.'),
+        timestamp: now
       },
       { status: 500 }
     );
   }
 }
+

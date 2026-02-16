@@ -10,6 +10,8 @@ import type { PracticeType } from '@/lib/bandi';
 type StripeSessionPayload = {
   ok?: boolean;
   error?: string;
+  message?: string;
+  detail?: string;
   session?: {
     id: string;
     payment_status: string | null;
@@ -24,11 +26,39 @@ type StripeSessionPayload = {
 type CompletePayload = {
   ok?: boolean;
   error?: string;
+  message?: string;
+  detail?: string;
   sessionId?: string;
   practiceType?: string;
   applicationId?: string;
   alreadyProvisioned?: boolean;
 };
+
+function readApiError(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const record = payload as Record<string, unknown>;
+  const normalize = (value: string) => {
+    const text = value.trim();
+    const lowered = text.toLowerCase();
+    if (!text || lowered === 'bad request' || lowered === 'invalid request') return '';
+    if (lowered.includes('invalid api key')) return 'Configurazione pagamento non valida. Contatta supporto BNDO.';
+    return text;
+  };
+
+  if (typeof record.error === 'string') {
+    const normalized = normalize(record.error);
+    if (normalized) return normalized;
+  }
+  if (typeof record.message === 'string') {
+    const normalized = normalize(record.message);
+    if (normalized) return normalized;
+  }
+  if (typeof record.detail === 'string') {
+    const normalized = normalize(record.detail);
+    if (normalized) return normalized;
+  }
+  return fallback;
+}
 
 function formatMoney(amount: number | null, currency: string | null) {
   if (amount === null || !currency) return null;
@@ -95,11 +125,13 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
           cache: 'no-store'
         });
         const json = (await res.json()) as StripeSessionPayload;
-        if (!res.ok) throw new Error(json?.error ?? 'Impossibile verificare il pagamento.');
+        if (!res.ok) throw new Error(readApiError(json, 'Impossibile verificare il pagamento.'));
         if (!cancelled) {
           setSession(json.session ?? null);
           const stripeEmail = json.session?.customer_email ?? '';
-          if (stripeEmail && !email) setEmail(stripeEmail);
+          if (stripeEmail) {
+            setEmail((prev) => prev || stripeEmail);
+          }
         }
       } catch (e) {
         if (!cancelled) setSessionError(e instanceof Error ? e.message : 'Errore verifica pagamento.');
@@ -111,7 +143,7 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
     return () => {
       cancelled = true;
     };
-  }, [effectiveSessionId, email]);
+  }, [effectiveSessionId]);
 
   useEffect(() => {
     // Keep the wizard usable on mobile: always jump back to the top when switching steps.
@@ -224,13 +256,13 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
       fd.set('acceptTerms', acceptTerms ? 'yes' : 'no');
       fd.set('consentStorage', consentStorage ? 'yes' : 'no');
 
-      const res = await fetch('/api/onboarding/after-payment/complete', {
+      const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         body: fd
       });
 
       const json = (await res.json()) as CompletePayload;
-      if (!res.ok) throw new Error(json?.error ?? 'Onboarding non riuscito.');
+      if (!res.ok) throw new Error(readApiError(json, 'Onboarding non riuscito.'));
 
       setCompleted(json);
     } catch (e) {

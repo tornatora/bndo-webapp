@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { slugify } from '@/lib/utils';
 import { APP_URL, buildAbsoluteUrl } from '@/lib/site-urls';
+import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
 const RegisterSchema = z
   .object({
@@ -38,6 +39,9 @@ async function generateUniqueUsername(email: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
+
   const formData = await request.formData();
   const parsed = RegisterSchema.safeParse({
     fullName: String(formData.get('fullName') ?? ''),
@@ -54,6 +58,16 @@ export async function POST(request: NextRequest) {
 
   const { fullName, companyName, password } = parsed.data;
   const email = parsed.data.email.toLowerCase();
+
+  const rateLimit = enforceRateLimit({
+    namespace: 'auth-register',
+    key: `${getClientIp(request)}:${email}`,
+    limit: 8,
+    windowMs: 10 * 60_000,
+    message: 'Troppi tentativi di registrazione. Riprova tra qualche minuto.'
+  });
+  if (rateLimit) return rateLimit;
+
   const supabaseAdmin = getSupabaseAdmin();
 
   const { data: profileByEmail } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();

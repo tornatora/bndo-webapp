@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getStripeClient } from '@/lib/stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { enforceRateLimit, getClientIp, publicError, rejectCrossSiteMutation } from '@/lib/security/http';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,17 @@ const checkoutSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const crossSite = rejectCrossSiteMutation(request);
+    if (crossSite) return crossSite;
+
+    const rateLimit = enforceRateLimit({
+      namespace: 'checkout-create',
+      key: getClientIp(request),
+      limit: 20,
+      windowMs: 10 * 60_000
+    });
+    if (rateLimit) return rateLimit;
+
     const supabaseAdmin = getSupabaseAdmin();
     const stripe = getStripeClient();
 
@@ -66,7 +78,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Impossibile creare la sessione checkout.'
+        error: publicError(error, 'Impossibile creare la sessione checkout.')
       },
       { status: 500 }
     );

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { isAutoReplyMessage } from '@/lib/chat/constants';
 
 type Message = {
   id: string;
@@ -18,31 +19,60 @@ type ChatSyncResponse = {
   lastReadAt?: string;
 };
 
-export function NotificationsBell({
-  threadId,
-  viewerProfileId,
-  initialLastReadAt
-}: {
+type ThreadContextPayload = {
   threadId: string | null;
-  viewerProfileId: string;
-  initialLastReadAt: string | null;
-}) {
+  lastReadAt: string | null;
+};
+
+// Simple in-memory cache to avoid refetching on every navigation.
+let cachedThreadContext: ThreadContextPayload | null = null;
+let cachedAt = 0;
+
+export function NotificationsBell({ viewerProfileId }: { viewerProfileId: string }) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [lastReadAt, setLastReadAt] = useState<string>(initialLastReadAt ?? new Date(0).toISOString());
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [lastReadAt, setLastReadAt] = useState<string>(new Date(0).toISOString());
+  const [contextLoaded, setContextLoaded] = useState(false);
   const markingRead = useRef(false);
 
-  useEffect(() => {
-    setLastReadAt(initialLastReadAt ?? new Date(0).toISOString());
-  }, [initialLastReadAt]);
+  async function loadThreadContext() {
+    // Cache for a short time; enough to cover multiple tab navigations.
+    const now = Date.now();
+    if (cachedThreadContext && now - cachedAt < 30_000) {
+      setThreadId(cachedThreadContext.threadId);
+      setLastReadAt(cachedThreadContext.lastReadAt ?? new Date(0).toISOString());
+      setContextLoaded(true);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/chat/thread-context', { cache: 'no-store' });
+      const json = (await res.json().catch(() => ({}))) as ThreadContextPayload & { error?: string };
+      if (!res.ok) {
+        // Keep silent; bell still renders but with no thread.
+        setContextLoaded(true);
+        return;
+      }
+      cachedThreadContext = { threadId: json.threadId ?? null, lastReadAt: json.lastReadAt ?? null };
+      cachedAt = now;
+      setThreadId(json.threadId ?? null);
+      setLastReadAt(json.lastReadAt ?? new Date(0).toISOString());
+      setContextLoaded(true);
+    } catch {
+      setContextLoaded(true);
+    }
+  }
 
   const unreadMessages = useMemo(() => {
     if (!threadId) return [];
     const lastRead = new Date(lastReadAt).getTime();
     return messages.filter(
       (message) =>
-        message.sender_profile_id !== viewerProfileId && new Date(message.created_at).getTime() > lastRead
+        message.sender_profile_id !== viewerProfileId &&
+        new Date(message.created_at).getTime() > lastRead &&
+        !isAutoReplyMessage(message.body)
     );
   }, [messages, viewerProfileId, lastReadAt, threadId]);
 
@@ -83,9 +113,9 @@ export function NotificationsBell({
   }
 
   useEffect(() => {
-    void refresh();
+    void loadThreadContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId]);
+  }, []);
 
   useEffect(() => {
     if (!threadId) return;
@@ -107,6 +137,12 @@ export function NotificationsBell({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
+
+  useEffect(() => {
+    if (!contextLoaded) return;
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextLoaded, threadId]);
 
   useEffect(() => {
     const onDoc = (event: MouseEvent) => {

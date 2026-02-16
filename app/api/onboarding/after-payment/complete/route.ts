@@ -8,6 +8,14 @@ import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import type { Json } from '@/lib/supabase/database.types';
 import { randomUUID } from 'crypto';
+import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
+import {
+  enforceRateLimit,
+  getClientIp,
+  publicError,
+  rejectCrossSiteMutation,
+  safeSessionId
+} from '@/lib/security/http';
 
 export const runtime = 'nodejs';
 
@@ -32,14 +40,6 @@ function moneyFromStripe(amountTotal: number | null | undefined, currency: strin
   if (!amountTotal || !currency) return null;
   const isZeroDecimal = new Set(['jpy', 'krw', 'vnd']).has(currency.toLowerCase());
   return isZeroDecimal ? amountTotal : amountTotal / 100;
-}
-
-function getClientIp(request: Request) {
-  const nf = request.headers.get('x-nf-client-connection-ip');
-  if (nf && nf.trim()) return nf.trim();
-  const xf = request.headers.get('x-forwarded-for');
-  if (xf && xf.trim()) return xf.split(',')[0].trim();
-  return null;
 }
 
 async function ensureOpsAutoReply(threadId: string) {
@@ -67,7 +67,7 @@ async function ensureOpsAutoReply(threadId: string) {
   await admin.from('consultant_messages').insert({
     thread_id: threadId,
     sender_profile_id: opsProfile.id,
-    body: 'Un nostro consulente ti rispondera il prima possibile.'
+    body: AUTO_REPLY_BODY
   });
 }
 
@@ -80,6 +80,17 @@ function practiceTypeFromQuiz(bandoType: string | null | undefined): PracticeTyp
 
 export async function POST(request: Request) {
   try {
+    const crossSite = rejectCrossSiteMutation(request);
+    if (crossSite) return crossSite;
+
+    const rateLimit = enforceRateLimit({
+      namespace: 'onboarding-complete',
+      key: getClientIp(request),
+      limit: 18,
+      windowMs: 10 * 60_000
+    });
+    if (rateLimit) return rateLimit;
+
     const supabaseAdmin = getSupabaseAdmin();
     // Stripe is optional for manual onboarding flows.
 
@@ -104,7 +115,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Dati non validi.' }, { status: 422 });
     }
 
-    const providedSessionId = (parsed.data.sessionId ?? '').trim();
+    const providedSessionId = safeSessionId(parsed.data.sessionId ?? null) ?? '';
     const providedEmail = (parsed.data.email ?? '').trim();
     if (!providedSessionId && !providedEmail) {
       return NextResponse.json({ error: 'Inserisci la tua email.' }, { status: 422 });
@@ -505,9 +516,6 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Errore onboarding post-pagamento.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: publicError(error, 'Errore onboarding. Riprova tra qualche secondo.') }, { status: 500 });
   }
 }

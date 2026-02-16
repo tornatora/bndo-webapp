@@ -156,6 +156,15 @@ export function getQuizQuestions(bandoType: QuizBandoType | null): Question[] {
         { value: 'B', label: 'Circa il 10%' },
         { value: 'C', label: 'Oltre il 10%' }
       ]
+    },
+    {
+      id: 'q11b',
+      title: "Hai un locale commerciale o un'abitazione accatastata uso ufficio?",
+      options: [
+        { value: 'A', label: 'Si, lo ho gia disponibile' },
+        { value: 'B', label: "Non ancora, ma mi impegno a individuarlo (affitto/comodato d'uso)" },
+        { value: 'C', label: 'No e non intendo individuarlo' }
+      ]
     }
   ];
 }
@@ -173,4 +182,3 @@ export function safeAnswersRecord(answers: Json): Record<string, unknown> {
   if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return {};
   return answers as Record<string, unknown>;
 }
-

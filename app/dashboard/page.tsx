@@ -1,17 +1,11 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
-import {
-  computeDerivedProgressKey,
-  computeProgressBar,
-  extractProgressFromNotes,
-  progressBadge
-} from '@/lib/admin/practice-progress';
+import { DashboardStatsClient } from '@/components/dashboard/DashboardStatsClient';
+import { DashboardApplicationsClient } from '@/components/dashboard/DashboardApplicationsClient';
 
 type ApplicationRow = {
   id: string;
@@ -41,14 +35,13 @@ export default async function DashboardPage() {
 
   const supabase = createClient();
 
-  const [{ data: applications }, { data: thread }] = await Promise.all([
+  const [{ data: applications }] = await Promise.all([
     supabase
       .from('tender_applications')
       .select('id, tender_id, status, supplier_registry_status, notes, updated_at')
       .eq('company_id', profile.company_id)
       .order('updated_at', { ascending: false })
       .limit(50),
-    supabase.from('consultant_threads').select('id').eq('company_id', profile.company_id).maybeSingle()
   ]);
 
   const tenderIds = [...new Set((applications ?? []).map((app) => app.tender_id).filter(Boolean))];
@@ -86,42 +79,9 @@ export default async function DashboardPage() {
       tender: tenderMap.get(app.tender_id) ?? null
     })) ?? [];
 
-  const applicationIds = typedApplications.map((application) => application.id);
-
-  const { data: docs } = applicationIds.length
-    ? await supabase
-        .from('application_documents')
-        .select('id, application_id, file_name, created_at')
-        .in('application_id', applicationIds)
-        .order('created_at', { ascending: false })
-        .limit(500)
-    : { data: [] as Array<{ id: string; application_id: string; file_name: string; created_at: string }> };
-
-  const docsCount = docs?.length ?? 0;
-
-  const { data: messages } = thread?.id
-    ? await supabase
-        .from('consultant_messages')
-        .select('id, thread_id, sender_profile_id, body, created_at')
-        .eq('thread_id', thread.id)
-        .order('created_at', { ascending: true })
-        .limit(40)
-    : { data: [] as Array<{ id: string; thread_id: string; sender_profile_id: string; body: string; created_at: string }> };
-
-  const { data: participant } = thread?.id
-    ? await supabase
-        .from('consultant_thread_participants')
-        .select('last_read_at')
-        .eq('thread_id', thread.id)
-        .eq('profile_id', profile.id)
-        .maybeSingle()
-    : { data: null };
-
-  const unreadCount = (messages ?? []).filter(
-    (message) =>
-      message.sender_profile_id !== profile.id &&
-      new Date(message.created_at).getTime() > new Date(participant?.last_read_at ?? new Date(0).toISOString()).getTime()
-  ).length;
+  // NOTE: Keep server work minimal here for fast navigation. Counts are refreshed client-side.
+  const docsCount = 0;
+  const unreadCount = 0;
 
   const supabaseAdmin = getSupabaseAdmin();
   const { data: latestQuiz } = await supabaseAdmin
@@ -146,15 +106,9 @@ export default async function DashboardPage() {
             <div className="stat-value">{typedApplications.length}</div>
             <div className="stat-label">Pratiche Attive</div>
           </div>
-          <div className="stat-item">
-            <div className="stat-value">{docsCount}</div>
-            <div className="stat-label">Documenti Caricati</div>
-          </div>
-          <div className="stat-item">
-            <div className="stat-value">{unreadCount}</div>
-            <div className="stat-label">Messaggi Non Letti</div>
-          </div>
         </div>
+
+        <DashboardStatsClient initialDocsCount={docsCount} initialUnreadCount={unreadCount} />
       </div>
 
       {typedApplications.length === 0 ? (
@@ -171,50 +125,9 @@ export default async function DashboardPage() {
           <div className="empty-icon">📋</div>
           <p className="empty-text">Nessuna pratica disponibile al momento.</p>
         </div>
-      ) : (
-        typedApplications.map((application) => {
-          const title = application.tender?.title ?? 'Pratica';
+      ) : null}
 
-          const docsInApp = (docs ?? []).filter((d) => d.application_id === application.id);
-          const checklist = computeDocumentChecklist(
-            application.id,
-            title,
-            docsInApp.map((d) => ({ application_id: application.id, file_name: d.file_name }))
-          );
-          const missingCount = checklist.filter((c) => !c.uploaded).length;
-          const uploadedCount = docsInApp.length;
-
-          const step =
-            extractProgressFromNotes(application.notes ?? null) ??
-            computeDerivedProgressKey(application.status, missingCount);
-          const bar = computeProgressBar(step);
-          const badge = progressBadge(step);
-
-          return (
-            <Link key={application.id} href={`/dashboard/practices/${application.id}`} className="pratica-card pratica-card-link">
-              <div className="pratica-header">
-                <div>
-                  <h2 className="pratica-title">{title}</h2>
-                </div>
-                <span className={badge.className}>{badge.label}</span>
-              </div>
-
-              <div className="progress-section">
-                <div className="progress-header">
-                  <span className="progress-label">Avanzamento pratica</span>
-                  <span className="progress-value">{bar.pct}%</span>
-                </div>
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${bar.pct}%` }} />
-                </div>
-                <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
-                  Mancanti: <strong>{missingCount}</strong> · Caricati: <strong>{uploadedCount}</strong>
-                </div>
-              </div>
-            </Link>
-          );
-        })
-      )}
+      <DashboardApplicationsClient initialCount={typedApplications.length} />
     </>
   );
 }

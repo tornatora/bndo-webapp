@@ -32,7 +32,7 @@ export function LegalShell({
               <Link href="/#processo">Processo</Link>
             </li>
             <li>
-              <Link href="/quiz" className="btn-nav">
+              <Link href="/quiz/autoimpiego" className="btn-nav">
                 <span>Inizia ora</span>
               </Link>
             </li>

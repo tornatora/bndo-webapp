@@ -1,34 +1,17 @@
-import Link from 'next/link';
-import { OnboardingWelcomeClient } from '@/components/landing/OnboardingWelcomeClient';
-import { MARKETING_URL } from '@/lib/site-urls';
-import type { PracticeType } from '@/lib/bandi';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-function parsePracticeType(value: string | undefined): PracticeType | undefined {
-  const v = (value ?? '').trim().toLowerCase();
-  if (!v) return undefined;
-  if (v === 'resto_sud_2_0') return 'resto_sud_2_0';
-  if (v === 'autoimpiego_centro_nord') return 'autoimpiego_centro_nord';
-  return undefined;
-}
-
-export default function AfterPaymentPage({
+export default function LegacyAfterPaymentPage({
   searchParams
 }: {
   searchParams: { session_id?: string; bando?: string; practice?: string; pratica?: string };
 }) {
-  const sessionId = searchParams.session_id;
-  const practiceType = parsePracticeType(searchParams.bando ?? searchParams.practice ?? searchParams.pratica);
-
-  return (
-    <>
-      <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 50 }}>
-        <Link href={MARKETING_URL} className="onboarding2030-back">
-          Torna al sito
-        </Link>
-      </div>
-      <OnboardingWelcomeClient sessionId={sessionId} practiceType={practiceType} />
-    </>
-  );
+  const params = new URLSearchParams();
+  if (searchParams.session_id) params.set('session_id', searchParams.session_id);
+  if (searchParams.bando) params.set('bando', searchParams.bando);
+  if (searchParams.practice) params.set('practice', searchParams.practice);
+  if (searchParams.pratica) params.set('pratica', searchParams.pratica);
+  const query = params.toString();
+  redirect(query ? `/onboarding?${query}` : '/onboarding');
 }

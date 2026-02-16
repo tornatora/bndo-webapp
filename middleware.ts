@@ -30,6 +30,7 @@ export async function middleware(request: NextRequest) {
   const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
   const isAppDomainAuthPath = isAuthPath || path.startsWith('/reset-password');
   const isQuizPath = path.startsWith('/quiz');
+  const isOnboardingPath = path.startsWith('/onboarding');
   const hasAuthError = request.nextUrl.searchParams.has('error');
   const isAdminMode = request.nextUrl.searchParams.get('mode') === 'admin';
   const isAdminPasswordPath = path === '/forgot-password' || path === '/reset-password';
@@ -63,7 +64,7 @@ export async function middleware(request: NextRequest) {
       if (isAdminPath) {
         return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, path, search));
       }
-      if (isQuizPath) {
+      if (isQuizPath || isOnboardingPath) {
         return NextResponse.redirect(buildAbsoluteUrl(MARKETING_URL, path, search));
       }
     }
@@ -75,7 +76,7 @@ export async function middleware(request: NextRequest) {
       if (isDashboardPath || (isAppDomainAuthPath && !isAdminAuthModePath)) {
         return NextResponse.redirect(buildAbsoluteUrl(APP_URL, path, search));
       }
-      if (isQuizPath) {
+      if (isQuizPath || isOnboardingPath) {
         return NextResponse.redirect(buildAbsoluteUrl(MARKETING_URL, path, search));
       }
     }
@@ -135,5 +136,15 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/quiz', '/dashboard/:path*', '/admin/:path*', '/login', '/register', '/forgot-password', '/reset-password']
+  matcher: [
+    '/',
+    '/quiz/:path*',
+    '/onboarding/:path*',
+    '/dashboard/:path*',
+    '/admin/:path*',
+    '/login',
+    '/register',
+    '/forgot-password',
+    '/reset-password'
+  ]
 };

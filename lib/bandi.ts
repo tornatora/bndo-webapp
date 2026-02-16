@@ -74,6 +74,18 @@ export async function ensureBandoTenderId(admin: SupabaseAdmin, practiceType: Pr
 export async function ensureBandoApplication(admin: SupabaseAdmin, companyId: string, practiceType: PracticeType) {
   const tenderId = await ensureBandoTenderId(admin, practiceType);
 
+  // Ensure the company has a "match" for this tender so RLS allows reading tender details (title, etc.)
+  // from the client dashboard. This is created server-side with service role.
+  await admin.from('tender_matches').upsert(
+    {
+      company_id: companyId,
+      tender_id: tenderId,
+      relevance_score: 1,
+      status: 'new'
+    },
+    { onConflict: 'company_id,tender_id' }
+  );
+
   const { data: app, error } = await admin
     .from('tender_applications')
     .upsert(
@@ -95,4 +107,3 @@ export async function ensureBandoApplication(admin: SupabaseAdmin, companyId: st
 
   return { applicationId: app.id, tenderId: app.tender_id as string };
 }
-

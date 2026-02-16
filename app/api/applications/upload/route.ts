@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const supabaseAdmin = getSupabaseAdmin();
     const formData = await request.formData();
     const applicationId = String(formData.get('applicationId') ?? '');
     const tenderId = String(formData.get('tenderId') ?? '');
@@ -67,7 +65,7 @@ export async function POST(request: Request) {
     const storagePath = `${profile.company_id}/${applicationId}/${timestamp}_${safeFileName}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-    const { error: storageError } = await supabaseAdmin.storage
+    const { error: storageError } = await supabase.storage
       .from('application-documents')
       .upload(storagePath, fileBuffer, {
         contentType: file.type || 'application/octet-stream',
@@ -78,7 +76,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Upload storage fallito: ${storageError.message}` }, { status: 500 });
     }
 
-    const { error: docError } = await supabaseAdmin.from('application_documents').insert({
+    const { error: docError } = await supabase.from('application_documents').insert({
       application_id: application.id,
       uploaded_by: profile.id,
       file_name: safeFileName,
@@ -96,7 +94,7 @@ export async function POST(request: Request) {
       );
     }
 
-    await supabaseAdmin
+    await supabase
       .from('tender_applications')
       .update({
         status: 'submitted',
@@ -105,7 +103,7 @@ export async function POST(request: Request) {
       })
       .eq('id', application.id);
 
-    await supabaseAdmin
+    await supabase
       .from('tender_matches')
       .update({
         status: 'participating'
@@ -115,7 +113,7 @@ export async function POST(request: Request) {
 
     // Avvisa inbox consulente con un messaggio automatico sul thread aziendale.
     try {
-      const { data: ensuredThread } = await supabaseAdmin
+      const { data: ensuredThread } = await supabase
         .from('consultant_threads')
         .upsert({ company_id: profile.company_id }, { onConflict: 'company_id' })
         .select('id')
@@ -124,7 +122,7 @@ export async function POST(request: Request) {
       const threadId = ensuredThread?.id;
 
       if (threadId) {
-        await supabaseAdmin.from('consultant_thread_participants').upsert(
+        await supabase.from('consultant_thread_participants').upsert(
           {
             thread_id: threadId,
             profile_id: profile.id,
@@ -134,7 +132,7 @@ export async function POST(request: Request) {
           { onConflict: 'thread_id,profile_id' }
         );
 
-        await supabaseAdmin.from('consultant_messages').insert({
+        await supabase.from('consultant_messages').insert({
           thread_id: threadId,
           sender_profile_id: profile.id,
           body: `Ho caricato il documento ${safeFileName} per la pratica ${tenderId}.`

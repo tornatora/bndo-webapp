@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
 
 const payloadSchema = z.object({
   threadId: z.string().uuid(),
@@ -26,8 +27,6 @@ type ChatMessage = {
   body: string;
   created_at: string;
 };
-
-const AUTO_REPLY_BODY = 'Un nostro consulente ti rispondera il prima possibile.';
 
 async function getViewerProfile() {
   const supabase = createClient();
@@ -127,7 +126,7 @@ async function maybeCreateAutomaticReply(threadId: string, sender: ViewerProfile
     return { autoReplyNotice: null, autoReplyMessage: null };
   }
 
-  const autoReplyNotice = 'Un nostro consulente ti rispondera il prima possibile.';
+  const autoReplyNotice = AUTO_REPLY_BODY;
   const opsSender = await findOpsSenderProfile(threadId);
 
   if (!opsSender) {

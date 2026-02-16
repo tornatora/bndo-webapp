@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
@@ -11,7 +10,6 @@ function safeFileName(name: string) {
 export async function POST(request: Request) {
   try {
     const supabase = createClient();
-    const supabaseAdmin = getSupabaseAdmin();
 
     const formData = await request.formData();
     const applicationId = String(formData.get('applicationId') ?? '');
@@ -68,7 +66,7 @@ export async function POST(request: Request) {
     const storagePath = `${profile.company_id}/${applicationId}/${timestamp}_${fileName}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-    const { error: storageError } = await supabaseAdmin.storage
+    const { error: storageError } = await supabase.storage
       .from('application-documents')
       .upload(storagePath, fileBuffer, {
         contentType: file.type || 'application/octet-stream',
@@ -79,7 +77,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Upload storage fallito: ${storageError.message}` }, { status: 500 });
     }
 
-    const { error: docError } = await supabaseAdmin.from('application_documents').insert({
+    const { error: docError } = await supabase.from('application_documents').insert({
       application_id: applicationId,
       uploaded_by: profile.id,
       file_name: fileName,
@@ -94,7 +92,7 @@ export async function POST(request: Request) {
 
     // Notify consultant thread (non-blocking).
     try {
-      const { data: ensuredThread } = await supabaseAdmin
+      const { data: ensuredThread } = await supabase
         .from('consultant_threads')
         .upsert({ company_id: profile.company_id }, { onConflict: 'company_id' })
         .select('id')
@@ -102,7 +100,7 @@ export async function POST(request: Request) {
 
       const threadId = ensuredThread?.id ?? null;
       if (threadId) {
-        await supabaseAdmin.from('consultant_thread_participants').upsert(
+        await supabase.from('consultant_thread_participants').upsert(
           {
             thread_id: threadId,
             profile_id: profile.id,
@@ -112,7 +110,7 @@ export async function POST(request: Request) {
           { onConflict: 'thread_id,profile_id' }
         );
 
-        await supabaseAdmin.from('consultant_messages').insert({
+        await supabase.from('consultant_messages').insert({
           thread_id: threadId,
           sender_profile_id: profile.id,
           body: `Ho caricato il documento ${fileName} per la mia pratica.`
@@ -130,4 +128,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

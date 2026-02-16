@@ -3,6 +3,7 @@ import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { ADMIN_URL, APP_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
+import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
 function resolveSafeRedirect(target: string | null, fallback: URL, allowedHosts: Set<string>) {
   if (!target) return fallback;
@@ -32,6 +33,9 @@ function redirectWithError(error: string, mode: 'admin' | 'user' = 'user', next:
 }
 
 export async function POST(request: NextRequest) {
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
+
   const formData = await request.formData();
   const identifier = String(formData.get('identifier') ?? '').trim();
   const password = String(formData.get('password') ?? '');
@@ -43,6 +47,15 @@ export async function POST(request: NextRequest) {
   if (!identifier || !password) {
     return redirectWithError('Credenziali obbligatorie', mode, nextParam);
   }
+
+  const rateLimit = enforceRateLimit({
+    namespace: 'auth-login',
+    key: `${getClientIp(request)}:${identifier.toLowerCase()}`,
+    limit: 15,
+    windowMs: 60_000,
+    message: 'Troppi tentativi di login. Riprova tra poco.'
+  });
+  if (rateLimit) return rateLimit;
 
   const supabaseAdmin = hasRealServiceRoleKey() ? getSupabaseAdmin() : null;
   let email = identifier;

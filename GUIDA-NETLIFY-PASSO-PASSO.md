@@ -40,7 +40,7 @@ Se usi Stripe/Resend aggiungi anche:
 ## 3-B) Stripe Success URL (post-pagamento)
 
 Se usi un Payment Link / Checkout di Stripe per l'anticipo dopo il quiz, imposta la `success_url` a:
-- `https://bndo.it/onboarding/after-payment?session_id={CHECKOUT_SESSION_ID}`
+- `https://bndo.it/onboarding?session_id={CHECKOUT_SESSION_ID}`
 
 ## 4) Domini custom
 

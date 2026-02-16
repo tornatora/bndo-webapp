@@ -3,12 +3,11 @@ import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/bandi';
+import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
 
 const payloadSchema = z.object({
   practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord'])
 });
-
-const AUTO_REPLY_BODY = 'Un nostro consulente ti rispondera il prima possibile.';
 
 type AuthProfile = {
   id: string;

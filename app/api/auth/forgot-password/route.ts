@@ -4,6 +4,7 @@ import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { ADMIN_URL, APP_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
+import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
 const ForgotPasswordSchema = z.object({
   email: z.string().trim().email().max(160)
@@ -23,6 +24,9 @@ function redirectAdminRecoveryBlocked() {
 }
 
 export async function POST(request: NextRequest) {
+  const crossSite = rejectCrossSiteMutation(request);
+  if (crossSite) return crossSite;
+
   const formData = await request.formData();
   const mode = String(formData.get('mode') ?? '').trim().toLowerCase();
   const requestHost = String(request.headers.get('host') ?? '').toLowerCase();
@@ -40,6 +44,16 @@ export async function POST(request: NextRequest) {
   }
 
   const normalizedEmail = parsed.data.email.toLowerCase();
+
+  const rateLimit = enforceRateLimit({
+    namespace: 'auth-forgot-password',
+    key: `${getClientIp(request)}:${normalizedEmail}`,
+    limit: 6,
+    windowMs: 10 * 60_000,
+    message: 'Troppi tentativi di recupero password. Riprova tra qualche minuto.'
+  });
+  if (rateLimit) return rateLimit;
+
   const supabaseAdmin = getSupabaseAdmin();
   const { data: profile } = await supabaseAdmin
     .from('profiles')

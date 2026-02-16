@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
+import { enforceRateLimit, getClientIp, publicError, rejectCrossSiteMutation } from '@/lib/security/http';
 
 const payloadSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -17,16 +18,19 @@ const payloadSchema = z.object({
   consentDataProcessing: z.boolean()
 });
 
-function getClientIp(request: Request) {
-  const nf = request.headers.get('x-nf-client-connection-ip');
-  if (nf && nf.trim()) return nf.trim();
-  const xf = request.headers.get('x-forwarded-for');
-  if (xf && xf.trim()) return xf.split(',')[0].trim();
-  return null;
-}
-
 export async function POST(request: Request) {
   try {
+    const crossSite = rejectCrossSiteMutation(request);
+    if (crossSite) return crossSite;
+
+    const rateLimit = enforceRateLimit({
+      namespace: 'quiz-submit',
+      key: getClientIp(request),
+      limit: 30,
+      windowMs: 10 * 60_000
+    });
+    if (rateLimit) return rateLimit;
+
     const payload = payloadSchema.parse(await request.json());
     if (!payload.consentPrivacy || !payload.consentTerms || !payload.consentDataProcessing) {
       return NextResponse.json({ error: 'Consensi obbligatori mancanti.' }, { status: 422 });
@@ -122,7 +126,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Errore salvataggio quiz.' },
+      { error: publicError(error, 'Errore salvataggio quiz.') },
       { status: 500 }
     );
   }

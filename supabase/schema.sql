@@ -478,5 +478,17 @@ on storage.objects
 for insert
 with check (
   bucket_id = 'application-documents'
-  and (auth.role() = 'authenticated' or auth.role() = 'service_role')
+  and (
+    auth.role() = 'service_role'
+    or (
+      auth.role() = 'authenticated'
+      and exists (
+        select 1
+        from public.tender_applications ta
+        where ta.company_id::text = split_part(storage.objects.name, '/', 1)
+          and ta.id::text = split_part(storage.objects.name, '/', 2)
+          and public.is_company_member(ta.company_id)
+      )
+    )
+  )
 );

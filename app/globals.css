@@ -2745,9 +2745,9 @@
             font-size: 14px;
             font-weight: 750;
             color: var(--navy);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .admin-table-meta {

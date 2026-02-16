@@ -38,7 +38,7 @@ export default function HomePage() {
               <a href="#processo">Processo</a>
             </li>
             <li>
-              <Link href="/quiz" className="btn-nav">
+              <Link href="/quiz/autoimpiego" className="btn-nav">
                 <span>Inizia ora</span>
               </Link>
             </li>
@@ -56,7 +56,7 @@ export default function HomePage() {
               success fee solo se vinci.
             </p>
             <div className="cta-group">
-              <Link href="/quiz" className="btn-primary">
+              <Link href="/quiz/autoimpiego" className="btn-primary">
                 <span>Verifica requisiti gratis</span>
               </Link>
               <a href="#bandi" className="btn-link">
@@ -147,7 +147,7 @@ export default function HomePage() {
               </div>
 
               <div className="bando-footer">
-                <Link href="/quiz" className="bando-btn">
+                <Link href="/quiz/autoimpiego" className="bando-btn">
                   <span>Verifica requisiti</span>
                 </Link>
               </div>
@@ -206,7 +206,7 @@ export default function HomePage() {
               </div>
 
               <div className="bando-footer">
-                <Link href="/quiz" className="bando-btn">
+                <Link href="/quiz/autoimpiego" className="bando-btn">
                   <span>Verifica requisiti</span>
                 </Link>
               </div>
@@ -311,7 +311,7 @@ export default function HomePage() {
                 </div>
 
                 <div style={{ marginTop: 32 }}>
-                  <Link href="/quiz" className="bando-btn">
+                  <Link href="/quiz/autoimpiego" className="bando-btn">
                     <span>Inizia ora</span>
                   </Link>
                 </div>
@@ -385,7 +385,7 @@ export default function HomePage() {
           <div className="cta-content">
             <h2>Inizia ora la tua pratica</h2>
             <p>Verifica gratuitamente se hai i requisiti per i bandi</p>
-            <Link href="/quiz" className="btn-primary btn-primary-white">
+            <Link href="/quiz/autoimpiego" className="btn-primary btn-primary-white">
               <span>Verifica requisiti gratis</span>
             </Link>
           </div>

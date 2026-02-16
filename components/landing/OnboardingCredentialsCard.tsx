@@ -12,7 +12,35 @@ type CredentialsPayload = {
   emailSent?: boolean;
   showCredentials?: boolean;
   message?: string;
+  error?: string;
+  detail?: string;
 };
+
+function readApiError(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const record = payload as Record<string, unknown>;
+  const normalize = (value: string) => {
+    const text = value.trim();
+    const lowered = text.toLowerCase();
+    if (!text || lowered === 'bad request' || lowered === 'invalid request') return '';
+    if (lowered.includes('invalid api key')) return 'Configurazione pagamento non valida. Contatta supporto BNDO.';
+    return text;
+  };
+
+  if (typeof record.error === 'string') {
+    const normalized = normalize(record.error);
+    if (normalized) return normalized;
+  }
+  if (typeof record.message === 'string') {
+    const normalized = normalize(record.message);
+    if (normalized) return normalized;
+  }
+  if (typeof record.detail === 'string') {
+    const normalized = normalize(record.detail);
+    if (normalized) return normalized;
+  }
+  return fallback;
+}
 
 export function OnboardingCredentialsCard({ sessionId }: { sessionId: string }) {
   const [payload, setPayload] = useState<CredentialsPayload>({ ready: false });
@@ -28,7 +56,7 @@ export function OnboardingCredentialsCard({ sessionId }: { sessionId: string }) 
         const data = (await response.json()) as CredentialsPayload;
 
         if (!response.ok) {
-          throw new Error(data.message ?? 'Errore durante il recupero credenziali.');
+          throw new Error(readApiError(data, 'Errore durante il recupero credenziali.'));
         }
 
         setPayload(data);

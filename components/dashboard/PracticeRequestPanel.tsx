@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { MARKETING_URL } from '@/lib/site-urls';
 
 type PracticeRequestPanelProps = {
   quizCompleted: boolean;
@@ -128,7 +127,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
 
             {!quizCompleted ? (
               <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
-                Consigliato: <Link href={`${MARKETING_URL}/quiz`}>compila il quiz requisiti</Link>
+                Consigliato: <Link href={`/quiz/autoimpiego`}>compila il quiz requisiti</Link>
               </div>
             ) : null}
           </article>
