@@ -44,6 +44,8 @@ export function DocumentsPracticeCard({
   uploaded: UploadedFile[];
 }) {
   const [tab, setTab] = useState<'missing' | 'uploaded' | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const missingCount = missing.length;
   const uploadedCount = uploaded.length;
@@ -127,16 +129,36 @@ export function DocumentsPracticeCard({
                     </div>
                   </div>
                   <div className="docs-row-cta">
-                    {doc.downloadUrl ? (
-                      <a className="docs-link" href={doc.downloadUrl} target="_blank" rel="noreferrer">
-                        Apri
-                      </a>
-                    ) : (
-                      <span className="docs-link is-disabled">Non disponibile</span>
-                    )}
+                    <button
+                      type="button"
+                      className="docs-link"
+                      disabled={openingId === doc.id}
+                      onClick={async () => {
+                        try {
+                          setOpenError(null);
+                          setOpeningId(doc.id);
+                          const res = await fetch(`/api/documents/signed-url?documentId=${doc.id}`, { cache: 'no-store' });
+                          const json = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; error?: string };
+                          if (!res.ok || !json.url) throw new Error(json.error ?? 'Impossibile aprire il documento.');
+                          window.open(json.url, '_blank', 'noreferrer');
+                        } catch (e) {
+                          setOpenError(e instanceof Error ? e.message : 'Errore apertura documento.');
+                        } finally {
+                          setOpeningId(null);
+                        }
+                      }}
+                    >
+                      {openingId === doc.id ? 'Apro...' : 'Apri'}
+                    </button>
                   </div>
                 </div>
               ))}
+              {openError ? (
+                <div className="docs-empty" style={{ marginTop: 10 }}>
+                  <div className="docs-empty-title">Errore</div>
+                  <div className="docs-empty-sub">{openError}</div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="docs-empty">
@@ -151,4 +173,3 @@ export function DocumentsPracticeCard({
     </article>
   );
 }
-

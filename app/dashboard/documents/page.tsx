@@ -96,23 +96,16 @@ export default async function DashboardDocumentsPage() {
       );
       const missing = checklist.filter((c) => !c.uploaded);
 
-      const docsWithUrl = await Promise.all(
-        docsInApp.map(async (doc) => {
-          const signed = await supabase.storage.from('application-documents').createSignedUrl(doc.storage_path, 3600);
-          return { ...doc, downloadUrl: signed.error ? null : signed.data.signedUrl };
-        })
-      );
-
       return {
         applicationId: application.id,
         practiceTitle,
         missing: missing.map((m) => ({ key: m.key, label: m.label })),
-        uploaded: docsWithUrl.map((d) => ({
+        uploaded: docsInApp.map((d) => ({
           id: d.id,
           fileName: d.file_name,
           createdAt: d.created_at,
           fileSize: d.file_size,
-          downloadUrl: d.downloadUrl
+          downloadUrl: null
         }))
       };
     })

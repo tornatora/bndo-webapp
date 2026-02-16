@@ -22,12 +22,20 @@ export function AdminNotificationsBell() {
     if (!silent) setLoading(true);
     try {
       const res = await fetch('/api/admin/notifications?limit=12', { cache: 'no-store' });
-      const json = (await res.json()) as { ok?: boolean; items?: typeof items; error?: string };
-      if (!res.ok) throw new Error(json?.error ?? 'Impossibile caricare notifiche.');
+      const contentType = res.headers.get('content-type') ?? '';
+      const json = contentType.includes('application/json')
+        ? ((await res.json()) as { ok?: boolean; items?: typeof items; error?: string })
+        : ({} as { ok?: boolean; items?: typeof items; error?: string });
+      if (!res.ok) {
+        // When auth redirects (HTML), content-type won't be JSON; show a real error so it's actionable.
+        const fallback = contentType.includes('text/html') ? 'Sessione scaduta: fai login di nuovo.' : 'Impossibile caricare notifiche.';
+        throw new Error(json?.error ?? fallback);
+      }
       setItems(json.items ?? []);
       setError(null);
     } catch (e) {
-      if (!silent) setError(e instanceof Error ? e.message : 'Errore notifiche.');
+      const msg = e instanceof Error ? e.message : 'Errore notifiche.';
+      setError(msg);
     } finally {
       if (!silent) setLoading(false);
     }

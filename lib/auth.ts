@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation';
+import { cache } from 'react';
 import { hasOpsAccess } from '@/lib/roles';
 import { ADMIN_URL } from '@/lib/site-urls';
 import { createClient } from '@/lib/supabase/server';
 
-export async function requireUser() {
+export const requireUser = cache(async () => {
   const supabase = createClient();
   const {
     data: { user }
@@ -14,15 +15,15 @@ export async function requireUser() {
   }
 
   return user;
-}
+});
 
-export async function requireUserProfile() {
+export const requireUserProfile = cache(async () => {
   const user = await requireUser();
   const supabase = createClient();
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, role, full_name, username, email, company_id')
     .eq('id', user.id)
     .single();
 
@@ -31,7 +32,7 @@ export async function requireUserProfile() {
   }
 
   return { user, profile };
-}
+});
 
 export async function requireOpsProfile() {
   const { user, profile } = await requireUserProfile();
