@@ -241,7 +241,28 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const [journeyStep, setJourneyStep] = useState<JourneyStep>(1);
   const [stepOneAttempted, setStepOneAttempted] = useState(false);
   const [stepTwoAttempted, setStepTwoAttempted] = useState(false);
+  const formRef = useRef<HTMLElement | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
+  const pendingStepScrollRef = useRef(false);
+
+  const scrollFormIntoView = () => {
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const scheduleFormScroll = () => {
+    window.requestAnimationFrame(() => {
+      scrollFormIntoView();
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingStepScrollRef.current) return;
+    pendingStepScrollRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      scrollFormIntoView();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [journeyStep]);
 
   useEffect(() => {
     apiRequest<CoverageResponse>('/api/v1/public/coverage')
@@ -377,7 +398,12 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const runMatching = async () => {
     if (!stepOneReady) {
       setStepOneAttempted(true);
-      setJourneyStep(1);
+      if (journeyStep === 1) {
+        scheduleFormScroll();
+      } else {
+        pendingStepScrollRef.current = true;
+        setJourneyStep(1);
+      }
       setError(
         profile.businessExists
           ? 'Compila i campi obbligatori evidenziati in Info base.'
@@ -388,7 +414,12 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
 
     if (!stepTwoReady) {
       setStepTwoAttempted(true);
-      setJourneyStep(2);
+      if (journeyStep === 2) {
+        scheduleFormScroll();
+      } else {
+        pendingStepScrollRef.current = true;
+        setJourneyStep(2);
+      }
       setError(
         profile.businessExists
           ? 'Indica obiettivo e importo richiesto per la tua impresa.'
@@ -429,8 +460,13 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
     }
   };
 
-  const goToStep = (step: JourneyStep) => {
+  const goToStep = (step: JourneyStep, options?: { scroll?: boolean }) => {
     if (step === 2 && !stepOneReady) return;
+    if (step === journeyStep) {
+      if (options?.scroll ?? true) scheduleFormScroll();
+      return;
+    }
+    pendingStepScrollRef.current = options?.scroll ?? true;
     setJourneyStep(step);
   };
 
@@ -453,7 +489,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
 
   return (
     <div className="scanner-v2 space-y-8">
-      <section className="panel-card full-search-bar fade-up">
+      <section ref={formRef} className="panel-card full-search-bar fade-up">
         <div className="full-search-head">
           <h1 className="full-search-title">Scanner bandi</h1>
           <p className="full-search-sub">Percorso rapido in 2 step.</p>

@@ -4862,6 +4862,11 @@ textarea.form-control,
   padding: 30px 30px 32px;
 }
 
+.scanner-v2 .full-search-bar,
+.scanner-v2 .panel-card.scanner-results {
+  scroll-margin-top: calc(var(--topbar-h) + 16px);
+}
+
 .scanner-v2 .result-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -5797,6 +5802,111 @@ textarea.form-control,
 
   .grant-detail-page .grant-detail-title {
     font-size: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .scanner-v2 .panel-card.scanner-results {
+    padding: 18px 14px 20px;
+  }
+
+  .scanner-v2 .results-switch {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .scanner-v2 .results-chip,
+  .scanner-v2 .results-sort,
+  .scanner-v2 .results-sort-select,
+  .scanner-v2 .result-actions,
+  .scanner-v2 .result-btn {
+    width: 100%;
+  }
+
+  .scanner-v2 .result-grid,
+  .scanner-v2 .result-card,
+  .scanner-v2 .result-card-head,
+  .scanner-v2 .result-card-titlewrap,
+  .scanner-v2 .result-card-footer,
+  .scanner-v2 .result-actions,
+  .scanner-v2 .result-links-inline {
+    min-width: 0;
+  }
+
+  .scanner-v2 .result-grid {
+    gap: 14px;
+  }
+
+  .scanner-v2 .result-card {
+    padding: 16px;
+    gap: 14px;
+    border-radius: 16px;
+  }
+
+  .scanner-v2 .result-card-head {
+    gap: 14px;
+  }
+
+  .scanner-v2 .result-card-title {
+    font-size: 18px;
+    line-height: 1.24;
+    -webkit-line-clamp: 3;
+  }
+
+  .scanner-v2 .result-card-tags {
+    gap: 8px;
+  }
+
+  .scanner-v2 .result-tag,
+  .scanner-v2 .result-tag--aid,
+  .scanner-v2 .result-tag--availability {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .scanner-v2 .result-info-line {
+    gap: 8px;
+  }
+
+  .scanner-v2 .result-info-line > span {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    white-space: normal;
+  }
+
+  .scanner-v2 .result-kpi {
+    min-width: 0;
+    min-height: 0;
+    padding: 14px;
+    gap: 8px;
+  }
+
+  .scanner-v2 .result-kpi-v {
+    font-size: clamp(20px, 7vw, 28px);
+    overflow-wrap: anywhere;
+  }
+
+  .scanner-v2 .result-kpi-v--prob {
+    font-size: clamp(28px, 11vw, 38px);
+  }
+
+  .scanner-v2 .result-btn {
+    min-width: 0;
+    min-height: 54px;
+    padding: 14px 16px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .scanner-v2 .result-btn--consult::before {
+    margin-right: 8px;
   }
 }
 /* --- end Scanner Bandi PRO sync --- */
