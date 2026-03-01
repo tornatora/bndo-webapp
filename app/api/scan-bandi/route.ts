@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { readBandiCache, readBundledBandiSeed } from '@/lib/bandiCache';
 import { checkRateLimit } from '@/lib/security/rateLimit';
+import { STRATEGIC_SCANNER_DOCS } from '@/lib/strategicScannerDocs';
 
 export const runtime = 'nodejs';
 
@@ -125,6 +126,8 @@ type IncentiviDoc = {
   url?: string;
   score?: number;
 };
+
+const SOUTH_REGION_SET = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
 
 type ScannerAuthResponse = {
   tokens: { accessToken: string; refreshToken: string };
@@ -303,14 +306,7 @@ function buildScannerProfilePayload(args: {
     employmentStatus,
   } = args;
 
-  const businessExistsRaw = rawProfile.isConstituted ?? rawProfile.businessExists;
-  const businessHints = normalizeForMatch([activityType, fundingGoal, cleanString(rawProfile.businessStage, 120)].filter(Boolean).join(' '));
-  const businessExists =
-    typeof businessExistsRaw === 'boolean'
-      ? businessExistsRaw
-      : /(da aprire|da costituire|costituend|nuova impresa|startup|avviare)/.test(businessHints)
-        ? false
-        : true;
+  const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal) ?? true;
 
   return {
     region: region ?? null,
@@ -330,6 +326,27 @@ function buildScannerProfilePayload(args: {
       fundingGoal: fundingGoal ?? null,
     },
   };
+}
+
+function inferBusinessExists(
+  rawProfile: Record<string, unknown>,
+  activityType: string | null,
+  fundingGoal: string | null,
+): boolean | null {
+  const businessExistsRaw = rawProfile.isConstituted ?? rawProfile.businessExists;
+  if (typeof businessExistsRaw === 'boolean') return businessExistsRaw;
+
+  const businessHints = normalizeForMatch(
+    [activityType, fundingGoal, cleanString(rawProfile.businessStage, 120)].filter(Boolean).join(' '),
+  );
+  if (!businessHints) return null;
+  if (/(da aprire|da costituire|costituend|nuova impresa|startup|avviare|autoimpiego|lavoro autonomo|libero professionista)/.test(businessHints)) {
+    return false;
+  }
+  if (/(gia attiva|già attiva|esistente|impresa attiva|azienda attiva)/.test(businessHints)) {
+    return true;
+  }
+  return null;
 }
 
 async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs = SCANNER_API_TIMEOUT_MS): Promise<T> {
@@ -781,30 +798,157 @@ function applyStrategicDocOverrides(doc: IncentiviDoc): IncentiviDoc {
   const titleNorm = normalizeForMatch(String(doc.title ?? ''));
   const urlNorm = normalizeForMatch(`${String(doc.institutionalLink ?? '')} ${String(doc.url ?? '')}`);
   const hints = `${titleNorm} ${urlNorm}`.trim();
+  const mergeList = (...values: unknown[]) => Array.from(new Set(values.flatMap((value) => asStringArray(value))));
 
   if (
+    hints.includes('resto al sud') ||
     hints.includes('resto al sud 2 0') ||
     hints.includes('resto al sud 20') ||
     hints.includes('resto al sud 2.0')
   ) {
     return {
       ...doc,
+      authorityName: doc.authorityName ?? 'Invitalia',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : "Incentivo per l'avvio di nuove iniziative imprenditoriali, libero-professionali e di lavoro autonomo nel Mezzogiorno.",
+      regions: mergeList(
+        doc.regions,
+        ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia'],
+      ),
+      sectors: mergeList(doc.sectors, ['Turismo', 'Commercio', 'Servizi', 'ICT', 'Digitale', 'Artigianato', 'Cultura', 'Ristorazione', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Startup', 'Impresa', 'Aspiranti imprenditori', 'Libero professionista', 'Lavoro autonomo']),
+      purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa', 'Imprenditoria giovanile', 'Autoimpiego', 'Sostegno investimenti']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
       costMin: 40_000,
       costMax: 200_000,
-      supportForm: Array.from(new Set([...asStringArray(doc.supportForm), 'Fondo perduto'])),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto', 'Voucher']),
+      ateco: mergeList(doc.ateco, ['Tutti i settori economici ammissibili tranne agricoltura, pesca e acquacoltura']),
+      institutionalLink: doc.institutionalLink || 'https://www.invitalia.it/incentivi-e-strumenti/resto-al-sud-20',
+      url: doc.url || '/incentivi-e-strumenti/resto-al-sud-20',
     };
   }
 
   if (hints.includes('smart start italia') || hints.includes('smartstart italia') || hints.includes('smart start')) {
     return {
       ...doc,
+      authorityName: doc.authorityName ?? 'Invitalia',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : "Incentivo per startup innovative e nuove imprese ad alto contenuto tecnologico.",
+      regions: mergeList(doc.regions, ['Italia']),
+      sectors: mergeList(doc.sectors, ['ICT', 'Digitale', 'Innovazione', 'Ricerca', 'Servizi', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Startup innovativa', 'Nuova impresa', 'Impresa']),
+      purposes: mergeList(doc.purposes, ['Innovazione e ricerca', 'Start up/Sviluppo d impresa', 'Digitalizzazione']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
       costMin: 100_000,
       costMax: 1_500_000,
-      supportForm: Array.from(new Set([...asStringArray(doc.supportForm), 'Fondo perduto'])),
+      supportForm: mergeList(doc.supportForm, ['Finanziamento agevolato', 'Contributo/Fondo perduto']),
+      institutionalLink: doc.institutionalLink || 'https://www.invitalia.it/cosa-facciamo/creiamo-nuove-aziende/smartstart-italia',
+      url: doc.url || '/cosa-facciamo/creiamo-nuove-aziende/smartstart-italia',
     };
   }
 
   return doc;
+}
+
+function computeStrategicSignal(args: {
+  doc: IncentiviDoc;
+  rawProfile: Record<string, unknown>;
+  region: string | null;
+  sector: string | null;
+  fundingGoal: string | null;
+  activityType: string | null;
+  contributionPreference: string | null;
+  age: number | null;
+  employmentStatus: string | null;
+}): { ok: boolean; boost: number; reasons: string[] } {
+  const { doc, rawProfile, region, sector, fundingGoal, activityType, contributionPreference, age, employmentStatus } = args;
+  const hints = normalizeForMatch(
+    [
+      doc.title,
+      doc.description,
+      doc.authorityName,
+      typeof doc.institutionalLink === 'string' ? doc.institutionalLink : '',
+      typeof doc.url === 'string' ? doc.url : '',
+      ...asStringArray(doc.purposes),
+      ...asStringArray(doc.supportForm),
+      ...asStringArray(doc.beneficiaries),
+      ...asStringArray(doc.sectors),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+  const sectorNorm = normalizeForMatch(sector ?? '');
+  const employmentNorm = normalizeForMatch(employmentStatus ?? '');
+  const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal);
+  const profileGoalNorm = normalizeForMatch([activityType, fundingGoal].filter(Boolean).join(' '));
+  const requestedAid = classifyContributionPreference(contributionPreference).kind;
+
+  if (hints.includes('resto al sud')) {
+    if (/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === true) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region && SOUTH_REGION_SET.has(region)) {
+      boost += 0.2;
+      reasons.push('Misura forte per il Mezzogiorno');
+    }
+    if (businessExists === false) {
+      boost += 0.18;
+      reasons.push('Adatto a nuova impresa o autoimpiego');
+    }
+    if (/(disoccupat|inoccupat|neet|senza lavoro|non occupat)/.test(employmentNorm)) {
+      boost += 0.14;
+      reasons.push('Compatibile con profilo disoccupato/inoccupato');
+    }
+    if (age !== null && age >= 18 && age <= 35) {
+      boost += 0.12;
+    }
+    if (/(avvio|nuova impresa|startup|autoimpiego|lavoro autonomo|libero professionista)/.test(profileGoalNorm)) {
+      boost += 0.12;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.1;
+    }
+    if (sectorNorm && !/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
+      boost += 0.05;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('smart start')) {
+    let boost = 0;
+    const reasons: string[] = [];
+    if (businessExists === false) boost += 0.08;
+    if (/(startup|innov|digit|software|ict|tecnolog)/.test(profileGoalNorm) || /(digit|ict|innov|software)/.test(sectorNorm)) {
+      boost += 0.12;
+      reasons.push('Molto coerente per startup innovative');
+    }
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('nuove imprese a tasso zero') || hints.includes('oltre nuove imprese')) {
+    let boost = 0;
+    const reasons: string[] = [];
+    if (businessExists === false) {
+      boost += 0.1;
+      reasons.push('Misura coerente con nuova impresa');
+    }
+    if (age !== null && age <= 35) boost += 0.06;
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  return { ok: true, boost: 0, reasons: [] };
 }
 
 function hasReliableEconomicDataDoc(doc: IncentiviDoc): boolean {
@@ -1430,22 +1574,56 @@ async function fetchIncentiviDocs(keyword: string | null, rows: number, timeoutM
 }
 
 function mergeIncentiviDocs(...lists: IncentiviDoc[][]) {
+  const preferString = (left: unknown, right: unknown) => {
+    const a = typeof left === 'string' && left.trim() ? left.trim() : null;
+    const b = typeof right === 'string' && right.trim() ? right.trim() : null;
+    if (!a) return b;
+    if (!b) return a;
+    return b.length >= a.length ? b : a;
+  };
+  const mergeList = (left: unknown, right: unknown) => Array.from(new Set([...asStringArray(left), ...asStringArray(right)]));
+  const mergeDocs = (left: IncentiviDoc, right: IncentiviDoc): IncentiviDoc => ({
+    ...left,
+    ...right,
+    title: preferString(left.title, right.title) ?? undefined,
+    description: preferString(left.description, right.description) ?? undefined,
+    authorityName: preferString(left.authorityName, right.authorityName) ?? undefined,
+    openDate: preferString(left.openDate, right.openDate) ?? undefined,
+    closeDate: preferString(left.closeDate, right.closeDate) ?? undefined,
+    regions: mergeList(left.regions, right.regions),
+    sectors: mergeList(left.sectors, right.sectors),
+    beneficiaries: mergeList(left.beneficiaries, right.beneficiaries),
+    dimensions: mergeList(left.dimensions, right.dimensions),
+    purposes: mergeList(left.purposes, right.purposes),
+    supportForm: mergeList(left.supportForm, right.supportForm),
+    ateco: mergeList(left.ateco, right.ateco),
+    costMin: right.costMin ?? left.costMin,
+    costMax: right.costMax ?? left.costMax,
+    institutionalLink: preferString(left.institutionalLink, right.institutionalLink) ?? undefined,
+    url: preferString(left.url, right.url) ?? undefined,
+    score: Math.max(typeof left.score === 'number' ? left.score : 0, typeof right.score === 'number' ? right.score : 0) || undefined,
+  });
   const byKey = new Map<string, IncentiviDoc>();
   const extras: IncentiviDoc[] = [];
 
   for (const list of lists) {
     for (const doc of list) {
       const key =
-        doc.id !== undefined && doc.id !== null
-          ? `id:${String(doc.id)}`
+        typeof doc.institutionalLink === 'string' && doc.institutionalLink.trim()
+          ? `official:${doc.institutionalLink.trim()}`
           : typeof doc.url === 'string' && doc.url.trim()
             ? `url:${doc.url.trim()}`
+            : doc.id !== undefined && doc.id !== null
+              ? `id:${String(doc.id)}`
+              : typeof doc.title === 'string' && doc.title.trim()
+                ? `title:${normalizeForMatch(doc.title)}`
             : null;
       if (!key) {
         extras.push(doc);
         continue;
       }
       if (!byKey.has(key)) byKey.set(key, doc);
+      else byKey.set(key, mergeDocs(byKey.get(key)!, doc));
     }
   }
 
@@ -1627,6 +1805,7 @@ export async function POST(req: Request) {
     if (docs.length === 0) {
       docs = await loadFallbackDocs();
     }
+    docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
 
     const keywordSets = buildKeywordSets(sector, fundingGoalQuery);
     const sectorCoreKeywords = keywordSets.sectorCore;
@@ -1742,6 +1921,18 @@ export async function POST(req: Request) {
                   : 0
           : 0;
 
+        const strategic = computeStrategicSignal({
+          doc,
+          rawProfile,
+          region: userRegionCanonical,
+          sector,
+          fundingGoal,
+          activityType,
+          contributionPreference,
+          age,
+          employmentStatus,
+        });
+
         const baseScore = computeScore({
           doc,
           titleNorm,
@@ -1755,7 +1946,7 @@ export async function POST(req: Request) {
           budget,
           contributionPreference
         });
-        const localScore = Math.max(0, Math.min(1, baseScore + sectorSpecificityBoost + atecoMatch.score));
+        const localScore = Math.max(0, Math.min(1, baseScore + sectorSpecificityBoost + atecoMatch.score + strategic.boost));
         const matchReasons: string[] = [];
         const mismatchFlags: string[] = [];
 
@@ -1769,6 +1960,7 @@ export async function POST(req: Request) {
         if (contribution.matched && contributionPrefInfo.strict && contributionPrefInfo.label) {
           matchReasons.push(`Forma contributo coerente (${contributionPrefInfo.label})`);
         }
+        if (strategic.reasons.length) matchReasons.push(...strategic.reasons);
         if (!matchReasons.length && isOpen) matchReasons.push('Bando aperto con segnali di compatibilita');
 
         if (userRegionCanonical && !regionOk) mismatchFlags.push('territory_mismatch');
@@ -1807,6 +1999,7 @@ export async function POST(req: Request) {
           regionOk,
           atecoOk: atecoMatch.ok,
           beneficiariesOk: beneficiariesMatch.ok,
+          strategicOk: strategic.ok,
           economicReliable: hasReliableEconomicDataDoc(doc),
           strictTextOk,
           relaxedTextOk,
@@ -1816,12 +2009,12 @@ export async function POST(req: Request) {
       });
 
     const openAndRegionStrict = mapped.filter(
-      (x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk && x.economicReliable,
+      (x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk && x.strategicOk && x.economicReliable,
     );
     const openAndRegion =
       openAndRegionStrict.length > 0
         ? openAndRegionStrict
-        : mapped.filter((x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk);
+        : mapped.filter((x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk && x.strategicOk);
     const strictTextPool = wantsTopic ? openAndRegion.filter((x) => x.strictTextOk) : openAndRegion;
     const relaxedTextPool = wantsTopic ? openAndRegion.filter((x) => x.relaxedTextOk) : openAndRegion;
     const requireGoal = Boolean(fundingGoal?.trim());
