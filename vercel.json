@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/refresh-bandi",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}
+

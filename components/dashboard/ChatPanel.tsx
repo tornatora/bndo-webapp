@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/realtime-safe';
 
 type Message = {
   id: string;
@@ -142,31 +143,35 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
   useEffect(() => {
     const supabase = createClient();
 
-    const channel = supabase
-      .channel(`consultant-thread-${threadId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'consultant_messages',
-          filter: `thread_id=eq.${threadId}`
-        },
-        (payload) => {
-          const incoming = payload.new as Message;
-          setMessages((previous) => {
-            const exists = previous.some((message) => message.id === incoming.id);
-            if (exists) return previous;
-            const updated = [...previous, incoming];
-            return updated.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-          });
+    const channel = subscribeToChannelSafely(
+      () =>
+        supabase
+          .channel(`consultant-thread-${threadId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'consultant_messages',
+              filter: `thread_id=eq.${threadId}`
+            },
+            (payload) => {
+              const incoming = payload.new as Message;
+              setMessages((previous) => {
+                const exists = previous.some((message) => message.id === incoming.id);
+                if (exists) return previous;
+                const updated = [...previous, incoming];
+                return updated.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+              });
 
-          if (incoming.sender_profile_id !== viewerProfileId && document.visibilityState === 'visible') {
-            scheduleMarkRead();
-          }
-        }
-      )
-      .subscribe();
+              if (incoming.sender_profile_id !== viewerProfileId && document.visibilityState === 'visible') {
+                scheduleMarkRead();
+              }
+            }
+          )
+          .subscribe(),
+      'dashboard chat'
+    );
 
     scheduleMarkRead();
     void refreshMessages(true);
@@ -176,7 +181,7 @@ export function ChatPanel({ threadId, viewerProfileId, initialMessages, initialL
         clearTimeout(markReadTimeout.current);
         markReadTimeout.current = null;
       }
-      supabase.removeChannel(channel);
+      removeChannelSafely(supabase, channel, 'dashboard chat');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, viewerProfileId]);

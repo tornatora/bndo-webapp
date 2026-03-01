@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/realtime-safe';
 
 type Message = {
   id: string;
@@ -250,58 +251,62 @@ export function AdminInbox({ viewerProfileId, initialThreads, initialThreadId, i
   useEffect(() => {
     const supabase = createClient();
 
-    const channel = supabase
-      .channel('admin-inbox-messages')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'consultant_messages'
-        },
-        (payload) => {
-          const incoming = payload.new as Message;
-          const activeThread = selectedThreadRef.current;
+    const channel = subscribeToChannelSafely(
+      () =>
+        supabase
+          .channel('admin-inbox-messages')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'consultant_messages'
+            },
+            (payload) => {
+              const incoming = payload.new as Message;
+              const activeThread = selectedThreadRef.current;
 
-          updateThreadMetadata(incoming.thread_id, {
-            lastMessage: incoming.body,
-            lastMessageAt: incoming.created_at
-          });
+              updateThreadMetadata(incoming.thread_id, {
+                lastMessage: incoming.body,
+                lastMessageAt: incoming.created_at
+              });
 
-          if (incoming.thread_id === activeThread) {
-            setMessages((previous) => {
-              const exists = previous.some((message) => message.id === incoming.id);
-              if (exists) return previous;
-              return [...previous, incoming].sort(
-                (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-              );
-            });
+              if (incoming.thread_id === activeThread) {
+                setMessages((previous) => {
+                  const exists = previous.some((message) => message.id === incoming.id);
+                  if (exists) return previous;
+                  return [...previous, incoming].sort(
+                    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                  );
+                });
 
-            if (incoming.sender_profile_id !== viewerProfileId && document.visibilityState === 'visible') {
-              scheduleMarkThreadRead(incoming.thread_id);
+                if (incoming.sender_profile_id !== viewerProfileId && document.visibilityState === 'visible') {
+                  scheduleMarkThreadRead(incoming.thread_id);
+                }
+                return;
+              }
+
+              if (incoming.sender_profile_id !== viewerProfileId) {
+                setThreads((previous) =>
+                  previous.map((thread) =>
+                    thread.threadId === incoming.thread_id
+                      ? { ...thread, unreadCount: thread.unreadCount + 1 }
+                      : thread
+                  )
+                );
+              }
             }
-            return;
-          }
-
-          if (incoming.sender_profile_id !== viewerProfileId) {
-            setThreads((previous) =>
-              previous.map((thread) =>
-                thread.threadId === incoming.thread_id
-                  ? { ...thread, unreadCount: thread.unreadCount + 1 }
-                  : thread
-              )
-            );
-          }
-        }
-      )
-      .subscribe();
+          )
+          .subscribe(),
+      'admin inbox'
+    );
 
     return () => {
       if (markReadTimer.current) {
         clearTimeout(markReadTimer.current);
         markReadTimer.current = null;
       }
-      supabase.removeChannel(channel);
+      removeChannelSafely(supabase, channel, 'admin inbox');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewerProfileId]);

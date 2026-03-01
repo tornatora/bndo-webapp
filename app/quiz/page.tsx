@@ -1,5 +1,1 @@
-import { redirect } from 'next/navigation';
-
-export default function QuizIndexPage() {
-  redirect('/quiz/autoimpiego');
-}
+export { QuizIndexPage as default } from '@/features/quiz';

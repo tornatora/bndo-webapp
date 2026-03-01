@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/realtime-safe';
 import { isAutoReplyMessage } from '@/lib/chat/constants';
 
 type Message = {
@@ -120,20 +121,24 @@ export function NotificationsBell({ viewerProfileId }: { viewerProfileId: string
   useEffect(() => {
     if (!threadId) return;
     const supabase = createClient();
-    const channel = supabase
-      .channel(`notify-thread-${threadId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'consultant_messages', filter: `thread_id=eq.${threadId}` },
-        (payload) => {
-          const incoming = payload.new as Message;
-          setMessages((prev) => mergeMessages(prev, [incoming]));
-        }
-      )
-      .subscribe();
+    const channel = subscribeToChannelSafely(
+      () =>
+        supabase
+          .channel(`notify-thread-${threadId}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'consultant_messages', filter: `thread_id=eq.${threadId}` },
+            (payload) => {
+              const incoming = payload.new as Message;
+              setMessages((prev) => mergeMessages(prev, [incoming]));
+            }
+          )
+          .subscribe(),
+      'dashboard notifications'
+    );
 
     return () => {
-      supabase.removeChannel(channel);
+      removeChannelSafely(supabase, channel, 'dashboard notifications');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);

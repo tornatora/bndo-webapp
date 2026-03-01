@@ -8,13 +8,17 @@ function stripPort(host: string) {
   return host.split(':')[0].toLowerCase();
 }
 
+function resolveRequestHost(request: NextRequest) {
+  return stripPort(request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? '');
+}
+
 export async function middleware(request: NextRequest) {
   if (process.env.MOCK_BACKEND === 'true') {
     return NextResponse.next();
   }
 
   const path = request.nextUrl.pathname;
-  const host = stripPort(request.headers.get('host') ?? '');
+  const host = resolveRequestHost(request);
 
   const marketingHost = stripPort(hostFromBaseUrl(MARKETING_URL));
   const appHost = stripPort(hostFromBaseUrl(APP_URL));
@@ -119,11 +123,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAuthPath && user && !hasAuthError) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
     if (profile?.role && hasOpsAccess(profile.role)) {
       return NextResponse.redirect(buildAbsoluteUrl(ADMIN_URL, '/admin'));

@@ -1,13 +1,21 @@
 {
-  "name": "gara-outsourcing-app",
+  "name": "bndo-bandi-assistant",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=18.17 <22"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "NEXT_DISABLE_WEBPACK_CACHE=1 next dev",
+    "clean": "rm -rf .next",
+    "clean:all": "rm -rf .next .turbo node_modules/.cache",
+    "dev:clean": "npm run clean:all && NEXT_DISABLE_WEBPACK_CACHE=1 next dev",
+    "build": "npm run clean && next build",
     "start": "next start",
+    "preview:stable": "npm run build && npm run start -- --port 3300",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "smoke:v2": "bash scripts/smoke-v2.sh"
   },
   "dependencies": {
     "@supabase/ssr": "0.5.2",
@@ -15,6 +23,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.473.0",
     "next": "^14.2.18",
+    "pdf-parse": "^2.4.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "stripe": "^17.5.0",

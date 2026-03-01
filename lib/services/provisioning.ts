@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendOnboardingCredentialsEmail } from '@/lib/services/email';
+import { APP_URL } from '@/lib/site-urls';
 import { randomPassword, slugify } from '@/lib/utils';
 
 type CheckoutProvisionPayload = {
@@ -94,13 +95,12 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
       }
     );
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const emailResult = await sendOnboardingCredentialsEmail({
       toEmail: payload.customerEmail,
       contactName: payload.contactName,
       companyName: payload.companyName,
       tempPassword: password,
-      loginUrl: `${appUrl}/login`
+      loginUrl: `${APP_URL}/login`
     });
 
     await supabaseAdmin.from('onboarding_credentials').upsert(
@@ -211,13 +211,12 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     throw new Error(`Failed to persist onboarding credentials: ${credentialsError.message}`);
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const emailResult = await sendOnboardingCredentialsEmail({
     toEmail: payload.customerEmail,
     contactName: payload.contactName,
     companyName: payload.companyName,
     tempPassword: password,
-    loginUrl: `${appUrl}/login`
+    loginUrl: `${APP_URL}/login`
   });
 
   await supabaseAdmin

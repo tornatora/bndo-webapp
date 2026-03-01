@@ -7,11 +7,42 @@ export const dynamic = 'force-dynamic';
 
 const requestSchema = z.object({
   email: z.string().email(),
-  practices: z.number().int().min(1).max(6).optional()
+  practices: z.number().int().min(1).max(6).optional(),
+  resetExisting: z.boolean().optional()
 });
 
 const PRACTICE_STATUS = ['draft', 'submitted', 'reviewed'] as const;
 const REGISTRY_STATUS = ['pending', 'in_progress', 'completed'] as const;
+
+const DEMO_TENDERS = [
+  {
+    authority_name: 'Invitalia',
+    title: 'Resto al Sud 2.0',
+    summary: 'Bando demo per finanza agevolata (seed locale).'
+  },
+  {
+    authority_name: 'Invitalia',
+    title: 'Autoimpiego Centro Nord',
+    summary: 'Bando demo per finanza agevolata (seed locale).'
+  }
+] as const;
+
+const QA_BASELINE_PRACTICES = [
+  {
+    id: '769117e6-ab97-4b8a-9ff1-bec0e14879e6',
+    title: 'Resto al Sud 2.0',
+    status: 'draft',
+    supplierRegistryStatus: 'pending',
+    shouldCreateDocs: true
+  },
+  {
+    id: 'a13a8bde-e544-4a14-b73f-61dd0ca8fe90',
+    title: 'Autoimpiego Centro Nord',
+    status: 'submitted',
+    supplierRegistryStatus: 'in_progress',
+    shouldCreateDocs: false
+  }
+] as const;
 
 const DOC_TEMPLATES = [
   {
@@ -48,6 +79,7 @@ export async function POST(request: Request) {
 
   try {
     const payload = requestSchema.parse(await request.json());
+    const normalizedEmail = payload.email.toLowerCase();
     const practicesTarget = payload.practices ?? 2;
 
     const supabaseAdmin = getSupabaseAdmin();
@@ -55,7 +87,7 @@ export async function POST(request: Request) {
     const { data: clientProfile } = await supabaseAdmin
       .from('profiles')
       .select('id, company_id, email')
-      .eq('email', payload.email)
+      .eq('email', normalizedEmail)
       .maybeSingle();
 
     if (!clientProfile) {
@@ -96,6 +128,38 @@ export async function POST(request: Request) {
 
     const clientProfileId = clientProfile.id;
 
+    if (payload.resetExisting) {
+      const { data: existingApps, error: existingAppsError } = await supabaseAdmin
+        .from('tender_applications')
+        .select('id')
+        .eq('company_id', companyId);
+
+      if (existingAppsError) {
+        return NextResponse.json({ error: existingAppsError.message }, { status: 500 });
+      }
+
+      const existingAppIds = (existingApps ?? []).map((app) => app.id);
+      if (existingAppIds.length) {
+        const { error: deleteDocsError } = await supabaseAdmin
+          .from('application_documents')
+          .delete()
+          .in('application_id', existingAppIds);
+
+        if (deleteDocsError) {
+          return NextResponse.json({ error: deleteDocsError.message }, { status: 500 });
+        }
+
+        const { error: deleteAppsError } = await supabaseAdmin
+          .from('tender_applications')
+          .delete()
+          .eq('company_id', companyId);
+
+        if (deleteAppsError) {
+          return NextResponse.json({ error: deleteAppsError.message }, { status: 500 });
+        }
+      }
+    }
+
     // Ensure a thread exists so admin can chat even if the client never opened the dashboard.
     await supabaseAdmin.from('consultant_threads').upsert({ company_id: companyId }, { onConflict: 'company_id' });
 
@@ -116,70 +180,135 @@ export async function POST(request: Request) {
       candidateTenderIds = (tenders ?? []).map((tender) => tender.id);
     }
 
-    if (!candidateTenderIds.length) {
-      // Fresh Supabase project: create our 2 in-scope tenders so demo seeding always works.
-      const deadline = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
-      const defaultTenders = [
-        {
-          authority_name: 'Invitalia',
-          title: 'Resto al Sud 2.0',
-          deadline_at: deadline,
-          summary: 'Bando demo per finanza agevolata (seed locale).'
-        },
-        {
-          authority_name: 'Invitalia',
-          title: 'Autoimpiego Centro Nord',
-          deadline_at: deadline,
-          summary: 'Bando demo per finanza agevolata (seed locale).'
-        }
-      ];
+    // Fresh Supabase project: create our 2 in-scope tenders so demo seeding always works.
+    const deadline = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString();
+    const { data: existingDefaults } = await supabaseAdmin
+      .from('tenders')
+      .select('id, title')
+      .in(
+        'title',
+        DEMO_TENDERS.map((t) => t.title)
+      );
 
-      const { data: existingDefaults } = await supabaseAdmin
-        .from('tenders')
-        .select('id, title')
-        .in(
-          'title',
-          defaultTenders.map((t) => t.title)
-        );
+    const existingTitles = new Set((existingDefaults ?? []).map((t) => t.title));
+    const toInsert = DEMO_TENDERS.filter((t) => !existingTitles.has(t.title)).map((tender) => ({
+      ...tender,
+      deadline_at: deadline
+    }));
 
-      const existingTitles = new Set((existingDefaults ?? []).map((t) => t.title));
-      const toInsert = defaultTenders.filter((t) => !existingTitles.has(t.title));
-
-      if (toInsert.length) {
-        const { error: insertError } = await supabaseAdmin.from('tenders').insert(toInsert);
-        if (insertError) {
-          return NextResponse.json({ error: insertError.message }, { status: 500 });
-        }
+    if (toInsert.length) {
+      const { error: insertError } = await supabaseAdmin.from('tenders').insert(toInsert);
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
       }
+    }
 
-      const { data: ensuredDefaults } = await supabaseAdmin
-        .from('tenders')
-        .select('id, title')
-        .in(
-          'title',
-          defaultTenders.map((t) => t.title)
-        );
+    const { data: ensuredDefaults } = await supabaseAdmin
+      .from('tenders')
+      .select('id, title')
+      .in(
+        'title',
+        DEMO_TENDERS.map((t) => t.title)
+      );
 
+    if (!candidateTenderIds.length) {
       candidateTenderIds = (ensuredDefaults ?? []).map((t) => t.id);
     }
 
-    const tenderIdsToUse = [...new Set(candidateTenderIds)].slice(0, practicesTarget);
+    const defaultTenderIdByTitle = new Map((ensuredDefaults ?? []).map((t) => [t.title, t.id]));
+    const useBaselineQaIds =
+      Boolean(payload.resetExisting) && process.env.TEST_CLIENT_EMAIL?.toLowerCase() === normalizedEmail;
+
+    const seededPracticeConfigs: Array<{
+      applicationId?: string;
+      tenderId: string;
+      status: (typeof PRACTICE_STATUS)[number];
+      supplierRegistryStatus: (typeof REGISTRY_STATUS)[number];
+      shouldCreateDocs: boolean;
+    }> = [];
+
+    if (useBaselineQaIds) {
+      for (const practice of QA_BASELINE_PRACTICES.slice(0, practicesTarget)) {
+        const tenderId = defaultTenderIdByTitle.get(practice.title);
+        if (!tenderId) {
+          return NextResponse.json(
+            { error: `Tender demo mancante per il seed QA: ${practice.title}` },
+            { status: 500 }
+          );
+        }
+
+        seededPracticeConfigs.push({
+          applicationId: practice.id,
+          tenderId,
+          status: practice.status,
+          supplierRegistryStatus: practice.supplierRegistryStatus,
+          shouldCreateDocs: practice.shouldCreateDocs
+        });
+      }
+    }
+
+    const additionalTenderIds = [...new Set(candidateTenderIds)].filter(
+      (tenderId) => !seededPracticeConfigs.some((config) => config.tenderId === tenderId)
+    );
+    const basePracticeCount = seededPracticeConfigs.length;
+
+    for (const [index, tenderId] of additionalTenderIds.entries()) {
+      if (seededPracticeConfigs.length >= practicesTarget) break;
+
+      const absoluteIndex = basePracticeCount + index;
+      seededPracticeConfigs.push({
+        tenderId,
+        status: PRACTICE_STATUS[absoluteIndex % PRACTICE_STATUS.length],
+        supplierRegistryStatus: REGISTRY_STATUS[absoluteIndex % REGISTRY_STATUS.length],
+        shouldCreateDocs: absoluteIndex % 2 === 0
+      });
+    }
 
     const demoNote = `DEMO: pratica creata automaticamente (${new Date().toLocaleString('it-IT')})`;
+    const practiceRows = seededPracticeConfigs.map((config) => ({
+      ...(config.applicationId ? { id: config.applicationId } : {}),
+      company_id: companyId,
+      tender_id: config.tenderId,
+      status: config.status,
+      supplier_registry_status: config.supplierRegistryStatus,
+      notes: demoNote
+    }));
 
-    const { error: createAppsError } = await supabaseAdmin.from('tender_applications').upsert(
-      tenderIdsToUse.map((tenderId, index) => ({
-        company_id: companyId,
-        tender_id: tenderId,
-        status: PRACTICE_STATUS[index % PRACTICE_STATUS.length],
-        supplier_registry_status: REGISTRY_STATUS[index % REGISTRY_STATUS.length],
-        notes: demoNote
-      })),
-      {
-        onConflict: 'company_id,tender_id',
-        ignoreDuplicates: true
+    if (payload.resetExisting && useBaselineQaIds) {
+      const reservedApplicationIds = practiceRows
+        .map((row) => row.id)
+        .filter((id): id is string => Boolean(id));
+
+      if (reservedApplicationIds.length) {
+        const { error: deleteReservedDocsError } = await supabaseAdmin
+          .from('application_documents')
+          .delete()
+          .in('application_id', reservedApplicationIds);
+
+        if (deleteReservedDocsError) {
+          return NextResponse.json({ error: deleteReservedDocsError.message }, { status: 500 });
+        }
+
+        const { error: deleteReservedAppsError } = await supabaseAdmin
+          .from('tender_applications')
+          .delete()
+          .in('id', reservedApplicationIds);
+
+        if (deleteReservedAppsError) {
+          return NextResponse.json({ error: deleteReservedAppsError.message }, { status: 500 });
+        }
       }
-    );
+    }
+
+    const { error: createAppsError } = payload.resetExisting
+      ? await supabaseAdmin.from('tender_applications').insert(practiceRows)
+      : await supabaseAdmin.from('tender_applications').upsert(
+          practiceRows.map(({ id, ...row }) => row),
+          {
+            onConflict: 'company_id,tender_id',
+            ignoreDuplicates: true
+          }
+        );
 
     if (createAppsError) {
       return NextResponse.json({ error: createAppsError.message }, { status: 500 });
@@ -189,16 +318,19 @@ export async function POST(request: Request) {
       .from('tender_applications')
       .select('id, tender_id, created_at')
       .eq('company_id', companyId)
-      .in('tender_id', tenderIdsToUse)
-      .order('created_at', { ascending: false })
-      .limit(practicesTarget);
+      .in(
+        'tender_id',
+        seededPracticeConfigs.map((config) => config.tenderId)
+      );
 
     const docsInserted: Array<{ applicationId: string; storagePath: string; fileName: string }> = [];
+    const seededAppByTenderId = new Map((seededApps ?? []).map((app) => [app.tender_id, app]));
 
-    for (const [index, app] of (seededApps ?? []).entries()) {
-      // Alternate: one practice with docs, one without, so "mancanti" is testable.
-      const shouldCreateDocs = index % 2 === 0;
-      if (!shouldCreateDocs) continue;
+    for (const config of seededPracticeConfigs) {
+      if (!config.shouldCreateDocs) continue;
+
+      const app = seededAppByTenderId.get(config.tenderId);
+      if (!app) continue;
 
       for (const doc of DOC_TEMPLATES.slice(0, 2)) {
         const storagePath = `demo/${companyId}/${app.id}/${doc.key}.txt`;
@@ -253,7 +385,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       companyId,
-      practices: seededApps?.length ?? 0,
+      practices: seededApps?.length ?? seededPracticeConfigs.length,
       createdDocuments: docsInserted.length,
       documents: docsInserted
     });

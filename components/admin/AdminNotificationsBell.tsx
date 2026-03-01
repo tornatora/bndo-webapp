@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/browser';
+import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/realtime-safe';
 
 export function AdminNotificationsBell() {
   const [open, setOpen] = useState(false);
@@ -64,17 +65,21 @@ export function AdminNotificationsBell() {
   useEffect(() => {
     // realtime: refresh list when any message is inserted
     const supabase = createClient();
-    const channel = supabase
-      .channel('admin-notifications')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consultant_messages' }, () => {
-        if (refreshTimer.current) clearTimeout(refreshTimer.current);
-        refreshTimer.current = setTimeout(() => void refresh(true), 250);
-      })
-      .subscribe();
+    const channel = subscribeToChannelSafely(
+      () =>
+        supabase
+          .channel('admin-notifications')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'consultant_messages' }, () => {
+            if (refreshTimer.current) clearTimeout(refreshTimer.current);
+            refreshTimer.current = setTimeout(() => void refresh(true), 250);
+          })
+          .subscribe(),
+      'admin notifications'
+    );
 
     return () => {
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      supabase.removeChannel(channel);
+      removeChannelSafely(supabase, channel, 'admin notifications');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
