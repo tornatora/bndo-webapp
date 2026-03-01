@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 
-type CachePayload<T> = {
+export type CachePayload<T> = {
   fetchedAt: string; // ISO
   docs: T[];
 };
@@ -31,3 +31,14 @@ export async function readBandiCache<T>(): Promise<CachePayload<T> | null> {
   }
 }
 
+export async function readBundledBandiSeed<T>(): Promise<CachePayload<T> | null> {
+  try {
+    const module = await import('@/data/bndo-bandi-cache.seed.json');
+    const parsed = module.default as CachePayload<T>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!Array.isArray((parsed as { docs?: unknown }).docs)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}

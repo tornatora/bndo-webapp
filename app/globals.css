@@ -19,9 +19,26 @@
   --border: rgba(11, 17, 54, 0.06);
   --bg: #ffffff;
   --bg-subtle: #fafbfc;
+  --app-height: 100vh;
   --topbar-h: 56px;
   /* Used to center the landing in the visible viewport above the fixed composer. */
   --composer-h: 116px;
+}
+
+@supports (height: 100svh) {
+  :root {
+    --app-height: 100svh;
+  }
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -33,6 +50,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   font-weight: 400;
   font-size: 16px;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='submit']):not([type='button']):not([type='reset']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 .login-hero {
@@ -180,12 +205,12 @@ body {
 }
 
 .page-shell {
-  min-height: 100vh;
+  min-height: var(--app-height);
   padding: 0;
 }
 
 .bndo-shell {
-  min-height: 100vh;
+  min-height: var(--app-height);
   background: radial-gradient(1200px 600px at 50% -20%, rgba(34, 197, 95, 0.10), rgba(255, 255, 255, 0) 70%),
     #ffffff;
 }
@@ -193,22 +218,22 @@ body {
 .bndo-shell.with-sidebar {
   display: grid;
   grid-template-columns: 64px 1fr;
-  height: 100vh;
-  max-height: 100vh;
+  height: var(--app-height);
+  max-height: var(--app-height);
   overflow: hidden;
 }
 
 .bndo-shell.with-sidebar.sidebar-open {
   grid-template-columns: 280px 1fr;
-  height: 100vh;
-  max-height: 100vh;
+  height: var(--app-height);
+  max-height: var(--app-height);
   overflow: hidden;
 }
 
 .mainpane {
   min-width: 0;
-  height: 100vh;
-  max-height: 100vh;
+  height: var(--app-height);
+  max-height: var(--app-height);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -217,14 +242,14 @@ body {
   .bndo-shell.with-sidebar,
   .bndo-shell.with-sidebar.sidebar-open {
     grid-template-columns: 1fr; /* mobile: no left rail */
-    height: 100vh;
-    max-height: 100vh;
+    height: var(--app-height);
+    max-height: var(--app-height);
     overflow: hidden;
   }
 
   .mainpane {
-    height: 100vh;
-    max-height: 100vh;
+    height: var(--app-height);
+    max-height: var(--app-height);
     overflow-y: auto;
     overflow-x: hidden;
   }
@@ -260,7 +285,7 @@ body {
 .sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: var(--app-height);
   border-right: 1px solid rgba(11, 17, 54, 0.08);
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(12px);
@@ -746,8 +771,14 @@ body {
     padding-top: calc(56px + env(safe-area-inset-top));
   }
 
+  .chatgpt-stage {
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
+
   .chat-landing {
-    padding-top: calc(14px + env(safe-area-inset-top));
+    min-height: calc(var(--app-height) - var(--topbar-h) - var(--composer-h) - 12px);
+    padding-top: calc(8px + env(safe-area-inset-top));
+    padding-bottom: 8px;
   }
 
   .scanner-pro-stage--full {
@@ -822,9 +853,13 @@ body {
   display: none !important;
 }
 
+.chat-view-pane {
+  min-height: calc(var(--app-height) - var(--topbar-h));
+}
+
 .chat-landing {
   /* Center within the visible area (topbar excluded, composer excluded). */
-  min-height: calc(100vh - var(--topbar-h) - var(--composer-h));
+  min-height: calc(var(--app-height) - var(--topbar-h) - var(--composer-h));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -867,7 +902,7 @@ body {
 
 .landing-title-bottom {
   display: inline-flex;
-  gap: 0;
+  gap: 0.16em;
   align-items: baseline;
   justify-content: center;
   flex-wrap: nowrap;
@@ -884,7 +919,6 @@ body {
   position: relative;
   color: inherit;
   -webkit-text-fill-color: currentColor;
-  margin-right: 12px; /* keep spacing stable even when the rotating part is long */
   flex: 0 0 auto;
 }
 
@@ -949,7 +983,6 @@ body {
   display: inline-block;
   min-width: 0;
   position: relative;
-  padding: 0 2px;
   animation: blurSwap 420ms ease-out both;
   /* Parent title uses gradient via text-fill transparent; force this span to be readable. */
   color: rgba(11, 17, 54, 0.98);
@@ -1059,7 +1092,7 @@ body {
   margin: 0 auto;
   padding: 0 16px;
   /* Full height under the topbar; landing will center itself accounting for composer. */
-  min-height: calc(100vh - var(--topbar-h));
+  min-height: calc(var(--app-height) - var(--topbar-h));
   display: block;
 }
 
@@ -3227,6 +3260,27 @@ body {
 }
 
 @media (max-width: 560px) {
+  .landing-title-bottom {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+    transform: none;
+    gap: 0;
+  }
+
+  .landing-title-fixed,
+  .landing-rotate {
+    display: inline;
+  }
+
+  .landing-rotate {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
   .sidebar.is-open {
     width: min(336px, calc(100vw - 14px));
     left: 7px;
@@ -4766,6 +4820,19 @@ textarea.form-control,
   font-weight: 540;
   color: rgba(25, 31, 66, 0.68);
   margin: 0;
+}
+
+@media (max-width: 899px) {
+  .scan-overlay {
+    place-items: start center;
+    padding: calc(18px + env(safe-area-inset-top)) 14px calc(22px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  .scan-overlay-inner {
+    width: min(440px, 100%);
+    margin: 0;
+  }
 }
 
 @keyframes scanDotPulse {
@@ -7176,7 +7243,7 @@ textarea.form-control,
     padding: 14px 14px 96px;
   }
 
-  .mainpane {
+  .bndo-shell.with-sidebar.dashboard-auth-shell .mainpane {
     padding-bottom: calc(96px + env(safe-area-inset-bottom));
     box-sizing: border-box;
   }

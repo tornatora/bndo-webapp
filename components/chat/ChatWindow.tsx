@@ -193,6 +193,31 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const fitWrapRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
 
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+
+    const syncViewportHeight = () => {
+      const next = Math.round(viewport?.height ?? window.innerHeight);
+      root.style.setProperty('--app-height', `${next}px`);
+    };
+
+    syncViewportHeight();
+    window.addEventListener('resize', syncViewportHeight);
+    window.addEventListener('orientationchange', syncViewportHeight);
+    viewport?.addEventListener('resize', syncViewportHeight);
+    viewport?.addEventListener('scroll', syncViewportHeight);
+
+    return () => {
+      window.removeEventListener('resize', syncViewportHeight);
+      window.removeEventListener('orientationchange', syncViewportHeight);
+      viewport?.removeEventListener('resize', syncViewportHeight);
+      viewport?.removeEventListener('scroll', syncViewportHeight);
+    };
+  }, []);
+
   useEffect(() => {
     // The UI currently doesn't persist chat history; always start with a clean server session
     // to avoid stale cookies generating incoherent replies (e.g. "Ciao" -> "posso affinare...").
@@ -567,18 +592,13 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
         ) : null}
 
         {
-          <div className={view === 'chat' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'chat'}>
+          <div className={view === 'chat' ? 'view-pane chat-view-pane' : 'view-pane chat-view-pane is-hidden'} aria-hidden={view !== 'chat'}>
             <div className="chatgpt-stage">
               {messages.length === 0 ? (
                 <div className="chat-landing">
                   <div className="landing-title">
                     <div className="landing-title-top">{LANDING_TITLE_PREFIX}</div>
-                    <div ref={fitWrapRef} className="landing-title-bottom" style={{ ['--fit-scale' as any]: fitScale }}>
-                      <span className="landing-title-fixed">Parlami </span>
-                      <span className="landing-rotate" key={rotateIdx}>
-                        {stripLeadingParlami(LANDING_ROTATING_FULL[rotateIdx] ?? LANDING_ROTATING_FULL[0])}
-                      </span>
-                    </div>
+                    <div ref={fitWrapRef} className="landing-title-bottom" style={{ ['--fit-scale' as any]: fitScale }}><span className="landing-title-fixed">Parlami</span><span className="landing-rotate" key={rotateIdx}>{stripLeadingParlami(LANDING_ROTATING_FULL[rotateIdx] ?? LANDING_ROTATING_FULL[0])}</span></div>
                   </div>
                   <TypewriterExamples />
                   <div className="chat-tech" aria-hidden="true">

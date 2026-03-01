@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { readBandiCache } from '@/lib/bandiCache';
+import { readBandiCache, readBundledBandiSeed } from '@/lib/bandiCache';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 
 export const runtime = 'nodejs';
@@ -1597,6 +1597,14 @@ export async function POST(req: Request) {
     }
 
     let docs: IncentiviDoc[] = [];
+    const loadFallbackDocs = async () => {
+      const cached = await readBandiCache<IncentiviDoc>();
+      if ((cached?.docs?.length ?? 0) > 0) return cached!.docs;
+
+      const bundled = await readBundledBandiSeed<IncentiviDoc>();
+      return bundled?.docs ?? [];
+    };
+
     try {
       if (keyword && userRegionCanonical) {
         const boosted = [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null]
@@ -1613,8 +1621,11 @@ export async function POST(req: Request) {
         docs = await fetchIncentiviDocs(keyword, 240, 8500);
       }
     } catch {
-      const cached = await readBandiCache<IncentiviDoc>();
-      docs = cached?.docs ?? [];
+      docs = await loadFallbackDocs();
+    }
+
+    if (docs.length === 0) {
+      docs = await loadFallbackDocs();
     }
 
     const keywordSets = buildKeywordSets(sector, fundingGoalQuery);
