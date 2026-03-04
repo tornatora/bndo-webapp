@@ -3824,6 +3824,15 @@ export async function POST(req: Request) {
       pinnedStrategicTitles.push('sostenibilita e risparmio energetico');
     }
     if (
+      businessExists === true &&
+      userRegionCanonical === 'Calabria' &&
+      /(digit|ict|software|cloud|cyber|cybersecurity|ecommerce|crm|automazion|digitalizzazione|trasformazione digitale)/.test(
+        profileSignalNorm,
+      )
+    ) {
+      pinnedStrategicTitles.push('voucher digitali');
+    }
+    if (
       businessExists === false &&
       userRegionCanonical === 'Lombardia' &&
       /alimentari|generi di prima necessita|negozio alimentare|minimarket|commercio al dettaglio|piccolo comune|piccoli comuni|frazione|frazioni/.test(
@@ -3837,6 +3846,9 @@ export async function POST(req: Request) {
     }
     if (businessExists === true && /macchinari|beni strumentali|attrezzature|impianti|industria 4 0/.test(profileSignalNorm)) {
       pinnedStrategicTitles.push('nuova sabatini');
+    }
+    if (businessExists === true && userRegionCanonical === 'Marche' && /smau|fiera|fiere|stand|buyer|b2b|internazionalizzazione/.test(profileSignalNorm)) {
+      pinnedStrategicTitles.push('smau');
     }
     if (businessExists === true && userRegionCanonical === 'Emilia-Romagna' && /fiera|fiere|stand|internazionalizzazione|buyer|b2b/.test(profileSignalNorm)) {
       pinnedStrategicTitles.push('cciaa bologna');
