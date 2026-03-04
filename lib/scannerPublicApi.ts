@@ -261,22 +261,30 @@ function inferHardStatus(item: ScanRouteItem): 'eligible' | 'not_eligible' | 'un
   return 'eligible';
 }
 
-function normalizeScanItem(item: ScanRouteItem, fallbackBudget: number | null): LocalMatchItem {
+function normalizeScanItem(item: ScanRouteItem): LocalMatchItem {
   const requirements = sanitizeList(item.requirements);
   const beneficiaries = item.beneficiaries?.length
     ? sanitizeList(item.beneficiaries)
     : splitRequirementList(getRequirementValue(requirements, ['Beneficiari']));
   const aidForm = item.aidForm ?? getRequirementValue(requirements, ['Forma agevolazione', 'Forma aiuto']);
   const budgetFromRequirements =
-    parseMoneyFromText(getRequirementValue(requirements, ['Importo', 'Contributo', 'Spesa ammissibile'])) ?? null;
-  const resolvedBudget = item.budgetTotal ?? budgetFromRequirements ?? fallbackBudget;
+    parseMoneyFromText(getRequirementValue(requirements, ['Importo agevolazione', 'Importo', 'Contributo'])) ?? null;
+  const projectBudgetFromRequirements =
+    parseMoneyFromText(getRequirementValue(requirements, ['Spesa progetto ammissibile', 'Spesa ammissibile', 'Spesa ammessa'])) ?? null;
+  const resolvedBudget = item.budgetTotal ?? budgetFromRequirements ?? null;
   const economicOffer =
     item.economicOffer ??
-    (resolvedBudget && resolvedBudget > 0
+    ((resolvedBudget && resolvedBudget > 0) || (projectBudgetFromRequirements && projectBudgetFromRequirements > 0)
       ? {
-          displayAmountLabel: `Fino a € ${Math.round(resolvedBudget).toLocaleString('it-IT')}`,
-          displayProjectAmountLabel: `Fino a € ${Math.round(resolvedBudget).toLocaleString('it-IT')}`,
-          displayCoverageLabel: item.aidIntensity || 'Copertura da verificare'
+          displayAmountLabel:
+            resolvedBudget && resolvedBudget > 0 ? `Fino a € ${Math.round(resolvedBudget).toLocaleString('it-IT')}` : null,
+          displayProjectAmountLabel:
+            projectBudgetFromRequirements && projectBudgetFromRequirements > 0
+              ? `Fino a € ${Math.round(projectBudgetFromRequirements).toLocaleString('it-IT')}`
+              : resolvedBudget && resolvedBudget > 0
+                ? `Fino a € ${Math.round(resolvedBudget).toLocaleString('it-IT')}`
+                : null,
+          displayCoverageLabel: item.aidIntensity || null
         }
       : null);
 
@@ -333,7 +341,6 @@ async function runLocalMatching(): Promise<LocalMatchLatestResponse> {
   if (!profile) {
     throw new ApiError(400, 'Profilo scanner mancante. Compila il form prima di avviare la ricerca.');
   }
-  const fallbackBudget = profile.requestedContributionEUR ?? profile.revenueOrBudgetEUR ?? null;
 
   const baseUrl = isBrowser() ? window.location.origin : '';
   const scan = await fetchJson<{
@@ -346,8 +353,8 @@ async function runLocalMatching(): Promise<LocalMatchLatestResponse> {
 
   const latest: LocalMatchLatestResponse = {
     run: { id: `local-${Date.now()}` },
-    items: (scan.results ?? []).map((item) => normalizeScanItem(item, fallbackBudget)),
-    nearMisses: (scan.nearMisses ?? []).map((item) => normalizeScanItem(item, fallbackBudget))
+    items: (scan.results ?? []).map((item) => normalizeScanItem(item)),
+    nearMisses: (scan.nearMisses ?? []).map((item) => normalizeScanItem(item))
   };
 
   writeStorage(LOCAL_MATCHES_KEY, latest);

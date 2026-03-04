@@ -197,16 +197,32 @@ const parseCoveragePercents = (
   };
 };
 
+const formatPercentValue = (value: number): string =>
+  `${value.toLocaleString('it-IT', {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+    maximumFractionDigits: 3,
+  })}%`;
+
+const formatPercentRange = (value: { min: number; max: number } | null): string => {
+  if (!value) return '0%';
+  const min = Math.max(0, value.min);
+  const max = Math.max(0, value.max);
+  if (min === 0 && max === 0) return '0%';
+  if (Math.abs(min - max) < 0.001) return formatPercentValue(max);
+  return `${formatPercentValue(min)} - ${formatPercentValue(max)}`;
+};
+
+const supportsFondoPerduto = (aidForm: string | null | undefined): boolean => {
+  const normalized = normalizeAid(aidForm ?? '');
+  return normalized.includes('fondo perduto');
+};
+
 const economicOffer = (
   aidForm: string | null | undefined,
   budgetTotal: number | null,
   aidIntensity: string | null | undefined,
   economic: Record<string, unknown> | null | undefined,
 ): { amount: string; coverage: string; projectAmount: string | null } => {
-  const displayAmountLabel =
-    typeof economic?.displayAmountLabel === 'string' && economic.displayAmountLabel.trim()
-      ? economic.displayAmountLabel.trim()
-      : null;
   const displayProjectAmountLabel =
     typeof economic?.displayProjectAmountLabel === 'string' && economic.displayProjectAmountLabel.trim()
       ? economic.displayProjectAmountLabel.trim()
@@ -225,59 +241,42 @@ const economicOffer = (
     (value): value is number => value !== null && Number.isFinite(value) && value > 0,
   );
   const hasOnlyTinyEconomicValues = economicValues.length > 0 && Math.max(...economicValues) < 5000;
-  let grantRange = formatRange(grantMin, grantMax);
   let projectRange = formatRange(costMin, costMax);
-  const coverageLabel =
+  const rawCoverageLabel =
     displayCoverageLabel ||
     (typeof economic?.estimatedCoverageLabel === 'string' ? economic.estimatedCoverageLabel : aidIntensity || null);
-  const coveragePercents = parseCoveragePercents(coverageLabel, economic);
-
-  if (!grantRange && coveragePercents && (costMin !== null || costMax !== null)) {
-    const inferredGrantMin = costMin !== null ? (costMin * coveragePercents.min) / 100 : null;
-    const inferredGrantMax = costMax !== null ? (costMax * coveragePercents.max) / 100 : null;
-    grantRange = formatRange(inferredGrantMin, inferredGrantMax);
-  }
+  const coveragePercents = supportsFondoPerduto(aidForm) ? parseCoveragePercents(rawCoverageLabel, economic) : null;
 
   if (!projectRange && budgetTotal && Number.isFinite(budgetTotal) && budgetTotal > 0) {
     projectRange = formatRange(null, budgetTotal);
   }
 
-  if (!grantRange && coveragePercents && budgetTotal && Number.isFinite(budgetTotal) && budgetTotal > 0) {
-    const inferredGrantMin = (budgetTotal * coveragePercents.min) / 100;
-    const inferredGrantMax = (budgetTotal * coveragePercents.max) / 100;
-    grantRange = formatRange(inferredGrantMin, inferredGrantMax);
+  let investmentRange = displayProjectAmountLabel || projectRange;
+
+  if (!investmentRange && budgetTotal !== null && budgetTotal > 0) {
+    investmentRange = formatRange(null, budgetTotal);
   }
 
-  let amountRange = displayAmountLabel || grantRange || projectRange;
-
-  if (!amountRange && budgetAllocation !== null && budgetAllocation > 0) {
-    amountRange = formatRange(null, budgetAllocation);
+  if (!investmentRange && budgetAllocation !== null && budgetAllocation > 0) {
+    investmentRange = formatRange(null, budgetAllocation);
   }
 
-  if (!amountRange && budgetTotal && Number.isFinite(budgetTotal) && budgetTotal > 0) {
-    amountRange = formatRange(null, budgetTotal);
+  if (hasOnlyTinyEconomicValues && (!budgetTotal || budgetTotal < 5000) && !displayProjectAmountLabel) {
+    investmentRange = null;
   }
 
-  if (hasOnlyTinyEconomicValues && (!budgetTotal || budgetTotal < 5000)) {
-    amountRange = null;
-  }
-
-  if (amountRange) {
-    const resolvedProjectRange = displayProjectAmountLabel || projectRange;
+  if (investmentRange) {
     return {
-      amount: amountRange,
-      coverage: coverageLabel || 'Copertura in aggiornamento',
-      projectAmount: resolvedProjectRange,
+      amount: investmentRange,
+      coverage: formatPercentRange(coveragePercents),
+      projectAmount: null,
     };
   }
 
   return {
     amount: budgetTotal && budgetTotal > 0 ? `Fino a ${formatCurrency(budgetTotal)}` : 'Dati economici in aggiornamento',
-    coverage: coverageLabel || 'Copertura in aggiornamento',
-    projectAmount:
-      displayProjectAmountLabel ||
-      projectRange ||
-      (budgetTotal && budgetTotal > 0 ? `Fino a ${formatCurrency(budgetTotal)}` : 'Dati economici in aggiornamento'),
+    coverage: formatPercentRange(coveragePercents),
+    projectAmount: null,
   };
 };
 
@@ -298,8 +297,6 @@ export function GrantCardPro({
   const consultingLink = buildConsultingLink(item);
   const deadlineLabel = formatDate(item.deadlineDate, 'A sportello');
   const openingLabel = formatDate(item.openingDate, 'Già aperto');
-  const showProjectAmount = Boolean(offer.projectAmount && offer.projectAmount !== offer.amount);
-
   return (
     <article className="result-card result-card--minimal fade-up">
       <header className="result-card-head">
@@ -326,7 +323,6 @@ export function GrantCardPro({
         <span>Apertura: {openingLabel}</span>
         <span>Scadenza: {deadlineLabel}</span>
         <span>{statusText[item.hardStatus]}</span>
-        {showProjectAmount ? <span>Spesa: {offer.projectAmount}</span> : null}
       </div>
 
       <div className="result-kpis">
@@ -335,7 +331,7 @@ export function GrantCardPro({
           <strong className="result-kpi-v">{offer.amount}</strong>
         </div>
         <div className="result-kpi">
-          <span className="result-kpi-k">% fondo perduto / copertura</span>
+          <span className="result-kpi-k">% fondo perduto</span>
           <strong className="result-kpi-v">{offer.coverage}</strong>
         </div>
         <div className="result-kpi result-kpi--prob">

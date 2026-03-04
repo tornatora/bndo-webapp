@@ -15,7 +15,8 @@
     "preview:stable": "npm run build && npm run start -- --port 3300",
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "smoke:v2": "bash scripts/smoke-v2.sh"
+    "smoke:v2": "bash scripts/smoke-v2.sh",
+    "scanner:cases": "node scripts/check-scanner-real-cases.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.5.2",

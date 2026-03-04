@@ -151,14 +151,21 @@ const hasEconomicCompleteness = (item: MatchCardItem): boolean => {
   const economic = item.economicOffer ?? null;
   if (!economic || typeof economic !== 'object') return false;
 
+  const displayAmountLabel =
+    typeof (economic as Record<string, unknown>).displayAmountLabel === 'string'
+      ? String((economic as Record<string, unknown>).displayAmountLabel).trim()
+      : '';
   const grantMin = readNumeric((economic as Record<string, unknown>).grantMin);
   const grantMax = readNumeric((economic as Record<string, unknown>).grantMax);
   const costMin = readNumeric((economic as Record<string, unknown>).costMin);
   const costMax = readNumeric((economic as Record<string, unknown>).costMax);
   const budgetAllocation = readNumeric((economic as Record<string, unknown>).budgetAllocation);
+  const coverageMin = readNumeric((economic as Record<string, unknown>).estimatedCoverageMinPercent);
+  const coverageMax = readNumeric((economic as Record<string, unknown>).estimatedCoverageMaxPercent);
 
+  if (displayAmountLabel) return true;
   if ((grantMin ?? 0) > 0 || (grantMax ?? 0) > 0) return true;
-  if ((costMin ?? 0) > 0 || (costMax ?? 0) > 0) return true;
+  if (((coverageMin ?? 0) > 0 || (coverageMax ?? 0) > 0) && ((costMin ?? 0) > 0 || (costMax ?? 0) > 0)) return true;
   if ((budgetAllocation ?? 0) > 0) return true;
 
   return false;
@@ -245,8 +252,18 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingStepScrollRef = useRef(false);
 
-  const scrollFormIntoView = () => {
-    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const scrollScannerViewportToTop = (behavior: ScrollBehavior = 'smooth') => {
+    const pane = formRef.current?.closest('.mainpane');
+    if (pane instanceof HTMLElement) {
+      pane.scrollTo({ top: 0, behavior });
+      return;
+    }
+
+    formRef.current?.scrollIntoView({ behavior, block: 'start' });
+  };
+
+  const scrollFormIntoView = (behavior: ScrollBehavior = 'smooth') => {
+    scrollScannerViewportToTop(behavior);
   };
 
   const scheduleFormScroll = () => {
@@ -263,6 +280,28 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [journeyStep]);
+
+  useEffect(() => {
+    if (!matching) return;
+    const frame = window.requestAnimationFrame(() => {
+      scrollScannerViewportToTop('auto');
+    });
+    const timeoutId = window.setTimeout(() => {
+      scrollScannerViewportToTop('auto');
+    }, 140);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeoutId);
+    };
+  }, [matching]);
+
+  useEffect(() => {
+    document.body.classList.toggle('scanner-overlay-open', matching);
+    return () => {
+      document.body.classList.remove('scanner-overlay-open');
+    };
+  }, [matching]);
 
   useEffect(() => {
     apiRequest<CoverageResponse>('/api/v1/public/coverage')
@@ -433,6 +472,11 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       return;
     }
 
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    scrollScannerViewportToTop('auto');
+    await wait(40);
     setMatching(true);
     setError(null);
     setNearMissItems([]);

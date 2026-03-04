@@ -70,11 +70,12 @@ export function FullScreenScannerOverlayPro({ open }: { open: boolean }) {
 
         <header className="scan-head">
           <div className="scan-badge-row">
-            <span className="scan-badge">Scanner bandi PRO</span>
-            <span className="scan-ai-tag">Analisi intelligente</span>
+            <span className="scan-ai-tag">Analisi Bandi con AI</span>
           </div>
-          <h2 className="scan-title">Sto cercando i bandi migliori per te</h2>
-          <p className="scan-subtitle">Scansione progressiva delle fonti ufficiali e controllo requisiti in tempo reale.</p>
+          <h2 className="scan-title">
+            <span>Sto cercando i bandi migliori</span>
+            <span className="scan-title-break">per te</span>
+          </h2>
         </header>
 
         <div className="scan-step-list">
@@ -83,7 +84,6 @@ export function FullScreenScannerOverlayPro({ open }: { open: boolean }) {
             const statusLabel = status === 'done' ? 'OK' : status === 'active' ? 'In corso' : 'Attesa';
             return (
               <div key={step} className={`scan-step-row scan-step-row--${status}`}>
-                <span className="scan-step-dot" />
                 <span className="scan-step-text">{step}</span>
                 <span className="scan-step-state">{statusLabel}</span>
               </div>

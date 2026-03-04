@@ -4,10 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { InputArea } from '@/components/chat/InputArea';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { BandiResults, type BandoResult } from '@/components/chat/BandiResults';
-import { FullScreenScannerOverlay } from '@/components/chat/FullScreenScannerOverlay';
 import { TypewriterExamples } from '@/components/chat/TypewriterExamples';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { BndiHomeView } from '@/components/views/BndiHomeView';
+import { FullScreenScannerOverlayPro as FullScreenScannerOverlay } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
 import { PraticheView } from '@/components/views/PraticheView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
@@ -73,6 +73,10 @@ type ScanResponse = {
     matchScore?: number;
     matchReasons?: string[];
     mismatchFlags?: string[];
+    aidForm?: string | null;
+    aidIntensity?: string | null;
+    budgetTotal?: number | null;
+    economicOffer?: Record<string, unknown> | null;
   }>;
   nearMisses?: BandoResult[];
   qualityBand?: 'high' | 'medium' | 'low';

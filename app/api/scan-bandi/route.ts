@@ -70,6 +70,34 @@ function cleanNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizeNumericToken(rawValue: string): string | null {
+  const cleaned = rawValue
+    .replace(/\s+/g, '')
+    .replace(/€/g, '')
+    .replace(/eur|euro/gi, '')
+    .replace(/[^0-9,.-]/g, '');
+
+  if (!cleaned) return null;
+
+  let normalized = cleaned;
+  if (normalized.includes(',') && normalized.includes('.')) {
+    normalized =
+      normalized.lastIndexOf(',') > normalized.lastIndexOf('.')
+        ? normalized.replace(/\./g, '').replace(',', '.')
+        : normalized.replace(/,/g, '');
+  } else if (normalized.includes(',')) {
+    const parts = normalized.split(',');
+    normalized =
+      parts.length === 2 && parts[1].length <= 2 ? `${parts[0].replace(/\./g, '')}.${parts[1]}` : parts.join('');
+  } else if (normalized.includes('.')) {
+    const parts = normalized.split('.');
+    normalized = parts.length === 2 && parts[1].length <= 2 ? `${parts[0]}.${parts[1]}` : parts.join('');
+  }
+
+  normalized = normalized.replace(/[^0-9.-]/g, '');
+  return normalized || null;
+}
+
 type ScanResult = {
   id: string;
   title: string;
@@ -122,12 +150,33 @@ type IncentiviDoc = {
   ateco?: string[] | string;
   costMin?: string | number;
   costMax?: string | number;
+  grantMin?: string | number;
+  grantMax?: string | number;
+  coverageMinPercent?: string | number;
+  coverageMaxPercent?: string | number;
+  displayAmountLabel?: string;
+  displayProjectAmountLabel?: string;
+  displayCoverageLabel?: string;
   institutionalLink?: string;
   url?: string;
   score?: number;
 };
 
 const SOUTH_REGION_SET = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
+const CENTER_NORTH_REGION_SET = new Set([
+  'Piemonte',
+  "Valle d'Aosta",
+  'Liguria',
+  'Lombardia',
+  'Veneto',
+  'Friuli-Venezia Giulia',
+  'Trentino-Alto Adige',
+  'Emilia-Romagna',
+  'Toscana',
+  'Lazio',
+  'Umbria',
+  'Marche',
+]);
 
 type ScannerAuthResponse = {
   tokens: { accessToken: string; refreshToken: string };
@@ -190,30 +239,11 @@ function parseMoneyValue(value: unknown): number | null {
   else if (/(milion|mln)/.test(raw)) multiplier = 1_000_000;
   else if (/\bmila\b|\bk\b/.test(raw)) multiplier = 1_000;
 
-  const compact = raw
-    .replace(/€|eur|euro/g, '')
-    .replace(/miliardi?|mld|milioni?|mln|mila|\bk\b/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[^0-9,.\-]/g, '');
+  const match =
+    raw.match(/-?\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|-?\d+(?:[.,]\d+)?/g)?.find((entry) => /\d/.test(entry)) ?? null;
+  if (!match) return null;
 
-  if (!compact) return null;
-
-  let normalized = compact;
-  if (normalized.includes(',') && normalized.includes('.')) {
-    normalized =
-      normalized.lastIndexOf(',') > normalized.lastIndexOf('.')
-        ? normalized.replace(/\./g, '').replace(',', '.')
-        : normalized.replace(/,/g, '');
-  } else if (normalized.includes(',')) {
-    const parts = normalized.split(',');
-    normalized =
-      parts.length === 2 && parts[1].length <= 2 ? `${parts[0].replace(/\./g, '')}.${parts[1]}` : parts.join('');
-  } else if (normalized.includes('.')) {
-    const parts = normalized.split('.');
-    normalized = parts.length === 2 && parts[1].length <= 2 ? `${parts[0]}.${parts[1]}` : parts.join('');
-  }
-
-  normalized = normalized.replace(/[^0-9.-]/g, '');
+  const normalized = normalizeNumericToken(match);
   if (!normalized) return null;
 
   const parsed = Number(normalized);
@@ -237,6 +267,210 @@ function formatRange(min: number | null, max: number | null): string | null {
   if (high !== null) return `Fino a ${formatCurrency(high)}`;
   if (low !== null) return `Da ${formatCurrency(low)} a ${formatCurrency(low)}`;
   return null;
+}
+
+type CoverageRange = { min: number | null; max: number | null; label: string | null };
+
+type LocalEconomicData = {
+  grantMin: number | null;
+  grantMax: number | null;
+  costMin: number | null;
+  costMax: number | null;
+  coverage: CoverageRange;
+  budgetTotal: number | null;
+  aidIntensity: string | null;
+  economicOffer: Record<string, unknown> | null;
+  reliableGrantAmount: boolean;
+};
+
+function extractMoneyValuesFromText(text: string): number[] {
+  if (!text.trim()) return [];
+
+  const values = Array.from(
+    text.matchAll(/(?:€\s*)?\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?(?:\s*(?:mila|milione|milioni|mln|mld))?(?:\s*(?:euro|eur|€))?/gi),
+  )
+    .map((match) => parseMoneyValue(match[0]))
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+
+  return Array.from(new Set(values));
+}
+
+function extractCoverageRangeFromText(text: string): CoverageRange {
+  const matches = Array.from(text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g))
+    .map((match) => Number((match[1] ?? '').replace(',', '.')))
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= 100);
+
+  if (!matches.length) return { min: null, max: null, label: null };
+
+  if (matches.length === 1) {
+    const value = matches[0]!;
+    return { min: value, max: value, label: `${value.toLocaleString('it-IT')}%` };
+  }
+
+  const min = Math.min(...matches);
+  const max = Math.max(...matches);
+  return {
+    min,
+    max,
+    label: `Dal ${min.toLocaleString('it-IT')}% al ${max.toLocaleString('it-IT')}%`,
+  };
+}
+
+function formatCoverageLabel(min: number | null, max: number | null): string | null {
+  if (min === null && max === null) return null;
+  if (min !== null && max !== null) {
+    if (Math.abs(min - max) < 0.001) return `${min.toLocaleString('it-IT')}%`;
+    return `Dal ${min.toLocaleString('it-IT')}% al ${max.toLocaleString('it-IT')}%`;
+  }
+  const resolved = max ?? min;
+  return resolved !== null ? `${resolved.toLocaleString('it-IT')}%` : null;
+}
+
+function extractGrantRangeFromSentence(sentence: string): { min: number | null; max: number | null } | null {
+  const normalized = normalizeForMatch(sentence);
+  if (
+    !/(contribut|agevolaz|credito d imposta|credito|finanziament|voucher|sovvenzion|aiut|beneficio|intervento|copertura|fondo perduto|tasso zero|investimento nel capitale)/.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+
+  const values = extractMoneyValuesFromText(sentence);
+  if (!values.length) return null;
+
+  if (/(tra|compres[oa]|da)\b/.test(normalized) && /\ba\b|\be\b/.test(normalized) && values.length >= 2) {
+    return { min: Math.min(...values), max: Math.max(...values) };
+  }
+  if (/(non inferiore|almeno|minim)/.test(normalized) && /(non superiore|fino a|massim|limite)/.test(normalized) && values.length >= 2) {
+    return { min: Math.min(...values), max: Math.max(...values) };
+  }
+  if (/(non superiore|fino a|massim|limite|entro)/.test(normalized)) {
+    return { min: null, max: Math.max(...values) };
+  }
+  if (/(non inferiore|almeno|minim)/.test(normalized)) {
+    return { min: Math.min(...values), max: null };
+  }
+
+  return values.length >= 2 ? { min: Math.min(...values), max: Math.max(...values) } : { min: null, max: values[0] ?? null };
+}
+
+function extractProjectRangeFromSentence(sentence: string): { min: number | null; max: number | null } | null {
+  const normalized = normalizeForMatch(sentence);
+  if (!/(spes|investiment|progett|programma|piano di attivita|piano di investimento|costi ammessi|spese ammissibili)/.test(normalized)) {
+    return null;
+  }
+
+  const values = extractMoneyValuesFromText(sentence);
+  if (!values.length) return null;
+
+  if (values.length >= 2 && (/(tra|compres[oa]|da)\b/.test(normalized) || /(non inferiore|almeno|minim)/.test(normalized))) {
+    return { min: Math.min(...values), max: Math.max(...values) };
+  }
+  if (/(non superiore|fino a|massim|limite)/.test(normalized)) {
+    return { min: null, max: Math.max(...values) };
+  }
+
+  return values.length >= 2 ? { min: Math.min(...values), max: Math.max(...values) } : { min: null, max: values[0] ?? null };
+}
+
+function resolveDocEconomicData(doc: IncentiviDoc): LocalEconomicData {
+  const description = typeof doc.description === 'string' ? doc.description : '';
+  const sentences = description
+    .split(/[\n\r]+|(?<=[.!?;:])\s+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  const fieldCostMin = parseMoneyValue(doc.costMin);
+  const fieldCostMax = parseMoneyValue(doc.costMax);
+  const explicitGrantMin = parseMoneyValue(doc.grantMin);
+  const explicitGrantMax = parseMoneyValue(doc.grantMax);
+  const explicitCoverageMin = cleanNumber(doc.coverageMinPercent);
+  const explicitCoverageMax = cleanNumber(doc.coverageMaxPercent);
+  const explicitAmountLabel = typeof doc.displayAmountLabel === 'string' && doc.displayAmountLabel.trim() ? doc.displayAmountLabel.trim() : null;
+  const explicitProjectAmountLabel =
+    typeof doc.displayProjectAmountLabel === 'string' && doc.displayProjectAmountLabel.trim()
+      ? doc.displayProjectAmountLabel.trim()
+      : null;
+  const explicitCoverageLabel =
+    typeof doc.displayCoverageLabel === 'string' && doc.displayCoverageLabel.trim() ? doc.displayCoverageLabel.trim() : null;
+
+  const sentenceGrantRanges = sentences.map(extractGrantRangeFromSentence).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const sentenceProjectRanges = sentences
+    .map(extractProjectRangeFromSentence)
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+  const parsedCoverage = extractCoverageRangeFromText(description);
+  const coverage: CoverageRange =
+    explicitCoverageMin !== null || explicitCoverageMax !== null || explicitCoverageLabel
+      ? {
+          min: explicitCoverageMin,
+          max: explicitCoverageMax ?? explicitCoverageMin,
+          label: explicitCoverageLabel || formatCoverageLabel(explicitCoverageMin, explicitCoverageMax),
+        }
+      : parsedCoverage;
+
+  const sentenceGrantMin = sentenceGrantRanges
+    .map((entry) => entry.min)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+  const sentenceGrantMax = sentenceGrantRanges
+    .map((entry) => entry.max)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+  const sentenceProjectMin = sentenceProjectRanges
+    .map((entry) => entry.min)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+  const sentenceProjectMax = sentenceProjectRanges
+    .map((entry) => entry.max)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+
+  const costMin = fieldCostMin ?? (sentenceProjectMin.length ? Math.min(...sentenceProjectMin) : null);
+  const costMax = fieldCostMax ?? (sentenceProjectMax.length ? Math.max(...sentenceProjectMax) : null);
+
+  let grantMin = explicitGrantMin ?? (sentenceGrantMin.length ? Math.min(...sentenceGrantMin) : null);
+  let grantMax = explicitGrantMax ?? (sentenceGrantMax.length ? Math.max(...sentenceGrantMax) : null);
+
+  if ((grantMin === null || grantMax === null) && (coverage.min !== null || coverage.max !== null) && (costMin !== null || costMax !== null)) {
+    const resolvedCoverageMin = coverage.min ?? coverage.max;
+    const resolvedCoverageMax = coverage.max ?? coverage.min;
+
+    if (grantMin === null && costMin !== null && resolvedCoverageMin !== null) {
+      grantMin = (costMin * resolvedCoverageMin) / 100;
+    }
+    if (grantMax === null && costMax !== null && resolvedCoverageMax !== null) {
+      grantMax = (costMax * resolvedCoverageMax) / 100;
+    }
+  }
+
+  const displayAmountLabel = explicitAmountLabel || formatRange(grantMin, grantMax);
+  const displayProjectAmountLabel = explicitProjectAmountLabel || formatRange(costMin, costMax);
+  const displayCoverageLabel = explicitCoverageLabel || coverage.label;
+  const reliableGrantAmount = Boolean(displayAmountLabel || grantMin || grantMax);
+  const budgetTotal = grantMax ?? grantMin ?? null;
+
+  return {
+    grantMin,
+    grantMax,
+    costMin,
+    costMax,
+    coverage,
+    budgetTotal,
+    aidIntensity: displayCoverageLabel,
+    economicOffer:
+      displayAmountLabel || displayProjectAmountLabel || displayCoverageLabel
+        ? {
+            grantMin,
+            grantMax,
+            costMin,
+            costMax,
+            estimatedCoverageMinPercent: coverage.min,
+            estimatedCoverageMaxPercent: coverage.max,
+            displayAmountLabel,
+            displayProjectAmountLabel,
+            displayCoverageLabel,
+          }
+        : null,
+    reliableGrantAmount,
+  };
 }
 
 function classifyAidSupport(value: string | null | undefined): 'fondo_perduto' | 'agevolato' | 'credito' | 'voucher' | 'misto' | 'altro' {
@@ -347,6 +581,327 @@ function inferBusinessExists(
     return true;
   }
   return null;
+}
+
+type BusinessStageMatch = { ok: boolean; score: number; matched: boolean; strict: boolean };
+
+function matchBusinessStage(
+  businessExists: boolean | null,
+  doc: IncentiviDoc,
+): BusinessStageMatch {
+  if (businessExists === null) return { ok: true, score: 0, matched: false, strict: false };
+
+  const text = normalizeForMatch(
+    [
+      doc.title,
+      doc.description,
+      ...asStringArray(doc.beneficiaries),
+      ...asStringArray(doc.purposes),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+
+  if (!text) return { ok: true, score: 0, matched: false, strict: false };
+
+  const assessmentServiceOnly =
+    /(first assessment|first assesment|post assessment|post assesment|assessment|assesment|roadmap digitale|diagnosi digitale|maturita digitale|check up digitale|polo di innovazione digitale|innovation hub)/.test(
+      text,
+    ) && !/(da costituire|costituend|nuova impresa|aspiranti imprenditori|persone fisiche che intendono costituire)/.test(text);
+  if (!businessExists && assessmentServiceOnly) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+
+  const hasNewBusinessSignals =
+    /(da costituire|costituend|nuova impresa|start up|startup|aspiranti imprenditori|persone fisiche che intendono costituire|autoimpiego|lavoro autonomo|avvio di nuove)/.test(
+      text,
+    );
+  const hasExistingBusinessSignals =
+    /(gia costituite|già costituite|gia attive|già attive|imprese attive|azienda gia attiva|aziende gia attive|sede operativa attiva|iscritte al registro delle imprese|almeno due bilanci approvati|operanti nel comune|operanti nel territorio|nuova unita locale|nuovo punto vendita|imprese lombarde che costituiscono un proprio museo)/.test(
+      text,
+    ) && !/(persone fisiche che intendono costituire|aspiranti imprenditori|da costituire|costituend)/.test(text);
+  const supportsMixedBusinessStage = hasNewBusinessSignals && hasExistingBusinessSignals;
+  const newBusinessOnly = hasNewBusinessSignals && !hasExistingBusinessSignals;
+  const existingBusinessOnly = hasExistingBusinessSignals && !hasNewBusinessSignals;
+
+  if (!businessExists && existingBusinessOnly) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  if (businessExists && newBusinessOnly) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+
+  if (supportsMixedBusinessStage) {
+    return { ok: true, score: 0.04, matched: true, strict: false };
+  }
+
+  if (!businessExists && newBusinessOnly) return { ok: true, score: 0.08, matched: true, strict: true };
+  if (businessExists && existingBusinessOnly) return { ok: true, score: 0.08, matched: true, strict: true };
+
+  return { ok: true, score: 0, matched: false, strict: false };
+}
+
+function classifyAuthorityPriority(authorityName: string | null | undefined): { boost: number; trusted: boolean } {
+  const authority = normalizeForMatch(authorityName ?? '');
+  if (!authority) return { boost: 0, trusted: false };
+
+  if (authority.includes('invitalia')) return { boost: 0.16, trusted: true };
+  if (authority.includes('camera di commercio') || authority.includes('cciaa') || authority.includes('unioncamere')) {
+    return { boost: 0.14, trusted: true };
+  }
+  if (authority.includes('regione') || authority.includes('provincia autonoma')) return { boost: 0.12, trusted: true };
+  if (authority.includes('ministero') || authority.includes('agenzia delle entrate')) return { boost: 0.1, trusted: true };
+  if (authority.includes('comune') || authority.includes('citta metropolitana') || authority.includes('provincia')) {
+    return { boost: 0.05, trusted: true };
+  }
+  if (authority.includes('universita') || authority.includes('politecnico')) return { boost: -0.06, trusted: false };
+  return { boost: 0, trusted: false };
+}
+
+type DemographicMatch = { ok: boolean; score: number; matched: boolean; strict: boolean };
+
+function matchDemographicConstraints(args: {
+  doc: IncentiviDoc;
+  rawProfile: Record<string, unknown>;
+  age: number | null;
+  employmentStatus: string | null;
+}): DemographicMatch {
+  const { doc, rawProfile, age, employmentStatus } = args;
+  const text = normalizeForMatch(
+    [
+      doc.title,
+      doc.description,
+      ...asStringArray(doc.beneficiaries),
+      ...asStringArray(doc.purposes),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+
+  if (!text) return { ok: true, score: 0, matched: false, strict: false };
+
+  const genderNorm = normalizeForMatch(
+    [
+      cleanString(rawProfile.gender, 40),
+      cleanString(rawProfile.genderIdentity, 40),
+      cleanString(rawProfile.founderGender, 40),
+      cleanString(rawProfile.activityType, 120),
+      cleanString(rawProfile.legalForm, 120),
+      cleanString(rawProfile.fundingGoal, 220),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+  const isFemale = /(femmin|donna|female|woman)/.test(genderNorm);
+  const employmentNorm = normalizeForMatch(employmentStatus ?? '');
+
+  const requiresFemale = /(impresa femminile|imprenditoria femminile|donne di qualsiasi eta|femminile)/.test(text);
+  const requiresYoung = /(under 35|18 e 35|18 ai 35|18-35|18 35|giovanil|giovani)/.test(text);
+  const requiresDisoccupato = /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(text);
+
+  const ageOk = requiresYoung ? age !== null && age >= 18 && age <= 35 : true;
+  const genderOk = requiresFemale ? isFemale : true;
+  const employmentOk = requiresDisoccupato
+    ? /(disoccupat|inoccupat|neet|senza lavoro|non occupat|working poor)/.test(employmentNorm)
+    : true;
+
+  if ((requiresFemale || requiresYoung) && !(genderOk || ageOk)) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  if (!employmentOk) return { ok: false, score: 0, matched: false, strict: true };
+
+  const matched = (requiresFemale && genderOk) || (requiresYoung && ageOk) || (requiresDisoccupato && employmentOk);
+  return { ok: true, score: matched ? 0.08 : 0, matched, strict: requiresFemale || requiresYoung || requiresDisoccupato };
+}
+
+function matchGoalIntent(fundingGoal: string | null, doc: IncentiviDoc): { ok: boolean; score: number; matched: boolean; strict: boolean } {
+  if (!fundingGoal) return { ok: true, score: 0, matched: false, strict: false };
+
+  const goalNorm = normalizeForMatch(fundingGoal);
+  if (!goalNorm) return { ok: true, score: 0, matched: false, strict: false };
+
+  const intentTokens = new Set<string>();
+  const add = (values: string[]) => values.map(normalizeForMatch).forEach((value) => intentTokens.add(value));
+
+  if (/(avvia|aprire|nuova impresa|startup|start up|autoimpiego|lavoro autonomo|libero professionista)/.test(goalNorm)) {
+    add(['nuova impresa', 'startup', 'start up', 'autoimpiego', 'lavoro autonomo', 'aspiranti imprenditori', 'imprenditoria']);
+  }
+  if (/(donna|donne|femmin|imprenditoria femminile|impresa femminile)/.test(goalNorm)) {
+    add(['imprenditoria femminile', 'impresa femminile', 'donna', 'donne', 'femminile']);
+  }
+  if (/(museo|musei|allestimento|espositivo|collezion|patrimonio cultur)/.test(goalNorm)) {
+    add([
+      'museo',
+      'musei',
+      'museale',
+      'museo d impresa',
+      'musei d impresa',
+      'allestimento espositivo',
+      'allestimenti espositivi',
+      'spazi espositivi',
+      'collezione museale',
+    ]);
+  }
+  if (/(digital|digitale|digitalizzazione|software|ict|ecommerce|e commerce|cyber|industria 4|4 0)/.test(goalNorm)) {
+    add(['digitalizzazione', 'digitale', 'software', 'ict', 'cloud', 'ecommerce', 'industria 4 0']);
+  }
+  if (/(mercati globali|digital export|marketing digitale|marketplace|sito multilingua|mercati esteri)/.test(goalNorm)) {
+    add([
+      'digital export',
+      'mercati globali',
+      'mercati esteri',
+      'marketing digitale',
+      'marketplace',
+      'sito multilingua',
+      'strategie digitali',
+    ]);
+  }
+  if (/(assessment|audit|maturita digitale|maturita tecnologica|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale)/.test(goalNorm)) {
+    add([
+      'assessment',
+      'first assessment',
+      'post assessment',
+      'assessment digitale',
+      'audit digitale',
+      'maturita digitale',
+      'check up digitale',
+      'diagnosi digitale',
+      'orientamento digitale',
+      'roadmap digitale',
+      'cybersecurity',
+      'cyber',
+    ]);
+  }
+  if (/(assunzion|occupaz|personale|dipendent|lavorator)/.test(goalNorm)) {
+    add(['assunzioni', 'occupazione', 'lavoratori', 'personale']);
+  }
+  if (/(macchinari|attrezzature|beni strumentali|impianti)/.test(goalNorm)) {
+    add(['macchinari', 'attrezzature', 'beni strumentali', 'impianti']);
+  }
+  if (/(efficientamento energetic|risparmio energetic|transizione energetic|fotovolta|solare|autoconsum|rinnovabil|emission|ricicl|mobilita sostenibile)/.test(goalNorm)) {
+    add([
+      'efficientamento energetico',
+      'risparmio energetico',
+      'transizione energetica',
+      'fotovoltaico',
+      'solare',
+      'autoconsumo',
+      'energie rinnovabili',
+      'riduzione emissioni',
+      'riciclo',
+      'mobilita sostenibile',
+    ]);
+  }
+  if (/(alimentari|generi di prima necessita|negozio alimentare|minimarket|commercio al dettaglio)/.test(goalNorm)) {
+    add([
+      'alimentari',
+      'generi di prima necessita',
+      'negozio alimentare',
+      'minimarket',
+      'commercio al dettaglio',
+      'prodotti alimentari',
+    ]);
+  }
+  if (/(piccolo comune|piccoli comuni|frazione|frazioni|borgo|paese)/.test(goalNorm)) {
+    add(['piccolo comune', 'piccoli comuni', 'frazione', 'frazioni', 'borgo', 'paese']);
+  }
+  if (/(fiera|export|internazionalizzazione|mercati esteri)/.test(goalNorm)) {
+    add(['fiera', 'internazionalizzazione', 'export', 'mercati esteri']);
+  }
+  if (/(smau|parigi|milano|londra|buyer|stand|b2b)/.test(goalNorm)) {
+    add(['smau', 'parigi', 'milano', 'londra', 'buyer', 'stand espositivo', 'b2b']);
+  }
+
+  if (!intentTokens.size) return { ok: true, score: 0, matched: false, strict: false };
+
+  const docPrimaryText = normalizeForMatch(
+    [
+      doc.title,
+      doc.institutionalLink,
+      doc.url,
+      ...asStringArray(doc.purposes),
+      ...asStringArray(doc.sectors),
+      ...asStringArray(doc.beneficiaries),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+  const docText = normalizeForMatch(
+    [
+      doc.title,
+      doc.description,
+      doc.institutionalLink,
+      doc.url,
+      ...asStringArray(doc.purposes),
+      ...asStringArray(doc.sectors),
+      ...asStringArray(doc.supportForm),
+      ...asStringArray(doc.beneficiaries),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+  const exactTopicTokens = expandMorphologicalVariants(buildHighSignalGoalPhrases(goalNorm));
+  const exactTopicMatched = exactTopicTokens.length > 0 ? anyTextMatch(docPrimaryText, exactTopicTokens) : false;
+  const mustMatchSpecificTokens: string[] = [];
+  const citySpecificTokens: string[] = [];
+  if (goalNorm.includes('smau')) mustMatchSpecificTokens.push('smau');
+  if (goalNorm.includes('parigi')) {
+    mustMatchSpecificTokens.push('parigi');
+    citySpecificTokens.push('parigi');
+  }
+  if (goalNorm.includes('milano')) {
+    mustMatchSpecificTokens.push('milano');
+    citySpecificTokens.push('milano');
+  }
+  if (goalNorm.includes('londra')) {
+    mustMatchSpecificTokens.push('londra');
+    citySpecificTokens.push('londra');
+  }
+  const genericSmauProgram =
+    goalNorm.includes('smau') &&
+    anyTextMatch(docPrimaryText, ['smau']) &&
+    /(fiere smau|fiera smau|partecipazione delle imprese.*smau|partecipazione.*smau|smau international)/.test(docText) &&
+    !/(parigi|milano|londra|stoccolma|new york|garda)/.test(docPrimaryText);
+  const hasSmauMatch = !goalNorm.includes('smau') || anyTextMatch(docPrimaryText, ['smau']);
+  const hasCityMatch =
+    citySpecificTokens.length === 0 || anyTextMatch(docPrimaryText, citySpecificTokens) || genericSmauProgram;
+  const needsItalyFairSpecificMatch = /(fiera|fiere|stand)/.test(goalNorm) && /\bitalia\b|\bitaliano\b|\bitaliane\b/.test(goalNorm);
+  const hasItalyFairSpecificMatch =
+    !needsItalyFairSpecificMatch || anyTextMatch(docPrimaryText, ['italia', 'italiano', 'italiane']);
+  if (!hasSmauMatch || !hasCityMatch) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  if (!hasItalyFairSpecificMatch) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  const assessmentSpecificTokens = expandMorphologicalVariants([
+    'assessment',
+    'assesment',
+    'first assessment',
+    'first assesment',
+    'post assessment',
+    'post assesment',
+    'audit digitale',
+    'maturita digitale',
+    'check up digitale',
+    'diagnosi digitale',
+    'roadmap digitale',
+    'orientamento digitale',
+  ]);
+  const needsAssessmentSpecificMatch = /(assessment|assesment|audit|maturita digitale|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale)/.test(
+    goalNorm,
+  );
+  if (needsAssessmentSpecificMatch && !anyTextMatch(docText, assessmentSpecificTokens)) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  if (exactTopicTokens.length > 0 && !exactTopicMatched) {
+    return { ok: false, score: 0, matched: false, strict: true };
+  }
+  const tokens = expandMorphologicalVariants([...intentTokens]);
+  const matched = anyTextMatch(docText, tokens);
+
+  if (!matched) return { ok: false, score: 0, matched: false, strict: true };
+  return { ok: true, score: exactTopicMatched ? 0.16 : 0.12, matched: true, strict: true };
 }
 
 async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs = SCANNER_API_TIMEOUT_MS): Promise<T> {
@@ -744,8 +1299,7 @@ function buildRequirements(
   const purposes = asStringArray(doc.purposes);
   const sectors = asStringArray(doc.sectors);
   const dimensions = asStringArray(doc.dimensions);
-  const costMin = parseMoneyValue(doc.costMin);
-  const costMax = parseMoneyValue(doc.costMax);
+  const economic = resolveDocEconomicData(doc);
 
   const territoryLine = (() => {
     const userRegion = opts?.userRegion ?? null;
@@ -771,17 +1325,24 @@ function buildRequirements(
   if (territoryLine) req.push(territoryLine);
   if (dimensions.length) req.push(`Dimensioni: ${dimensions.slice(0, 2).join(', ')}`);
   if (supportForm.length) req.push(`Forma agevolazione: ${supportForm.slice(0, 2).join(', ')}`);
+  if (economic.economicOffer && typeof economic.economicOffer.displayAmountLabel === 'string' && economic.economicOffer.displayAmountLabel.trim()) {
+    req.push(`Importo agevolazione: ${economic.economicOffer.displayAmountLabel.trim()}`);
+  }
+  if (economic.economicOffer && typeof economic.economicOffer.displayCoverageLabel === 'string' && economic.economicOffer.displayCoverageLabel.trim()) {
+    req.push(`% copertura: ${economic.economicOffer.displayCoverageLabel.trim()}`);
+  }
+  if (
+    economic.economicOffer &&
+    typeof economic.economicOffer.displayProjectAmountLabel === 'string' &&
+    economic.economicOffer.displayProjectAmountLabel.trim()
+  ) {
+    req.push(`Spesa progetto ammissibile: ${economic.economicOffer.displayProjectAmountLabel.trim()}`);
+  }
   if (purposes.length) req.push(`Finalita: ${purposes.slice(0, 2).join(', ')}`);
   if (sectors.length) req.push(`Settore: ${sectors.slice(0, 2).join(', ')}`);
-  if ((costMin ?? 0) > 0 || (costMax ?? 0) > 0) {
-    const parts: string[] = [];
-    if ((costMin ?? 0) > 0) parts.push(`min ${Math.round(costMin as number).toLocaleString('it-IT')} EUR`);
-    if ((costMax ?? 0) > 0) parts.push(`max ${Math.round(costMax as number).toLocaleString('it-IT')} EUR`);
-    if (parts.length) req.push(`Spesa ammessa: ${parts.join(' / ')}`);
-  }
 
   // Fallback: keep list concise
-  return req.slice(0, 5);
+  return req.slice(0, 6);
 }
 
 function buildSourceUrl(doc: IncentiviDoc): string {
@@ -794,11 +1355,71 @@ function buildSourceUrl(doc: IncentiviDoc): string {
   return `${INCENTIVI_BASE_URL}/it`;
 }
 
-function applyStrategicDocOverrides(doc: IncentiviDoc): IncentiviDoc {
+function applyStrategicDocOverrides(
+  doc: IncentiviDoc,
+  context?: {
+    userRegionCanonical: string | null;
+    businessExists: boolean | null;
+  },
+): IncentiviDoc {
   const titleNorm = normalizeForMatch(String(doc.title ?? ''));
   const urlNorm = normalizeForMatch(`${String(doc.institutionalLink ?? '')} ${String(doc.url ?? '')}`);
   const hints = `${titleNorm} ${urlNorm}`.trim();
   const mergeList = (...values: unknown[]) => Array.from(new Set(values.flatMap((value) => asStringArray(value))));
+  const userRegionCanonical = context?.userRegionCanonical ?? null;
+  const businessExists = context?.businessExists ?? null;
+
+  if (
+    hints.includes('autoimpiego centro nord') ||
+    hints.includes('autoimpiego centro-nord') ||
+    hints.includes('autoimpiego per il centro nord')
+  ) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Invitalia',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : "Incentivo per under 35 inattivi, inoccupati, disoccupati, disoccupati GOL e working poor che vogliono avviare una nuova attività nel Centro-Nord.",
+      regions: mergeList(doc.regions, [
+        'Piemonte',
+        "Valle d'Aosta",
+        'Liguria',
+        'Lombardia',
+        'Veneto',
+        'Friuli-Venezia Giulia',
+        'Trentino-Alto Adige',
+        'Emilia-Romagna',
+        'Toscana',
+        'Lazio',
+        'Umbria',
+        'Marche',
+      ]),
+      sectors: mergeList(doc.sectors, ['Turismo', 'Commercio', 'Servizi', 'ICT', 'Digitale', 'Artigianato', 'Cultura', 'Ristorazione', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, [
+        'Startup',
+        'Aspiranti imprenditori',
+        'Libero professionista',
+        'Lavoro autonomo',
+        'Under 35',
+        'Disoccupati',
+        'Inoccupati',
+        'Working poor',
+      ]),
+      purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa', 'Imprenditoria giovanile', 'Autoimpiego', 'Sostegno investimenti']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto', 'Voucher']),
+      costMax: 200_000,
+      displayAmountLabel: 'Voucher fino a € 30.000 - € 40.000',
+      displayProjectAmountLabel: 'Fino a € 200.000',
+      displayCoverageLabel: '60% - 100%',
+      coverageMinPercent: 60,
+      coverageMaxPercent: 100,
+      ateco: mergeList(doc.ateco, ['Tutti i settori economici ammissibili tranne agricoltura, pesca e acquacoltura']),
+      institutionalLink: doc.institutionalLink || 'https://www.invitalia.it/incentivi-e-strumenti/autoimpiego-centro-nord',
+      url: doc.url || '/incentivi-e-strumenti/autoimpiego-centro-nord',
+    };
+  }
 
   if (
     hints.includes('resto al sud') ||
@@ -821,9 +1442,13 @@ function applyStrategicDocOverrides(doc: IncentiviDoc): IncentiviDoc {
       beneficiaries: mergeList(doc.beneficiaries, ['Startup', 'Impresa', 'Aspiranti imprenditori', 'Libero professionista', 'Lavoro autonomo']),
       purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa', 'Imprenditoria giovanile', 'Autoimpiego', 'Sostegno investimenti']),
       dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
-      costMin: 40_000,
+      costMin: 10_000,
       costMax: 200_000,
       supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto', 'Voucher']),
+      displayProjectAmountLabel: 'Da € 10.000 a € 200.000',
+      displayCoverageLabel: '70% - 100%',
+      coverageMinPercent: 70,
+      coverageMaxPercent: 100,
       ateco: mergeList(doc.ateco, ['Tutti i settori economici ammissibili tranne agricoltura, pesca e acquacoltura']),
       institutionalLink: doc.institutionalLink || 'https://www.invitalia.it/incentivi-e-strumenti/resto-al-sud-20',
       url: doc.url || '/incentivi-e-strumenti/resto-al-sud-20',
@@ -831,6 +1456,7 @@ function applyStrategicDocOverrides(doc: IncentiviDoc): IncentiviDoc {
   }
 
   if (hints.includes('smart start italia') || hints.includes('smartstart italia') || hints.includes('smart start')) {
+    const isSouth = userRegionCanonical ? SOUTH_REGION_SET.has(userRegionCanonical) : false;
     return {
       ...doc,
       authorityName: doc.authorityName ?? 'Invitalia',
@@ -846,8 +1472,380 @@ function applyStrategicDocOverrides(doc: IncentiviDoc): IncentiviDoc {
       costMin: 100_000,
       costMax: 1_500_000,
       supportForm: mergeList(doc.supportForm, ['Finanziamento agevolato', 'Contributo/Fondo perduto']),
-      institutionalLink: doc.institutionalLink || 'https://www.invitalia.it/cosa-facciamo/creiamo-nuove-aziende/smartstart-italia',
-      url: doc.url || '/cosa-facciamo/creiamo-nuove-aziende/smartstart-italia',
+      displayProjectAmountLabel: 'Da € 100.000 a € 1.500.000',
+      displayCoverageLabel: isSouth ? '30%' : '0%',
+      coverageMinPercent: isSouth ? 30 : 0,
+      coverageMaxPercent: isSouth ? 30 : 0,
+      url: doc.url || '/it/catalogo/smartstart-italia-sostegno-alle-startup-innovative',
+    };
+  }
+
+  if (hints.includes('pidnext') || hints.includes('polo di innovazione digitale pidnext')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Ministero delle Imprese e del Made in Italy',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'La misura si rivolge a micro, piccole e medie imprese gia attive e iscritte al registro delle imprese.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, [
+        'Piemonte',
+        'Lombardia',
+        "Valle d'Aosta",
+        'Liguria',
+        'Abruzzo',
+        'Molise',
+        'Basilicata',
+        'Calabria',
+        'Campania',
+        'Puglia',
+        'Sicilia',
+        'Trentino-Alto Adige',
+        'Veneto',
+        'Sardegna',
+        'Toscana',
+        'Friuli-Venezia Giulia',
+        'Emilia-Romagna',
+        'Umbria',
+        'Marche',
+        'Lazio',
+      ]),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Turismo', 'Servizi', 'ICT', 'Digitale', 'Artigianato', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda gia attiva', 'Impresa iscritta al registro imprese']),
+      purposes: ['Digitalizzazione', 'Innovazione e ricerca'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMax: 2_883,
+      grantMax: 2_883,
+      displayAmountLabel: 'Fino a € 2.883',
+      displayProjectAmountLabel: 'Fino a € 2.883',
+      displayCoverageLabel: '100%',
+      coverageMinPercent: 100,
+      coverageMaxPercent: 100,
+      url: doc.url || '/it/catalogo/polo-di-innovazione-digitale-pidnext-servizi-di-first-e-post-assessment',
+    };
+  }
+
+  if (hints.includes('nuova sabatini') || hints.includes('beni strumentali sabatini') || hints.includes('beni strumentali')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Ministero delle Imprese e del Made in Italy',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : 'Misura nazionale per PMI già attive che investono in macchinari, beni strumentali, software e tecnologie 4.0.',
+      regions: mergeList(doc.regions, ['Italia']),
+      sectors: mergeList(doc.sectors, ['Manifattura', 'Digitale', 'ICT', 'Commercio', 'Servizi']),
+      beneficiaries: mergeList(doc.beneficiaries, ['PMI', 'Impresa', 'Azienda già attiva']),
+      purposes: mergeList(doc.purposes, ['Digitalizzazione', 'Sostegno investimenti', 'Industria 4 0', 'Beni strumentali']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Finanziamento agevolato', 'Contributo']),
+      costMin: 20_000,
+      costMax: 4_000_000,
+      grantMin: 550,
+      grantMax: 143_000,
+      coverageMinPercent: 2.75,
+      coverageMaxPercent: 3.575,
+      displayAmountLabel: 'Contributo calcolato su finanziamenti da € 20.000 a € 4.000.000',
+      displayProjectAmountLabel: 'Da € 20.000 a € 4.000.000',
+      displayCoverageLabel: '0%',
+      url: doc.url || '/it/incentivi/nuova-sabatini',
+    };
+  }
+
+  if (
+    hints.includes('fiere smau') ||
+    hints.includes('smau milano 2026') ||
+    hints.includes('smau parigi 2026') ||
+    hints.includes('partecipazione delle imprese alla fiera smau') ||
+    hints.includes('partecipazione delle imprese della regione marche alle fiere smau')
+  ) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Regione Marche',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a startup e PMI innovative marchigiane gia costituite che partecipano a SMAU Milano 2026.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Marche']),
+      sectors: mergeList(doc.sectors, ['ICT', 'Digitale', 'Innovazione', 'Servizi']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Startup innovativa', 'PMI innovativa', 'Impresa', 'Impresa gia attiva']),
+      purposes: ['Internazionalizzazione', 'Innovazione e ricerca'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMax: 5_000,
+      grantMax: 5_000,
+      displayAmountLabel: 'Fino a € 5.000',
+      displayProjectAmountLabel: 'Fino a € 5.000',
+      displayCoverageLabel: '100%',
+      coverageMinPercent: 100,
+      coverageMaxPercent: 100,
+      openDate: doc.openDate || '2026-02-20T00:00:00',
+      closeDate: doc.closeDate || '2026-04-16T00:00:00',
+      url: doc.url || '/it/catalogo/pr-marche-fesr-20212027-intervento-1341-partecipazione-delle-imprese-alla-fiera-smau',
+    };
+  }
+
+  if (
+    hints.includes('voucher digitali i4 0') ||
+    hints.includes('voucher digitali i40') ||
+    hints.includes('pid avanzato') ||
+    (hints.includes('cosenza') && hints.includes('digital'))
+  ) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Camera di Commercio, Industria, Artigianato e Agricoltura di Cosenza',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a micro, piccole e medie imprese gia attive della provincia di Cosenza con progetti di digitalizzazione.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Calabria']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Servizi', 'ICT', 'Digitale', 'Manifattura', 'Turismo', 'Artigianato']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda gia attiva']),
+      purposes: ['Digitalizzazione', 'Innovazione e ricerca'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 4_000,
+      costMax: 20_000,
+      grantMin: 2_000,
+      grantMax: 10_000,
+      displayAmountLabel: 'Da € 2.000 a € 10.000',
+      displayProjectAmountLabel: 'Da € 4.000 a € 20.000',
+      displayCoverageLabel: '50% - 70%',
+      coverageMinPercent: 50,
+      coverageMaxPercent: 70,
+      openDate: doc.openDate || '2026-03-04T00:00:00',
+      closeDate: doc.closeDate || '2026-09-30T00:00:00',
+      url: doc.url || '/it/catalogo/cciaa-cosenza-bando-voucher-digitali-i40-anno-2026-xii-edizione-pid-avanzato',
+    };
+  }
+
+  if (hints.includes('nuova impresa') && hints.includes('piccoli comuni') && hints.includes('frazioni')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Regione Lombardia',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a nuove attività o nuove unità locali di commercio al dettaglio alimentare e di generi di prima necessità in piccoli comuni o frazioni lombarde.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Lombardia']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Agroalimentare', 'Ristorazione']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Nuova impresa', 'Impresa', 'Azienda gia attiva']),
+      purposes: ['Start up/Sviluppo d impresa', 'Commercio al dettaglio alimentare'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa', 'Grande Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 3_000,
+      costMax: 50_000,
+      grantMin: 2_400,
+      grantMax: 40_000,
+      displayAmountLabel: 'Da € 2.400 a € 40.000',
+      displayProjectAmountLabel: 'Da € 3.000 a € 50.000',
+      displayCoverageLabel: '80%',
+      coverageMinPercent: 80,
+      coverageMaxPercent: 80,
+      openDate: doc.openDate || '2026-01-28T00:00:00',
+      closeDate: doc.closeDate || '2026-11-12T00:00:00',
+      institutionalLink:
+        doc.institutionalLink ||
+        'https://www.bandi.regione.lombardia.it/servizi/servizio/bandi/dettaglio/attivita-produttive-commercio/sostegno-avvio-impresa/nuova-impresa-piccoli-comuni-frazioni-2026-RLO12025051423',
+      url: doc.url || '/it/catalogo/bando-nuova-impresa-piccoli-comuni-e-frazioni-2026',
+    };
+  }
+
+  if (hints.includes('bando connessi') || (hints.includes('strategie digitali') && hints.includes('mercati globali'))) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Camera di Commercio Metropolitana di Milano-Monza-Brianza-Lodi',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a MPMI gia attive delle province di Milano, Monza Brianza e Lodi con strategie di digital export e marketing digitale per i mercati esteri.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Lombardia']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'ICT', 'Digitale', 'Turismo', 'Ristorazione', 'Artigianato', 'Altri servizi']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda gia attiva']),
+      purposes: ['Internazionalizzazione', 'Digitalizzazione', 'Digital export'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 4_000,
+      costMax: 16_667,
+      grantMin: 2_400,
+      grantMax: 10_000,
+      displayAmountLabel: 'Da € 2.400 a € 10.000',
+      displayProjectAmountLabel: 'Da € 4.000 a € 16.667',
+      displayCoverageLabel: '60%',
+      coverageMinPercent: 60,
+      coverageMaxPercent: 60,
+      institutionalLink: doc.institutionalLink || 'https://www.milomb.camcom.it/bando-connessi-2026',
+      url: doc.url || '/it/catalogo/bando-connessi-contributi-lo-sviluppo-di-strategie-digitali-i-mercati-globali-2026',
+    };
+  }
+
+  if ((hints.includes('cosenza') && hints.includes('risparmio energetico')) || hints.includes('sostenibilita e risparmio energetico')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Camera di Commercio, Industria, Artigianato e Agricoltura di Cosenza',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a imprese gia attive della provincia di Cosenza con investimenti in efficientamento energetico, riduzione dei consumi, riciclo e mobilita sostenibile.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Calabria']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Turismo', 'Artigianato', 'Agroalimentare', 'ICT', 'Manifattura', 'Servizi', 'Ristorazione']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda gia attiva']),
+      purposes: ['Transizione ecologica', 'Efficientamento energetico'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 2_000,
+      costMax: 20_000,
+      grantMin: 1_000,
+      grantMax: 12_000,
+      displayAmountLabel: 'Da € 1.000 a € 12.000',
+      displayProjectAmountLabel: 'Da € 2.000 a € 20.000',
+      displayCoverageLabel: '50% - 60%',
+      coverageMinPercent: 50,
+      coverageMaxPercent: 60,
+      openDate: doc.openDate || '2026-03-04T00:00:00',
+      closeDate: doc.closeDate || '2026-09-30T00:00:00',
+      institutionalLink:
+        doc.institutionalLink || 'https://www.cs.camcom.gov.it/it/content/service/01-bando-sostenibilt%C3%A0-e-risparmio-energetico-ix',
+      url: doc.url || '/it/catalogo/cciaa-cosenza-bando-sostenibilita-e-risparmio-energetico-ix-edizione',
+    };
+  }
+
+  if (hints.includes('cciaa bologna') && (hints.includes('fiere internazionali') || hints.includes('partecipazione a fiere internazionali'))) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Camera di Commercio, Industria, Artigianato e Agricoltura di Bologna',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a micro, piccole e medie imprese gia attive del territorio bolognese che partecipano a fiere internazionali in Italia.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Emilia-Romagna']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Servizi', 'Turismo', 'Manifattura', 'Artigianato', 'ICT']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda gia attiva']),
+      purposes: ['Internazionalizzazione'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa', 'Media Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 3_000,
+      costMax: 8_000,
+      grantMin: 1_500,
+      grantMax: 4_000,
+      displayAmountLabel: 'Da € 1.500 a € 4.000',
+      displayProjectAmountLabel: 'Da € 3.000 a € 8.000',
+      displayCoverageLabel: '50%',
+      coverageMinPercent: 50,
+      coverageMaxPercent: 50,
+      url: doc.url || '/it/catalogo/cciaa-bologna-contributi-la-partecipazione-fiere-internazionali-italia-anno-2026',
+    };
+  }
+
+  if (hints.includes('consolidamento delle startup innovative') || (hints.includes('regione veneto') && hints.includes('startup innovative'))) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Agenzia veneta per i pagamenti in agricoltura - AVEPA',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        'Il bando si rivolge a startup innovative gia costituite con progetti di consolidamento e innovazione in Veneto.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Veneto']),
+      sectors: mergeList(doc.sectors, ['ICT', 'Digitale', 'Innovazione', 'Servizi', 'Manifattura', 'Ricerca']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Startup innovativa', 'Impresa', 'Azienda gia attiva']),
+      purposes: ['Innovazione e ricerca', 'Start up/Sviluppo d impresa', 'Digitalizzazione'],
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 50_000,
+      costMax: 250_000,
+      grantMin: 25_000,
+      grantMax: 150_000,
+      displayAmountLabel: 'Da € 25.000 a € 150.000',
+      displayProjectAmountLabel: 'Da € 50.000 a € 250.000',
+      displayCoverageLabel: '50% - 60%',
+      coverageMinPercent: 50,
+      coverageMaxPercent: 60,
+      url: doc.url || '/it/catalogo/regione-veneto-bando-il-consolidamento-delle-startup-innovative',
+    };
+  }
+
+  if (
+    hints.includes('museo di impresa') ||
+    hints.includes('musei di impresa') ||
+    hints.includes('museo d impresa') ||
+    hints.includes('musei d impresa')
+  ) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Regione Lombardia',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : "Contributo a fondo perduto per imprese lombarde che realizzano o riqualificano il proprio museo d'impresa.",
+      regions: mergeList(doc.regions, ['Lombardia']),
+      sectors: mergeList(doc.sectors, ['Cultura', 'Turismo', 'Commercio', 'Servizi']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Impresa', 'PMI', 'Azienda già attiva']),
+      purposes: mergeList(doc.purposes, [
+        'Museo d impresa',
+        'Valorizzazione patrimonio industriale',
+        'Allestimento spazi espositivi',
+        'Promozione e marketing culturale',
+      ]),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 10_000,
+      costMax: 80_000,
+      grantMin: 10_000,
+      grantMax: 80_000,
+      coverageMinPercent: 100,
+      coverageMaxPercent: 100,
+      displayAmountLabel: doc.displayAmountLabel ?? 'Da € 10.000 a € 80.000',
+      displayProjectAmountLabel: doc.displayProjectAmountLabel ?? 'Da € 10.000 a € 80.000',
+      displayCoverageLabel: doc.displayCoverageLabel ?? '100%',
+      openDate: doc.openDate || '2026-03-02T00:00:00',
+      closeDate: doc.closeDate || '2026-04-24T00:00:00',
+      url: doc.url || '/it/catalogo/regione-lombardia-bando-musei-dimpresa-2026',
+    };
+  }
+
+  if (hints.includes('oltre nuove imprese a tasso zero') || hints.includes('nuove imprese a tasso zero')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? "Invitalia - Agenzia nazionale per l'attrazione degli investimenti e lo sviluppo d'impresa S.p.A.",
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : 'Incentivo per imprese giovanili o femminili costituite da non piu di 60 mesi o da costituire, con progetti fino a 3 milioni di euro.',
+      regions: mergeList(doc.regions, ['Italia']),
+      sectors: mergeList(doc.sectors, ['Produzione', 'Servizi', 'Commercio', 'Turismo', 'Manifattura', 'Artigianato']),
+      beneficiaries: mergeList(doc.beneficiaries, [
+        'Impresa giovanile',
+        'Impresa femminile',
+        'Nuova impresa',
+        'Impresa da costituire',
+        'Startup',
+      ]),
+      purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa', 'Imprenditoria giovanile', 'Imprenditoria femminile', 'Sostegno investimenti']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto', 'Finanziamento agevolato']),
+      costMax: 3_000_000,
+      grantMax: 600_000,
+      displayProjectAmountLabel: 'Fino a € 3.000.000',
+      displayCoverageLabel: '20%',
+      coverageMinPercent: 20,
+      coverageMaxPercent: 20,
+      url: doc.url || '/it/catalogo/oltre-nuove-imprese-tasso-zero',
     };
   }
 
@@ -886,6 +1884,89 @@ function computeStrategicSignal(args: {
   const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal);
   const profileGoalNorm = normalizeForMatch([activityType, fundingGoal].filter(Boolean).join(' '));
   const requestedAid = classifyContributionPreference(contributionPreference).kind;
+  const femaleHint = /(femmin|donna|female|woman)/.test(
+    normalizeForMatch(
+      [
+        cleanString(rawProfile.gender, 40),
+        cleanString(rawProfile.genderIdentity, 40),
+        cleanString(rawProfile.founderGender, 40),
+        activityType,
+        cleanString(rawProfile.legalForm, 120),
+        fundingGoal,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    ),
+  );
+  const innovativeHint = /(startup innovativ|innovativa|innovative|pmi innovativ)/.test(
+    normalizeForMatch([activityType, cleanString(rawProfile.legalForm, 120), fundingGoal].filter(Boolean).join(' ')),
+  );
+  const digitalAssessmentHint = /(assessment|audit|maturita digitale|maturita tecnologica|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale|trasformazione digitale)/.test(
+    profileGoalNorm,
+  );
+  const digitalExportHint = /(digital export|mercati globali|mercati esteri|internazionalizzazione|marketplace|marketing digitale|lead generation|canali digitali|sito multilingua|ecommerce|analisi dei dati|intelligenza artificiale|ai commerciale)/.test(
+    profileGoalNorm,
+  );
+  const energyTransitionHint = /(efficientamento energetic|risparmio energetic|transizione energetic|consumi energetic|fotovolta|solare|autoconsum|rinnovabil|riduzione emission|ricicl|mobilita sostenibile|energia pulita)/.test(
+    profileGoalNorm,
+  );
+  const foodRetailHint = /(alimentari|generi di prima necessita|negozio alimentare|minimarket|commercio al dettaglio|bottega|emporio)/.test(
+    profileGoalNorm,
+  );
+  const smallTownHint = /(piccolo comune|piccoli comuni|frazione|frazioni|borgo|paese)/.test(profileGoalNorm);
+  const newUnitHint = /(unita locale|nuova unita locale|nuovo punto vendita|secondo punto vendita|nuova sede operativa)/.test(profileGoalNorm);
+  const exportFairHint = /(smau|fiera|fiere|internazionalizzazione|export|mercati esteri|buyer|b2b|stand)/.test(profileGoalNorm);
+
+  if (hints.includes('autoimpiego centro nord') || hints.includes('autoimpiego centro-nord')) {
+    if (/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === true) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (region && !CENTER_NORTH_REGION_SET.has(region)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (age !== null && (age < 18 || age > 35)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    const isClearlyEmployed =
+      employmentNorm &&
+      /(\boccupat|\bdipendent|indeterminat|determinato)/.test(employmentNorm) &&
+      !/(disoccupat|inoccupat|non occupat|working poor|neet|gol|senza lavoro)/.test(employmentNorm);
+    if (isClearlyEmployed) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.1;
+    const reasons: string[] = [];
+
+    if (region && CENTER_NORTH_REGION_SET.has(region)) {
+      boost += 0.22;
+      reasons.push('Misura dedicata al Centro-Nord');
+    }
+    if (businessExists === false) {
+      boost += 0.2;
+      reasons.push('Coerente con nuova attività o autoimpiego');
+    }
+    if (/(disoccupat|inoccupat|neet|gol|working poor|senza lavoro|non occupat)/.test(employmentNorm)) {
+      boost += 0.14;
+    }
+    if (age !== null && age >= 18 && age <= 35) {
+      boost += 0.12;
+    }
+    if (/(avvio|nuova impresa|startup|autoimpiego|lavoro autonomo|libero professionista)/.test(profileGoalNorm)) {
+      boost += 0.14;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto' || requestedAid === 'voucher') {
+      boost += 0.08;
+    }
+    if (sectorNorm && !/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
+      boost += 0.04;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
 
   if (hints.includes('resto al sud')) {
     if (/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
@@ -929,22 +2010,346 @@ function computeStrategicSignal(args: {
   if (hints.includes('smart start')) {
     let boost = 0;
     const reasons: string[] = [];
-    if (businessExists === false) boost += 0.08;
+    if (businessExists === false) {
+      boost += 0.08;
+      reasons.push('Misura coerente con startup da costituire o nuova impresa innovativa');
+    }
     if (/(startup|innov|digit|software|ict|tecnolog)/.test(profileGoalNorm) || /(digit|ict|innov|software)/.test(sectorNorm)) {
       boost += 0.12;
       reasons.push('Molto coerente per startup innovative');
     }
+    if (region && SOUTH_REGION_SET.has(region)) {
+      boost += 0.08;
+      reasons.push('Nel Mezzogiorno prevede anche quota a fondo perduto');
+    }
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('pidnext') || hints.includes('polo di innovazione digitale pidnext')) {
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!digitalAssessmentHint && !/(digit|ict|software|cloud|cyber|innov)/.test(sectorNorm)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (businessExists === true) {
+      boost += 0.18;
+      reasons.push('Servizio dedicato a imprese già attive');
+    }
+    if (digitalAssessmentHint || /(digit|ict|software|cloud|cyber|innov)/.test(sectorNorm)) {
+      boost += 0.18;
+      reasons.push('Perfetto per assessment e roadmap di trasformazione digitale');
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.06;
+    }
+
     return { ok: true, boost, reasons: reasons.slice(0, 2) };
   }
 
   if (hints.includes('nuove imprese a tasso zero') || hints.includes('oltre nuove imprese')) {
+    if (businessExists === true) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (age !== null && age > 35 && !femaleHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
     let boost = 0;
     const reasons: string[] = [];
     if (businessExists === false) {
-      boost += 0.1;
+      boost += 0.14;
       reasons.push('Misura coerente con nuova impresa');
     }
-    if (age !== null && age <= 35) boost += 0.06;
+    if (age !== null && age <= 35) {
+      boost += 0.1;
+      reasons.push('Profilo giovanile coerente con il bando');
+    }
+    if (femaleHint) {
+      boost += 0.12;
+      reasons.push('Misura dedicata anche a imprenditoria femminile');
+    }
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (
+    hints.includes('fiere smau') ||
+    hints.includes('smau milano 2026') ||
+    hints.includes('smau parigi 2026') ||
+    hints.includes('partecipazione delle imprese alla fiera smau') ||
+    hints.includes('partecipazione delle imprese della regione marche alle fiere smau')
+  ) {
+    if (region && region !== 'Marche') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!innovativeHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!exportFairHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Marche') {
+      boost += 0.2;
+      reasons.push('Bando regionale specifico per imprese marchigiane');
+    }
+    if (innovativeHint) {
+      boost += 0.18;
+      reasons.push('Richiede startup o PMI innovative');
+    }
+    if (exportFairHint) {
+      boost += 0.18;
+    }
+    if (profileGoalNorm.includes('parigi') && hints.includes('parigi')) {
+      boost += 0.16;
+      reasons.push('Coincide con la fiera internazionale richiesta');
+    }
+    if (profileGoalNorm.includes('milano') && hints.includes('smau')) {
+      boost += 0.1;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.06;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (
+    hints.includes('voucher digitali i4 0') ||
+    hints.includes('voucher digitali i40') ||
+    hints.includes('pid avanzato')
+  ) {
+    if (region && region !== 'Calabria') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!digitalAssessmentHint && !/(digit|ict|software|cloud|cyber|ecommerce|crm|automazion)/.test(profileGoalNorm)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Calabria') {
+      boost += 0.2;
+      reasons.push('Bando camerale specifico per imprese della provincia di Cosenza');
+    }
+    if (businessExists === true) {
+      boost += 0.14;
+      reasons.push('Dedicato a imprese già attive');
+    }
+    if (/(digit|ict|software|cloud|cyber|ecommerce|crm|automazion)/.test(profileGoalNorm)) {
+      boost += 0.2;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('nuova impresa') && hints.includes('piccoli comuni') && hints.includes('frazioni')) {
+    if (region && region !== 'Lombardia') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === true && !newUnitHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!foodRetailHint || !smallTownHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Lombardia') {
+      boost += 0.18;
+      reasons.push('Bando regionale specifico per la Lombardia');
+    }
+    if (businessExists === false || newUnitHint) {
+      boost += 0.18;
+      reasons.push('Coerente con apertura di nuova impresa o nuova unità locale');
+    }
+    if (foodRetailHint) {
+      boost += 0.18;
+    }
+    if (smallTownHint) {
+      boost += 0.16;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('bando connessi') || (hints.includes('strategie digitali') && hints.includes('mercati globali'))) {
+    if (region && region !== 'Lombardia') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!digitalExportHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Lombardia') {
+      boost += 0.18;
+      reasons.push('Bando camerale locale per Milano Monza Brianza Lodi');
+    }
+    if (businessExists === true) {
+      boost += 0.12;
+      reasons.push('Dedicato a imprese già attive');
+    }
+    if (digitalExportHint) {
+      boost += 0.22;
+      reasons.push('Perfetto per digital export e mercati esteri');
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if ((hints.includes('cosenza') && hints.includes('risparmio energetico')) || hints.includes('sostenibilita e risparmio energetico')) {
+    if (region && region !== 'Calabria') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!energyTransitionHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Calabria') {
+      boost += 0.2;
+      reasons.push('Bando camerale specifico per imprese della provincia di Cosenza');
+    }
+    if (businessExists === true) {
+      boost += 0.12;
+      reasons.push('Dedicato a imprese già attive');
+    }
+    if (energyTransitionHint) {
+      boost += 0.2;
+      reasons.push('Coerente con efficientamento energetico e sostenibilità');
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('cciaa bologna') && (hints.includes('fiere internazionali') || hints.includes('partecipazione a fiere internazionali'))) {
+    if (region && region !== 'Emilia-Romagna') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!exportFairHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Emilia-Romagna') {
+      boost += 0.18;
+      reasons.push('Bando camerale locale per imprese bolognesi');
+    }
+    if (businessExists === true) {
+      boost += 0.12;
+      reasons.push('Coerente con impresa già attiva');
+    }
+    if (exportFairHint) {
+      boost += 0.18;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.06;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('consolidamento delle startup innovative') || (hints.includes('regione veneto') && hints.includes('startup innovative'))) {
+    if (region && region !== 'Veneto') {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!innovativeHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region === 'Veneto') {
+      boost += 0.18;
+      reasons.push('Bando regionale specifico per startup innovative venete');
+    }
+    if (businessExists === true) {
+      boost += 0.12;
+      reasons.push('Misura di consolidamento per startup già costituite');
+    }
+    if (innovativeHint) {
+      boost += 0.18;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.06;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (
+    hints.includes('museo di impresa') ||
+    hints.includes('musei di impresa') ||
+    hints.includes('museo d impresa') ||
+    hints.includes('musei d impresa')
+  ) {
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.04;
+    const reasons: string[] = [];
+
+    if (region === 'Lombardia') {
+      boost += 0.14;
+      reasons.push('Misura regionale mirata per la Lombardia');
+    }
+    if (businessExists === true) {
+      boost += 0.14;
+      reasons.push('Coerente con impresa già attiva');
+    }
+    if (/(museo|musei|museale|allestimento espositivo|spazi espositivi)/.test(profileGoalNorm)) {
+      boost += 0.18;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
+    }
+
     return { ok: true, boost, reasons: reasons.slice(0, 2) };
   }
 
@@ -952,14 +2357,29 @@ function computeStrategicSignal(args: {
 }
 
 function hasReliableEconomicDataDoc(doc: IncentiviDoc): boolean {
-  const min = parseMoneyValue(doc.costMin);
-  const max = parseMoneyValue(doc.costMax);
-  const values = [min, max].filter((v): v is number => v !== null && Number.isFinite(v) && v > 0);
+  const economic = resolveDocEconomicData(doc);
+  const projectValues = [economic.costMin, economic.costMax].filter(
+    (value): value is number => value !== null && Number.isFinite(value) && value > 0,
+  );
+  const hasReliableProjectRange =
+    projectValues.length > 0 &&
+    (typeof economic.economicOffer?.displayProjectAmountLabel === 'string' ||
+      typeof economic.economicOffer?.displayCoverageLabel === 'string' ||
+      typeof economic.aidIntensity === 'string');
+
+  if (hasReliableProjectRange) return true;
+  if (!economic.reliableGrantAmount) return false;
+
+  const values = [economic.grantMin, economic.grantMax].filter(
+    (value): value is number => value !== null && Number.isFinite(value) && value > 0,
+  );
   if (!values.length) return false;
 
   const top = Math.max(...values);
   if (top < 5_000) return false;
-  if ((min ?? 0) > 0 && (max ?? 0) > 0 && (max as number) < (min as number)) return false;
+  if ((economic.grantMin ?? 0) > 0 && (economic.grantMax ?? 0) > 0 && (economic.grantMax as number) < (economic.grantMin as number)) {
+    return false;
+  }
   return true;
 }
 
@@ -1018,6 +2438,23 @@ function expandKeywords(primary: string[]) {
       out.add('transizione green');
     }
   }
+  return [...out];
+}
+
+function expandMorphologicalVariants(tokens: string[]) {
+  const out = new Set<string>();
+
+  for (const token of tokens) {
+    if (!token) continue;
+    out.add(token);
+    if (token.includes(' ') || token.length < 4) continue;
+
+    if (token.endsWith('o')) out.add(`${token.slice(0, -1)}i`);
+    if (token.endsWith('i')) out.add(`${token.slice(0, -1)}o`);
+    if (token.endsWith('a')) out.add(`${token.slice(0, -1)}e`);
+    if (token.endsWith('e')) out.add(`${token.slice(0, -1)}a`);
+  }
+
   return [...out];
 }
 
@@ -1140,6 +2577,120 @@ function tokenizeKeywords(textNorm: string) {
     .filter((t) => !LOW_SIGNAL_TOKENS.has(t));
 }
 
+function buildHighSignalGoalPhrases(textNorm: string) {
+  if (!textNorm) return [] as string[];
+
+  const units = new Set<string>();
+  const add = (values: string[]) => values.forEach((value) => units.add(normalizeForMatch(value)));
+
+  if (/(museo d impresa|musei d impresa|museo impresa|musei impresa|museale)/.test(textNorm)) {
+    add([
+      'museo d impresa',
+      'musei d impresa',
+      'museo',
+      'musei',
+      'museale',
+      'spazi espositivi',
+      'allestimento espositivo',
+      'allestimenti espositivi',
+    ]);
+  }
+  if (/(autoimpiego|nuova impresa|startup|start up|lavoro autonomo|libero professionista|aprire attivita|avviare attivita)/.test(textNorm)) {
+    add([
+      'autoimpiego',
+      'nuova impresa',
+      'avvio impresa',
+      'avvio di impresa',
+      'nuova attivita',
+      'lavoro autonomo',
+      'libero professionista',
+      'aspiranti imprenditori',
+      'imprenditoria giovanile',
+      'ditta individuale',
+    ]);
+  }
+  if (/(startup innovativ|innovativa|innovative)/.test(textNorm)) {
+    add(['startup innovativa', 'startup innovative', 'start up innovativa']);
+  }
+  if (/(donna|donne|femmin|imprenditoria femminile|impresa femminile)/.test(textNorm)) {
+    add(['imprenditoria femminile', 'impresa femminile', 'donna', 'donne', 'femminile']);
+  }
+  if (/(ecommerce|e commerce|shop online|negozio online|vendita online)/.test(textNorm)) {
+    add(['ecommerce', 'e commerce', 'shop online', 'negozio online', 'vendita online']);
+  }
+  if (/(mercati globali|digital export|marketing digitale|marketplace|sito multilingua|mercati esteri)/.test(textNorm)) {
+    add([
+      'digital export',
+      'mercati globali',
+      'mercati esteri',
+      'marketing digitale',
+      'marketplace',
+      'sito multilingua',
+      'strategie digitali',
+    ]);
+  }
+  if (/(digital|digitale|digitalizzazione|software|ict|cloud|cyber|cybersecurity|industria 4|4 0)/.test(textNorm)) {
+    add(['digitalizzazione', 'digitale', 'software', 'ict', 'cloud', 'ecommerce', 'cybersecurity', 'industria 4 0']);
+  }
+  if (/(assessment|audit|maturita digitale|maturita tecnologica|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale)/.test(textNorm)) {
+    add([
+      'assessment',
+      'first assessment',
+      'post assessment',
+      'assessment digitale',
+      'audit digitale',
+      'maturita digitale',
+      'check up digitale',
+      'diagnosi digitale',
+      'orientamento digitale',
+      'roadmap digitale',
+      'cybersecurity',
+      'cyber',
+    ]);
+  }
+  if (/(fotovolta|solare|rinnovabil|energia pulita)/.test(textNorm)) {
+    add(['fotovoltaico', 'solare', 'rinnovabili', 'energia rinnovabile']);
+  }
+  if (/(efficientamento energetic|risparmio energetic|transizione energetic|autoconsum|emission|ricicl|mobilita sostenibile)/.test(textNorm)) {
+    add([
+      'efficientamento energetico',
+      'risparmio energetico',
+      'transizione energetica',
+      'autoconsumo',
+      'riduzione emissioni',
+      'riciclo',
+      'mobilita sostenibile',
+    ]);
+  }
+  if (/(macchinari|beni strumentali|attrezzature|impianti)/.test(textNorm)) {
+    add(['macchinari', 'beni strumentali', 'attrezzature', 'impianti']);
+  }
+  if (/(alimentari|generi di prima necessita|negozio alimentare|minimarket|commercio al dettaglio)/.test(textNorm)) {
+    add([
+      'alimentari',
+      'generi di prima necessita',
+      'negozio alimentare',
+      'minimarket',
+      'commercio al dettaglio',
+      'prodotti alimentari',
+    ]);
+  }
+  if (/(piccolo comune|piccoli comuni|frazione|frazioni|borgo|paese)/.test(textNorm)) {
+    add(['piccolo comune', 'piccoli comuni', 'frazione', 'frazioni', 'borgo', 'paese']);
+  }
+  if (/(assunzion|personale|dipendent|nuove risorse)/.test(textNorm)) {
+    add(['assunzioni', 'personale', 'dipendenti', 'occupazione']);
+  }
+  if (/(export|internazionalizzazione|mercati esteri|fiera|fiere)/.test(textNorm)) {
+    add(['export', 'internazionalizzazione', 'mercati esteri', 'fiera', 'fiere']);
+  }
+  if (/(smau|parigi|milano|londra|buyer|stand|b2b)/.test(textNorm)) {
+    add(['smau', 'parigi', 'milano', 'londra', 'buyer', 'stand espositivo', 'b2b']);
+  }
+
+  return [...units].filter(Boolean);
+}
+
 function buildKeywordSets(sector: string | null, fundingGoal: string | null) {
   const sectorNorm = sector ? normalizeForMatch(sector) : '';
   const goalNorm = fundingGoal ? normalizeForMatch(fundingGoal) : '';
@@ -1147,13 +2698,32 @@ function buildKeywordSets(sector: string | null, fundingGoal: string | null) {
     if (!textNorm) return [] as string[];
     const units = new Set<string>();
 
-    for (const t of tokenizeKeywords(textNorm)) units.add(t);
+    for (const t of expandMorphologicalVariants(tokenizeKeywords(textNorm))) units.add(t);
     if (textNorm.split(' ').length >= 2 && textNorm.length <= 60) units.add(textNorm);
+    if (kind === 'goal') {
+      for (const phrase of buildHighSignalGoalPhrases(textNorm)) units.add(phrase);
+    }
 
     const add = (arr: string[]) => arr.forEach((x) => units.add(normalizeForMatch(x)));
 
     if (/(digital|digitale|digitalizzazione|ict|software|cloud|ecommerce|e commerce|cyber|cybersecurity|industria 4|4 0)/.test(textNorm)) {
       add(['digitalizzazione', 'digitale', 'ict', 'software', 'cloud', 'ecommerce', 'cybersecurity', 'industria 4 0']);
+    }
+    if (/(assessment|audit|maturita digitale|maturita tecnologica|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale)/.test(textNorm)) {
+      add([
+        'assessment',
+        'first assessment',
+        'post assessment',
+        'assessment digitale',
+        'audit digitale',
+        'maturita digitale',
+        'check up digitale',
+        'diagnosi digitale',
+        'orientamento digitale',
+        'roadmap digitale',
+        'cybersecurity',
+        'cyber',
+      ]);
     }
     if (/(turismo|turistic|ricettiv|albergh|hotel|alberg|b&b|bnb|agriturism|campegg|ospitalit|accoglienza)/.test(textNorm)) {
       if (kind === 'sector') {
@@ -1178,6 +2748,12 @@ function buildKeywordSets(sector: string | null, fundingGoal: string | null) {
     }
     if (/(ricerca|innovazione|r d|r s|sviluppo sperimentale|brevet)/.test(textNorm)) {
       add(['ricerca', 'sviluppo', 'innovazione', 'r d', 'r s', 'brevetti']);
+    }
+    if (/(donna|donne|femmin|imprenditoria femminile|impresa femminile)/.test(textNorm)) {
+      add(['imprenditoria femminile', 'impresa femminile', 'donna', 'donne', 'femminile']);
+    }
+    if (/(smau|parigi|milano|londra|buyer|stand|b2b)/.test(textNorm)) {
+      add(['smau', 'parigi', 'milano', 'londra', 'buyer', 'stand espositivo', 'b2b']);
     }
 
     return [...units];
@@ -1313,8 +2889,8 @@ function matchBeneficiaries(activityType: string | null, doc: IncentiviDoc) {
 
 function matchBudget(budget: number | null, doc: IncentiviDoc) {
   if (budget === null) return { ok: true, score: 0 };
-  const min = typeof doc.costMin === 'number' ? doc.costMin : Number.parseFloat(String(doc.costMin ?? ''));
-  const max = typeof doc.costMax === 'number' ? doc.costMax : Number.parseFloat(String(doc.costMax ?? ''));
+  const min = parseMoneyValue(doc.costMin);
+  const max = parseMoneyValue(doc.costMax);
   const hasMin = Number.isFinite(min);
   const hasMax = Number.isFinite(max);
   if (!hasMin && !hasMax) return { ok: true, score: 0 };
@@ -1690,6 +3266,7 @@ export async function POST(req: Request) {
       cleanString(rawProfile.workStatus, 80);
     const budget = cleanNumber(rawProfile.revenueOrBudgetEUR);
     const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR);
+    const fundingGoalSignalQuery = fundingGoal ? tokenizeKeywords(normalizeForMatch(fundingGoal)).slice(0, 4).join(' ') || null : null;
 
     const bookingBase = process.env.NEXT_PUBLIC_BOOKING_URL;
     if (!bookingBase) {
@@ -1713,6 +3290,7 @@ export async function POST(req: Request) {
       age,
       employmentStatus,
     });
+    const businessExists = scannerProfile.businessExists;
 
     if (SCANNER_API_ENABLED) {
       try {
@@ -1785,16 +3363,28 @@ export async function POST(req: Request) {
 
     try {
       if (keyword && userRegionCanonical) {
-        const boosted = [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null]
-          .filter(Boolean)
-          .join(' ');
-        const results = await Promise.allSettled([
-          fetchIncentiviDocs(keyword, 220, 6500),
-          fetchIncentiviDocs(boosted, 220, 6500)
-        ]);
-        const a = results[0].status === 'fulfilled' ? results[0].value : [];
-        const b = results[1].status === 'fulfilled' ? results[1].value : [];
-        docs = mergeIncentiviDocs(a, b);
+        const queryCandidates = Array.from(
+          new Set(
+            [
+              keyword,
+              [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null].filter(Boolean).join(' '),
+              fundingGoal,
+              [fundingGoal, userRegionCanonical].filter(Boolean).join(' '),
+              fundingGoalSignalQuery,
+              [fundingGoalSignalQuery, userRegionCanonical].filter(Boolean).join(' '),
+              atecoQuery,
+              [sector, fundingGoal].filter(Boolean).join(' '),
+            ]
+              .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+              .filter((entry) => entry.length >= 3),
+          ),
+        );
+        const results = await Promise.allSettled(queryCandidates.map((query) => fetchIncentiviDocs(query, 180, 6500)));
+        docs = mergeIncentiviDocs(
+          ...results
+            .filter((entry): entry is PromiseFulfilledResult<IncentiviDoc[]> => entry.status === 'fulfilled')
+            .map((entry) => entry.value),
+        );
       } else {
         docs = await fetchIncentiviDocs(keyword, 240, 8500);
       }
@@ -1816,7 +3406,10 @@ export async function POST(req: Request) {
 
     const now = new Date();
     const mapped = docs.map((docRaw) => {
-        const doc = applyStrategicDocOverrides(docRaw);
+        const doc = applyStrategicDocOverrides(docRaw, {
+          userRegionCanonical,
+          businessExists,
+        });
         const openDate = parseSolrDate(doc.openDate);
         const closeDate = parseSolrDate(doc.closeDate);
         const isOpen = isOpenNow(openDate, closeDate, now);
@@ -1838,6 +3431,16 @@ export async function POST(req: Request) {
         const atecoMatch = matchAteco(userAtecoDigits, doc);
         const beneficiariesMatch = matchBeneficiaries(activityType, doc);
         const contribution = matchContribution(contributionPreference, doc);
+        const businessStage = matchBusinessStage(businessExists, doc);
+        const demographicMatch = matchDemographicConstraints({
+          doc,
+          rawProfile,
+          age,
+          employmentStatus,
+        });
+        const goalIntentMatch = matchGoalIntent(fundingGoal, doc);
+        const authorityPriority = classifyAuthorityPriority(doc.authorityName);
+        const economic = resolveDocEconomicData(doc);
 
         // Text relevance gating:
         // - strictTextOk tries to match both sector + goal (high precision)
@@ -1946,7 +3549,20 @@ export async function POST(req: Request) {
           budget,
           contributionPreference
         });
-        const localScore = Math.max(0, Math.min(1, baseScore + sectorSpecificityBoost + atecoMatch.score + strategic.boost));
+        const localScore = Math.max(
+          0,
+          Math.min(
+            1,
+            baseScore +
+              sectorSpecificityBoost +
+              atecoMatch.score +
+              strategic.boost +
+              businessStage.score +
+              demographicMatch.score +
+              goalIntentMatch.score +
+              authorityPriority.boost,
+          ),
+        );
         const matchReasons: string[] = [];
         const mismatchFlags: string[] = [];
 
@@ -1957,6 +3573,11 @@ export async function POST(req: Request) {
         if (userAtecoDigits.length && atecoMatch.ok) matchReasons.push('ATECO coerente');
         if (wantsTopic && strictTextOk) matchReasons.push('Finalita e settore coerenti');
         if (beneficiariesMatch.matched) matchReasons.push('Beneficiari ammessi coerenti');
+        if (businessStage.matched) {
+          matchReasons.push(businessExists ? 'Compatibile con impresa già attiva' : 'Compatibile con nuova attività');
+        }
+        if (demographicMatch.matched) matchReasons.push('Profilo personale coerente');
+        if (goalIntentMatch.matched) matchReasons.push('Obiettivo progetto coerente');
         if (contribution.matched && contributionPrefInfo.strict && contributionPrefInfo.label) {
           matchReasons.push(`Forma contributo coerente (${contributionPrefInfo.label})`);
         }
@@ -1966,6 +3587,9 @@ export async function POST(req: Request) {
         if (userRegionCanonical && !regionOk) mismatchFlags.push('territory_mismatch');
         if (userAtecoDigits.length && !atecoMatch.ok) mismatchFlags.push('ateco_mismatch');
         if (beneficiariesMatch.strict && !beneficiariesMatch.matched) mismatchFlags.push('beneficiary_mismatch');
+        if (businessStage.strict && !businessStage.ok) mismatchFlags.push('business_stage_mismatch');
+        if (demographicMatch.strict && !demographicMatch.ok) mismatchFlags.push('demographic_mismatch');
+        if (goalIntentMatch.strict && !goalIntentMatch.ok) mismatchFlags.push('goal_intent_mismatch');
         if (contributionPrefInfo.strict && !contribution.matched) mismatchFlags.push('contribution_preference_mismatch');
         if (wantsTopic && !strictTextOk && !relaxedTextOk) mismatchFlags.push('goal_sector_weak');
 
@@ -1991,7 +3615,23 @@ export async function POST(req: Request) {
           matchScore: localScore,
           matchReasons: matchReasons.slice(0, 3),
           mismatchFlags: mismatchFlags.slice(0, 3),
-          score: localScore
+          score: localScore,
+          grantId: doc.id ? `incentivi-${String(doc.id)}` : undefined,
+          grantTitle: doc.title ?? 'Incentivo (Incentivi.gov)',
+          authority: doc.authorityName ?? 'Incentivi.gov',
+          officialUrl: buildSourceUrl(doc),
+          beneficiaries: asStringArray(doc.beneficiaries),
+          openingDate: openDate ? openDate.toISOString() : null,
+          deadlineDate: deadline,
+          availabilityStatus: openDate && now.getTime() < openDate.getTime() ? 'incoming' : 'open',
+          aidForm: asStringArray(doc.supportForm).join(', ') || null,
+          aidIntensity: economic.aidIntensity,
+          budgetTotal: economic.budgetTotal,
+          economicOffer: economic.economicOffer,
+          probabilityScore: Math.round(localScore * 100),
+          hardStatus: mismatchFlags.length === 0 ? 'eligible' : 'unknown',
+          whyFit: matchReasons.slice(0, 3),
+          missingRequirements: mismatchFlags.slice(0, 3),
         };
 
         return {
@@ -1999,6 +3639,9 @@ export async function POST(req: Request) {
           regionOk,
           atecoOk: atecoMatch.ok,
           beneficiariesOk: beneficiariesMatch.ok,
+          businessStageOk: businessStage.ok,
+          demographicsOk: demographicMatch.ok,
+          goalIntentOk: goalIntentMatch.ok,
           strategicOk: strategic.ok,
           economicReliable: hasReliableEconomicDataDoc(doc),
           strictTextOk,
@@ -2007,29 +3650,94 @@ export async function POST(req: Request) {
           result
         };
       });
-
     const openAndRegionStrict = mapped.filter(
-      (x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk && x.strategicOk && x.economicReliable,
+      (x) =>
+        x.isOpen &&
+        x.regionOk &&
+        x.atecoOk &&
+        x.beneficiariesOk &&
+        x.businessStageOk &&
+        x.demographicsOk &&
+        x.goalIntentOk &&
+        x.strategicOk &&
+        x.economicReliable,
     );
     const openAndRegion =
       openAndRegionStrict.length > 0
         ? openAndRegionStrict
-        : mapped.filter((x) => x.isOpen && x.regionOk && x.atecoOk && x.beneficiariesOk && x.strategicOk);
+        : mapped.filter(
+            (x) =>
+              x.isOpen &&
+              x.regionOk &&
+              x.atecoOk &&
+              x.beneficiariesOk &&
+              x.businessStageOk &&
+              x.demographicsOk &&
+              x.goalIntentOk &&
+              x.strategicOk,
+          );
     const strictTextPool = wantsTopic ? openAndRegion.filter((x) => x.strictTextOk) : openAndRegion;
     const relaxedTextPool = wantsTopic ? openAndRegion.filter((x) => x.relaxedTextOk) : openAndRegion;
+    const goalIntentPool = wantsTopic ? openAndRegion.filter((x) => x.goalIntentOk) : openAndRegion;
+    const strictGoalIntentPool = wantsTopic ? strictTextPool.filter((x) => x.goalIntentOk) : strictTextPool;
+    const relaxedGoalIntentPool = wantsTopic ? relaxedTextPool.filter((x) => x.goalIntentOk) : relaxedTextPool;
     const requireGoal = Boolean(fundingGoal?.trim());
 
     const chosenTextPool = !wantsTopic
       ? openAndRegion
       : requireGoal
-        ? strictTextPool
+        ? strictGoalIntentPool.length > 0
+          ? strictGoalIntentPool
+          : goalIntentPool.length > 0
+            ? goalIntentPool
+            : strictTextPool
         : strictTextPool.length >= Math.min(3, limit)
           ? strictTextPool
-          : relaxedTextPool;
+          : relaxedGoalIntentPool.length > 0
+            ? relaxedGoalIntentPool
+            : relaxedTextPool;
 
-    const candidates: Candidate[] = chosenTextPool.map((x) => ({ result: x.result, contributionMatched: x.contributionMatched }));
+    const pinnedStrategicTitles: string[] = [];
+    const employmentNorm = normalizeForMatch(employmentStatus ?? '');
+    if (
+      businessExists === false &&
+      userRegionCanonical &&
+      CENTER_NORTH_REGION_SET.has(userRegionCanonical) &&
+      age !== null &&
+      age >= 18 &&
+      age <= 35 &&
+      /(disoccupat|inoccupat|neet|gol|working poor|senza lavoro|non occupat)/.test(employmentNorm) &&
+      !/(agricolt|pesca|acquacolt)/.test(normalizeForMatch(sector ?? ''))
+    ) {
+      pinnedStrategicTitles.push('autoimpiego centro nord');
+    }
 
+    const candidateMap = new Map<string, Candidate>();
+    for (const entry of chosenTextPool) {
+      candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
+    }
+    for (const entry of mapped) {
+      if (
+        !entry.isOpen ||
+        !entry.regionOk ||
+        !entry.atecoOk ||
+        !entry.beneficiariesOk ||
+        !entry.businessStageOk ||
+        !entry.demographicsOk ||
+        !entry.strategicOk
+      ) {
+        continue;
+      }
+      const titleNorm = normalizeForMatch(entry.result.title);
+      if (!pinnedStrategicTitles.some((pinned) => titleNorm.includes(pinned))) continue;
+      candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
+    }
+
+    const candidates: Candidate[] = [...candidateMap.values()];
     const sortByRelevance = (a: Candidate, b: Candidate) => {
+      const aPinned = pinnedStrategicTitles.some((pinned) => normalizeForMatch(a.result.title).includes(pinned));
+      const bPinned = pinnedStrategicTitles.some((pinned) => normalizeForMatch(b.result.title).includes(pinned));
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
       if (a.result.score !== b.result.score) return b.result.score - a.result.score;
       const at = a.result.deadlineAt ? new Date(a.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
       const bt = b.result.deadlineAt ? new Date(b.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
