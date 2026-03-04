@@ -2008,6 +2008,15 @@ function computeStrategicSignal(args: {
   }
 
   if (hints.includes('smart start')) {
+    const smartStartGoalFit =
+      innovativeHint ||
+      /(digit|ict|software|saas|ai|intelligenza artificiale|startup innovativ|innovazion|ricerca|tecnolog)/.test(profileGoalNorm) ||
+      /(digit|ict|software|tecnolog|innovazion|ricerca)/.test(sectorNorm);
+
+    if (!smartStartGoalFit) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
     let boost = 0;
     const reasons: string[] = [];
     if (businessExists === false) {
@@ -2022,6 +2031,29 @@ function computeStrategicSignal(args: {
       boost += 0.08;
       reasons.push('Nel Mezzogiorno prevede anche quota a fondo perduto');
     }
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('fondo impresa femminile')) {
+    if (!femaleHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.06;
+    const reasons: string[] = [];
+
+    if (femaleHint) {
+      boost += 0.22;
+      reasons.push('Misura riservata a imprenditoria femminile');
+    }
+    if (businessExists === false) {
+      boost += 0.1;
+      reasons.push('Coerente con avvio o consolidamento di impresa femminile');
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.06;
+    }
+
     return { ok: true, boost, reasons: reasons.slice(0, 2) };
   }
 
@@ -3710,6 +3742,18 @@ export async function POST(req: Request) {
       !/(agricolt|pesca|acquacolt)/.test(normalizeForMatch(sector ?? ''))
     ) {
       pinnedStrategicTitles.push('autoimpiego centro nord');
+    }
+    if (
+      businessExists === false &&
+      userRegionCanonical &&
+      SOUTH_REGION_SET.has(userRegionCanonical) &&
+      age !== null &&
+      age >= 18 &&
+      age <= 35 &&
+      /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm) &&
+      contributionPrefInfo.kind === 'fondo_perduto'
+    ) {
+      pinnedStrategicTitles.push('resto al sud');
     }
 
     const candidateMap = new Map<string, Candidate>();
