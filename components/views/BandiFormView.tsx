@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FullScreenScannerOverlayPro as FullScreenScannerOverlay } from '@/components/views/FullScreenScannerOverlayPro';
+import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantCardPro as GrantCard, type MatchCardItem } from '@/components/views/GrantCardPro';
 import { apiRequest } from '@/lib/scannerPublicApi';
 
@@ -36,7 +36,7 @@ interface ProfileFormState {
 }
 
 type AvailabilityFilter = 'all' | 'open' | 'incoming';
-type SortMode = 'fit' | 'deadline' | 'budget';
+type SortMode = 'coverage' | 'fit' | 'deadline' | 'budget';
 type JourneyStep = 1 | 2;
 
 const IT_REGIONS = [
@@ -243,42 +243,97 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const [nearMissItems, setNearMissItems] = useState<MatchCardItem[]>([]);
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
-  const [sortMode, setSortMode] = useState<SortMode>('fit');
+  const [sortMode, setSortMode] = useState<SortMode>('coverage');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [journeyStep, setJourneyStep] = useState<JourneyStep>(1);
   const [stepOneAttempted, setStepOneAttempted] = useState(false);
   const [stepTwoAttempted, setStepTwoAttempted] = useState(false);
+  const [overlayProgress, setOverlayProgress] = useState(0);
+  const [overlayStepIndex, setOverlayStepIndex] = useState(0);
   const formRef = useRef<HTMLElement | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingStepScrollRef = useRef(false);
+  const overlayProgressTimerRef = useRef<number | null>(null);
 
   const scrollScannerViewportToTop = (behavior: ScrollBehavior = 'smooth') => {
     const pane = formRef.current?.closest('.mainpane');
     if (pane instanceof HTMLElement) {
       pane.scrollTo({ top: 0, behavior });
+      if (behavior === 'auto') {
+        pane.scrollTop = 0;
+      } else {
+        window.setTimeout(() => {
+          pane.scrollTop = 0;
+        }, 180);
+      }
       return;
     }
 
     formRef.current?.scrollIntoView({ behavior, block: 'start' });
   };
 
-  const scrollFormIntoView = (behavior: ScrollBehavior = 'smooth') => {
-    scrollScannerViewportToTop(behavior);
+  const forceScannerViewportTop = (persistMs = 0) => {
+    const pane = formRef.current?.closest('.mainpane');
+    if (pane instanceof HTMLElement) {
+      pane.scrollTop = 0;
+      pane.scrollTo({ top: 0, behavior: 'auto' });
+      if (persistMs > 0) {
+        const started = window.performance.now();
+        const settle = () => {
+          pane.scrollTop = 0;
+          pane.scrollTo({ top: 0, behavior: 'auto' });
+          if (window.performance.now() - started < persistMs) {
+            window.requestAnimationFrame(settle);
+          }
+        };
+        window.requestAnimationFrame(settle);
+      }
+      return;
+    }
+    scrollScannerViewportToTop('auto');
   };
 
   const scheduleFormScroll = () => {
     window.requestAnimationFrame(() => {
-      scrollFormIntoView();
+      forceScannerViewportTop(420);
+      window.setTimeout(() => {
+        forceScannerViewportTop(420);
+      }, 80);
     });
+  };
+
+  const stopOverlayProgressLoop = () => {
+    if (overlayProgressTimerRef.current !== null) {
+      window.clearInterval(overlayProgressTimerRef.current);
+      overlayProgressTimerRef.current = null;
+    }
+  };
+
+  const startOverlayProgressLoop = () => {
+    stopOverlayProgressLoop();
+    overlayProgressTimerRef.current = window.setInterval(() => {
+      setOverlayProgress((prev) => {
+        if (prev >= 92) return prev;
+        const baseStep = prev < 24 ? 6.8 : prev < 56 ? 3.6 : prev < 78 ? 1.8 : 0.9;
+        const jitter = prev < 78 ? Math.random() : Math.random() * 0.35;
+        return Math.min(92, prev + baseStep + jitter);
+      });
+    }, 110);
   };
 
   useEffect(() => {
     if (!pendingStepScrollRef.current) return;
     pendingStepScrollRef.current = false;
     const frame = window.requestAnimationFrame(() => {
-      scrollFormIntoView();
+      forceScannerViewportTop(420);
     });
-    return () => window.cancelAnimationFrame(frame);
+    const timeoutId = window.setTimeout(() => {
+      forceScannerViewportTop(420);
+    }, 180);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeoutId);
+    };
   }, [journeyStep]);
 
   useEffect(() => {
@@ -297,9 +352,26 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   }, [matching]);
 
   useEffect(() => {
+    const clamped = Math.max(0, Math.min(100, overlayProgress));
+    const idx = Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.floor((clamped / 100) * SCAN_OVERLAY_STEPS.length));
+    setOverlayStepIndex((prev) => (prev === idx ? prev : idx));
+  }, [overlayProgress]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayProgressTimerRef.current !== null) {
+        window.clearInterval(overlayProgressTimerRef.current);
+        overlayProgressTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     document.body.classList.toggle('scanner-overlay-open', matching);
+    document.documentElement.classList.toggle('scanner-overlay-open', matching);
     return () => {
       document.body.classList.remove('scanner-overlay-open');
+      document.documentElement.classList.remove('scanner-overlay-open');
     };
   }, [matching]);
 
@@ -370,6 +442,11 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
     });
 
     return filtered.sort((a, b) => {
+      if (sortMode === 'coverage') {
+        const coverageDelta = coverageScore(b) - coverageScore(a);
+        if (coverageDelta !== 0) return coverageDelta;
+      }
+
       if (sortMode === 'deadline') {
         return toTimestampOrMax(a.deadlineDate) - toTimestampOrMax(b.deadlineDate);
       }
@@ -478,40 +555,69 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
     scrollScannerViewportToTop('auto');
     await wait(40);
     setMatching(true);
+    setOverlayProgress(8);
+    setOverlayStepIndex(0);
+    startOverlayProgressLoop();
     setError(null);
     setNearMissItems([]);
-    const startedAt = Date.now();
-    const minOverlayMs = 5600;
+    let shouldScrollResults = false;
 
     try {
       await saveProfile();
+      setOverlayProgress((prev) => Math.max(prev, 30));
       await apiRequest('/api/v1/matching/run', 'POST', null, {});
+      setOverlayProgress((prev) => Math.max(prev, 64));
       const latest = await apiRequest<MatchLatestResponse>('/api/v1/matching/latest', 'GET');
 
+      stopOverlayProgressLoop();
       setMatchItems(latest.items);
       setNearMissItems(latest.nearMisses ?? []);
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 120);
+      setOverlayProgress(100);
+      setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
+      await wait(180);
+      shouldScrollResults = true;
     } catch (err) {
+      stopOverlayProgressLoop();
+      setOverlayProgress(100);
+      setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
+      await wait(140);
       setError((err as Error).message || 'Errore durante la ricerca');
     } finally {
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < minOverlayMs) {
-        await wait(minOverlayMs - elapsed);
-      }
+      stopOverlayProgressLoop();
       setMatching(false);
+      if (shouldScrollResults) {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        });
+      }
     }
   };
 
   const goToStep = (step: JourneyStep, options?: { scroll?: boolean }) => {
     if (step === 2 && !stepOneReady) return;
+    const shouldScroll = options?.scroll ?? true;
+    if (shouldScroll) {
+      forceScannerViewportTop(420);
+    }
     if (step === journeyStep) {
-      if (options?.scroll ?? true) scheduleFormScroll();
+      if (shouldScroll) scheduleFormScroll();
       return;
     }
-    pendingStepScrollRef.current = options?.scroll ?? true;
+    pendingStepScrollRef.current = shouldScroll;
     setJourneyStep(step);
+    if (shouldScroll) {
+      window.requestAnimationFrame(() => {
+        forceScannerViewportTop(420);
+      });
+      window.setTimeout(() => {
+        forceScannerViewportTop(420);
+      }, 120);
+      window.setTimeout(() => {
+        forceScannerViewportTop(420);
+      }, 260);
+    }
   };
 
   const setBusinessMode = (businessExists: boolean) => {
@@ -926,6 +1032,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value as SortMode)}
             >
+              <option value="coverage">Più fondo perduto</option>
               <option value="fit">Più adatti</option>
               <option value="deadline">Scadenza più vicina</option>
               <option value="budget">Importo più alto</option>
@@ -972,7 +1079,12 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
         ) : null}
       </section>
 
-      <FullScreenScannerOverlay open={matching} />
+      <FullScreenScannerOverlay
+        open={matching}
+        progress={overlayProgress}
+        activeStepIndex={overlayStepIndex}
+        currentStepLabel={SCAN_OVERLAY_STEPS[overlayStepIndex] ?? SCAN_OVERLAY_STEPS[0]}
+      />
     </div>
   );
 }

@@ -1,48 +1,71 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export function FullScreenScannerOverlayPro({ open }: { open: boolean }) {
-  const steps = useMemo(
-    () => [
-      'Scansione fonti ufficiali nazionali',
-      'Scansione fonti regionali e Camere di Commercio',
-      'Scansione fonti locali e territoriali',
-      'Verifica requisiti obbligatori del tuo profilo',
-      'Ranking finale e priorità dei bandi migliori',
-    ],
-    [],
-  );
+export const SCAN_OVERLAY_STEPS = [
+  'Scansione fonti ufficiali nazionali',
+  'Scansione fonti regionali e Camere di Commercio',
+  'Scansione fonti locali e territoriali',
+  'Verifica requisiti obbligatori del tuo profilo',
+  'Ranking finale e priorità dei bandi migliori',
+] as const;
+
+type FullScreenScannerOverlayProProps = {
+  open: boolean;
+  progress?: number;
+  activeStepIndex?: number;
+  currentStepLabel?: string;
+};
+
+const clampProgress = (value: number) => Math.max(0, Math.min(100, value));
+const toStepFromProgress = (value: number) =>
+  Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.floor((clampProgress(value) / 100) * SCAN_OVERLAY_STEPS.length));
+
+export function FullScreenScannerOverlayPro({
+  open,
+  progress,
+  activeStepIndex,
+  currentStepLabel,
+}: FullScreenScannerOverlayProProps) {
+  const isControlled = progress !== undefined || activeStepIndex !== undefined || currentStepLabel !== undefined;
 
   const minDurationMs = 5600;
-  const [idx, setIdx] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const [internalIdx, setInternalIdx] = useState(0);
+  const [internalProgress, setInternalProgress] = useState(0);
   const startAtRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || isControlled) return;
     startAtRef.current = Date.now();
-    setIdx(0);
-    setProgress(0);
+    setInternalIdx(0);
+    setInternalProgress(0);
 
     const progressId = setInterval(() => {
       const elapsed = Date.now() - startAtRef.current;
       const next = Math.max(0, Math.min(100, (elapsed / minDurationMs) * 100));
-      setProgress(next);
-      const stepIndex = Math.min(steps.length - 1, Math.floor((next / 100) * steps.length));
-      setIdx(stepIndex);
+      setInternalProgress(next);
+      const stepIndex = Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.floor((next / 100) * SCAN_OVERLAY_STEPS.length));
+      setInternalIdx(stepIndex);
     }, 90);
 
     return () => {
       clearInterval(progressId);
     };
-  }, [open, steps.length]);
+  }, [open, isControlled]);
 
   if (!open) return null;
 
+  const safeProgress = isControlled
+    ? clampProgress(progress ?? (activeStepIndex !== undefined ? ((activeStepIndex + 1) / SCAN_OVERLAY_STEPS.length) * 100 : 0))
+    : internalProgress;
+  const safeStepIndex = isControlled
+    ? Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.max(0, activeStepIndex ?? toStepFromProgress(safeProgress)))
+    : internalIdx;
+  const activeLabel = currentStepLabel ?? SCAN_OVERLAY_STEPS[safeStepIndex] ?? SCAN_OVERLAY_STEPS[0];
+
   const stepStatus = (stepIndex: number): 'done' | 'active' | 'pending' => {
-    if (stepIndex < idx) return 'done';
-    if (stepIndex === idx) return 'active';
+    if (stepIndex < safeStepIndex) return 'done';
+    if (stepIndex === safeStepIndex) return 'active';
     return 'pending';
   };
 
@@ -79,7 +102,7 @@ export function FullScreenScannerOverlayPro({ open }: { open: boolean }) {
         </header>
 
         <div className="scan-step-list">
-          {steps.map((step, stepIndex) => {
+          {SCAN_OVERLAY_STEPS.map((step, stepIndex) => {
             const status = stepStatus(stepIndex);
             const statusLabel = status === 'done' ? 'OK' : status === 'active' ? 'In corso' : 'Attesa';
             return (
@@ -93,12 +116,12 @@ export function FullScreenScannerOverlayPro({ open }: { open: boolean }) {
 
         <div className="scan-foot">
           <div className="scan-progress-wrap" aria-hidden="true">
-            <span className="scan-progress-bar" style={{ width: `${progress}%` }} />
+            <span className="scan-progress-bar" style={{ width: `${safeProgress}%` }} />
           </div>
-          <span className="scan-progress-label">{Math.round(progress)}%</span>
+          <span className="scan-progress-label">{Math.round(safeProgress)}%</span>
         </div>
 
-        <div className="scan-sub">Fase in corso: {steps[idx] ?? steps[0]}</div>
+        <div className="scan-sub">Fase in corso: {activeLabel}</div>
       </div>
     </div>
   );

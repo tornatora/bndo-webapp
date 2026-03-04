@@ -326,6 +326,92 @@ function formatCoverageLabel(min: number | null, max: number | null): string | n
   return resolved !== null ? `${resolved.toLocaleString('it-IT')}%` : null;
 }
 
+function parsePercentValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.min(100, value));
+  }
+  if (typeof value === 'string') {
+    const match = value.match(/(\d+(?:[.,]\d+)?)/);
+    if (!match) return null;
+    const parsed = Number(match[1].replace(',', '.'));
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(0, Math.min(100, parsed));
+  }
+  return null;
+}
+
+function coveragePriorityFromResult(result: ScanResult): number {
+  const economic = result.economicOffer && typeof result.economicOffer === 'object' ? result.economicOffer : null;
+  if (economic) {
+    const directValues = [parsePercentValue(economic.estimatedCoverageMinPercent), parsePercentValue(economic.estimatedCoverageMaxPercent)]
+      .filter((value): value is number => value !== null)
+      .map((value) => Math.max(0, Math.min(100, value)));
+    if (directValues.length) return Math.max(...directValues);
+  }
+
+  const labels: string[] = [];
+  if (economic && typeof economic.displayCoverageLabel === 'string' && economic.displayCoverageLabel.trim()) {
+    labels.push(economic.displayCoverageLabel.trim());
+  }
+  if (economic && typeof economic.estimatedCoverageLabel === 'string' && economic.estimatedCoverageLabel.trim()) {
+    labels.push(economic.estimatedCoverageLabel.trim());
+  }
+  if (typeof result.aidIntensity === 'string' && result.aidIntensity.trim()) {
+    labels.push(result.aidIntensity.trim());
+  }
+
+  let best = 0;
+  for (const label of labels) {
+    const range = extractCoverageRangeFromText(label);
+    const candidate = range.max ?? range.min ?? 0;
+    if (candidate > best) best = candidate;
+  }
+
+  return Math.max(0, Math.min(100, best));
+}
+
+function availabilityPriority(status: ScanResult['availabilityStatus']): number {
+  if (status === 'open') return 0;
+  if (status === 'incoming') return 1;
+  return 2;
+}
+
+function hardStatusPriority(status: ScanResult['hardStatus']): number {
+  if (status === 'eligible') return 0;
+  if (status === 'unknown') return 1;
+  return 2;
+}
+
+function sortCandidatesForDisplay(candidates: Candidate[], pinnedStrategicTitles: string[] = []): Candidate[] {
+  const pinnedNorm = pinnedStrategicTitles.map((entry) => normalizeForMatch(entry)).filter(Boolean);
+  const isPinned = (result: ScanResult) => {
+    if (!pinnedNorm.length) return false;
+    const titleNorm = normalizeForMatch(result.title);
+    return pinnedNorm.some((pinned) => titleNorm.includes(pinned));
+  };
+
+  return [...candidates].sort((a, b) => {
+    const aPinned = isPinned(a.result);
+    const bPinned = isPinned(b.result);
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+
+    const availabilityDelta = availabilityPriority(a.result.availabilityStatus) - availabilityPriority(b.result.availabilityStatus);
+    if (availabilityDelta !== 0) return availabilityDelta;
+
+    const hardDelta = hardStatusPriority(a.result.hardStatus) - hardStatusPriority(b.result.hardStatus);
+    if (hardDelta !== 0) return hardDelta;
+
+    const coverageDelta = coveragePriorityFromResult(b.result) - coveragePriorityFromResult(a.result);
+    if (coverageDelta !== 0) return coverageDelta;
+
+    if (a.result.score !== b.result.score) return b.result.score - a.result.score;
+
+    const at = a.result.deadlineAt ? new Date(a.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
+    const bt = b.result.deadlineAt ? new Date(b.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
+    return at - bt;
+  });
+}
+
 function extractGrantRangeFromSentence(sentence: string): { min: number | null; max: number | null } | null {
   const normalized = normalizeForMatch(sentence);
   if (
@@ -1103,11 +1189,12 @@ async function scanViaScannerApi(args: {
     };
   };
 
-  const mapped: Candidate[] = (latest.items ?? [])
+  const mappedAll: Candidate[] = (latest.items ?? [])
     .filter((item) => item.hardStatus !== 'not_eligible')
     .map((item) => toCandidate(item))
     .filter((entry): entry is Candidate => Boolean(entry))
-    .slice(0, limit);
+    ;
+  const mapped = sortCandidatesForDisplay(mappedAll).slice(0, limit);
 
   const nearMisses: Candidate[] = (latest.nearMisses ?? [])
     .filter((item) => item.hardStatus === 'not_eligible')
@@ -3876,17 +3963,7 @@ export async function POST(req: Request) {
     }
 
     const candidates: Candidate[] = [...candidateMap.values()];
-    const sortByRelevance = (a: Candidate, b: Candidate) => {
-      const aPinned = pinnedStrategicTitles.some((pinned) => normalizeForMatch(a.result.title).includes(pinned));
-      const bPinned = pinnedStrategicTitles.some((pinned) => normalizeForMatch(b.result.title).includes(pinned));
-      if (aPinned !== bPinned) return aPinned ? -1 : 1;
-      if (a.result.score !== b.result.score) return b.result.score - a.result.score;
-      const at = a.result.deadlineAt ? new Date(a.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
-      const bt = b.result.deadlineAt ? new Date(b.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
-      return at - bt;
-    };
-
-    const sorted = [...candidates].sort(sortByRelevance);
+    const sorted = sortCandidatesForDisplay(candidates, pinnedStrategicTitles);
 
     const qualityThreshold = 0.56;
     const pickFrom = (pool: Candidate[]) => {
