@@ -2083,6 +2083,41 @@ function computeStrategicSignal(args: {
     return { ok: true, boost, reasons: reasons.slice(0, 2) };
   }
 
+  if (
+    hints.includes('seal of excellence') ||
+    hints.includes('edih') ||
+    hints.includes('tef ') ||
+    hints.includes('tef ai matters') ||
+    hints.includes('ai matters') ||
+    hints.includes('ai-pact') ||
+    hints.includes('ai pact') ||
+    hints.includes('innovation hub')
+  ) {
+    if (businessExists === false) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (!digitalAssessmentHint) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.06;
+    const reasons: string[] = [];
+
+    if (businessExists === true) {
+      boost += 0.14;
+      reasons.push('Servizio rivolto a imprese già attive');
+    }
+    if (digitalAssessmentHint) {
+      boost += 0.18;
+      reasons.push('Coerente con assessment e servizi di digitalizzazione');
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.04;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
   if (hints.includes('nuove imprese a tasso zero') || hints.includes('oltre nuove imprese')) {
     if (businessExists === true) {
       return { ok: false, boost: 0, reasons: [] };
@@ -3754,6 +3789,14 @@ export async function POST(req: Request) {
       contributionPrefInfo.kind === 'fondo_perduto'
     ) {
       pinnedStrategicTitles.push('resto al sud');
+    }
+    if (
+      businessExists === false &&
+      /(digit|ict|software|saas|ai|intelligenza artificiale|startup innovativ|innovazion|ricerca|tecnolog)/.test(
+        normalizeForMatch([sector, fundingGoal, activityType].filter(Boolean).join(' ')),
+      )
+    ) {
+      pinnedStrategicTitles.push('smart start');
     }
 
     const candidateMap = new Map<string, Candidate>();
