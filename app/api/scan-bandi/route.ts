@@ -3766,6 +3766,7 @@ export async function POST(req: Request) {
 
     const pinnedStrategicTitles: string[] = [];
     const employmentNorm = normalizeForMatch(employmentStatus ?? '');
+    const profileSignalNorm = normalizeForMatch([sector, fundingGoal, activityType].filter(Boolean).join(' '));
     if (
       businessExists === false &&
       userRegionCanonical &&
@@ -3792,11 +3793,53 @@ export async function POST(req: Request) {
     }
     if (
       businessExists === false &&
-      /(digit|ict|software|saas|ai|intelligenza artificiale|startup innovativ|innovazion|ricerca|tecnolog)/.test(
-        normalizeForMatch([sector, fundingGoal, activityType].filter(Boolean).join(' ')),
-      )
+      /(digit|ict|software|saas|ai|intelligenza artificiale|startup innovativ|innovazion|ricerca|tecnolog)/.test(profileSignalNorm)
     ) {
       pinnedStrategicTitles.push('smart start');
+    }
+    if (
+      businessExists === true &&
+      /(assessment|audit|maturita digitale|maturita tecnologica|check up digitale|diagnosi digitale|roadmap digitale|orientamento digitale|trasformazione digitale)/.test(
+        profileSignalNorm,
+      )
+    ) {
+      pinnedStrategicTitles.push('pidnext');
+    }
+    if (
+      businessExists === true &&
+      userRegionCanonical === 'Lombardia' &&
+      /(digital export|mercati globali|mercati esteri|internazionalizzazione|marketplace|marketing digitale|lead generation|canali digitali|sito multilingua|ecommerce|analisi dei dati|intelligenza artificiale|ai commerciale)/.test(
+        profileSignalNorm,
+      )
+    ) {
+      pinnedStrategicTitles.push('bando connessi');
+    }
+    if (
+      businessExists === true &&
+      userRegionCanonical === 'Calabria' &&
+      /(efficientamento energetic|risparmio energetic|transizione energetic|consumi energetic|fotovolta|solare|autoconsum|rinnovabil|riduzione emission|ricicl|mobilita sostenibile|energia pulita)/.test(
+        profileSignalNorm,
+      )
+    ) {
+      pinnedStrategicTitles.push('sostenibilita e risparmio energetico');
+    }
+    if (
+      businessExists === false &&
+      userRegionCanonical === 'Lombardia' &&
+      /alimentari|generi di prima necessita|negozio alimentare|minimarket|commercio al dettaglio|piccolo comune|piccoli comuni|frazione|frazioni/.test(
+        profileSignalNorm,
+      )
+    ) {
+      pinnedStrategicTitles.push('nuova impresa');
+    }
+    if (businessExists === true && userRegionCanonical === 'Lombardia' && /museo|musei|museale|spazi espositivi/.test(profileSignalNorm)) {
+      pinnedStrategicTitles.push('musei d impresa');
+    }
+    if (businessExists === true && /macchinari|beni strumentali|attrezzature|impianti|industria 4 0/.test(profileSignalNorm)) {
+      pinnedStrategicTitles.push('nuova sabatini');
+    }
+    if (businessExists === true && userRegionCanonical === 'Emilia-Romagna' && /fiera|fiere|stand|internazionalizzazione|buyer|b2b/.test(profileSignalNorm)) {
+      pinnedStrategicTitles.push('cciaa bologna');
     }
 
     const candidateMap = new Map<string, Candidate>();
