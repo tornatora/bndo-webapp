@@ -158,6 +158,28 @@ const cases = [
     },
   },
   {
+    id: 'agri-existing-sicilia',
+    expectIncludes: ['Nuova Sabatini'],
+    expectMustNotInclude: ['Resto al Sud', 'FUSESE', 'Nuove imprese a tasso zero'],
+    payload: {
+      userProfile: {
+        region: 'Sicilia',
+        businessExists: true,
+        activityType: 'PMI',
+        legalForm: 'SRL',
+        sector: 'agricoltura',
+        fundingGoal: 'Ammodernare un impresa agricola con nuovi macchinari e irrigazione efficiente',
+        contributionPreference: 'fondo perduto',
+        revenueOrBudgetEUR: 120000,
+        requestedContributionEUR: 60000,
+      },
+      mode: 'fast',
+      channel: 'chat',
+      strictness: 'high',
+      limit: 8,
+    },
+  },
+  {
     id: 'pidnext-assessment-digitale',
     expectFirst: 'PIDNEXT',
     expectAmount: 'Fino a € 2.883',

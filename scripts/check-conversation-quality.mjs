@@ -51,12 +51,14 @@ async function run() {
     'Sono un giovane under35 calabrese, cerco fondo perduto',
     'Voglio aprire una nuova attività imprenditoriale',
   ]);
-  const demonymLast = demonymReplies[demonymReplies.length - 1];
-  const demonymText = String(demonymLast.assistantText ?? '').toLowerCase();
+  const demonymFirst = demonymReplies[0];
+  const demonymText = String(demonymFirst?.assistantText ?? '').toLowerCase();
   assert(
     demonymText.includes('calabria') && (demonymText.includes('vuoi avviare') || demonymText.includes('in un altra regione')),
     'demonym flow should ask contextual region confirmation',
   );
+  const demonymSecond = demonymReplies[1];
+  assert(demonymSecond?.nextQuestionField !== 'location', 'demonym flow should not ask location repeatedly');
 
   const profileReplies = await runFlow([
     'ciao',

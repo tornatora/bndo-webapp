@@ -5115,6 +5115,16 @@ export async function POST(req: Request) {
           ? {
               rejectedByGate,
               activeCaseIds: caseProfileResolution.activeCaseIds,
+              profileSignals: {
+                region: normalizedProfile.region,
+                businessExists: normalizedProfile.businessExists,
+                sector: normalizedProfile.sector,
+                activityType: normalizedProfile.activityType,
+                age: normalizedProfile.age,
+                ageBand: normalizedProfile.ageBand,
+                employmentStatus: normalizedProfile.employmentStatus,
+                fundingGoal: normalizedProfile.fundingGoal,
+              },
             }
           : undefined,
     });

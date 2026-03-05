@@ -64,6 +64,7 @@ function withConversationMeta(args: {
   nextQuestionField?: NextBestField | null;
   profileCompletenessScore?: number;
   scanReadinessReason?: string;
+  questionReasonCode?: string;
 }) {
   const nextBestField: NextBestField | null =
     typeof args.nextQuestionField !== 'undefined' ? args.nextQuestionField : nextBestFieldFromStep(args.step);
@@ -84,6 +85,7 @@ function withConversationMeta(args: {
     needsClarification: args.needsClarification,
     profileCompletenessScore: args.profileCompletenessScore,
     scanReadinessReason: args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
+    questionReasonCode: args.questionReasonCode ?? args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
   };
 }
 
@@ -551,7 +553,8 @@ function emptyProfile(): UserProfile {
     fundingGoal: null,
     contributionPreference: null,
     contactEmail: null,
-    contactPhone: null
+    contactPhone: null,
+    slotSource: {}
   };
 }
 
@@ -576,7 +579,8 @@ function isProfileEmpty(p: UserProfile) {
     !p.fundingGoal &&
     !p.contributionPreference &&
     !p.contactEmail &&
-    !p.contactPhone
+    !p.contactPhone &&
+    (!p.slotSource || Object.keys(p.slotSource).length === 0)
   );
 }
 
@@ -756,16 +760,26 @@ function questionForStepWithProfile(step: Step, profile: UserProfile, seed: stri
 function getNextStep(profile: UserProfile): Step {
   if (profile.locationNeedsConfirmation && profile.location?.region) return 'location';
   const readiness = isScanReadyAdaptive(profile);
+  const hasStrongCoreSignals = Boolean(
+    profile.fundingGoal?.trim() &&
+      hasBusinessContext(profile) &&
+      profile.location?.region &&
+      (profile.businessExists !== false || !needsFounderEligibilityData(profile)),
+  );
   if (readiness.missingSignals.includes('fundingGoal')) return 'fundingGoal';
   if (readiness.missingSignals.includes('businessContext')) return 'activityType';
   if (readiness.missingSignals.includes('location')) return 'location';
   if (readiness.missingSignals.includes('founderEligibility')) return 'activityType';
   if (readiness.missingSignals.includes('topicPrecision')) {
+    if (hasStrongCoreSignals && (profile.sector?.trim() || profile.budgetAnswered || profile.requestedContributionEUR !== null)) {
+      return 'ready';
+    }
     if (!profile.sector?.trim()) return 'sector';
     if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
+    if (hasStrongCoreSignals) return 'ready';
     if (!profile.contributionPreference?.trim()) return 'contributionPreference';
     if (!profile.atecoAnswered) return 'ateco';
-    return 'fundingGoal';
+    return 'ready';
   }
   return 'ready';
 }
@@ -884,14 +898,18 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   if (!n) return null;
 
   if (
-    /(da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
+    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
       n
     )
   ) {
     return false;
   }
 
-  if (/(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|ho gia un attivita|ho partita iva)/.test(n)) {
+  if (
+    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola)/.test(
+      n,
+    )
+  ) {
     return true;
   }
 
@@ -1028,10 +1046,15 @@ function messageMentionsBudget(message: string) {
 function parseRegionAndMunicipality(message: string): { region: string | null; municipality: string | null } {
   const cleaned = message.trim();
   const norm = normalizeForMatch(cleaned);
-  const regionHit =
+  const regionSignal = detectRegionSignal(cleaned);
+  const explicitRegionHit =
     IT_REGIONS.find((r) => normalizeForMatch(r) === norm) ??
     IT_REGIONS.find((r) => normalizeForMatch(r).includes(norm) || norm.includes(normalizeForMatch(r))) ??
-    detectRegionByDemonym(cleaned) ??
+    (regionSignal?.source === 'explicit' ? regionSignal.region : null);
+  const demonymRegion = detectRegionByDemonym(cleaned);
+  const regionHit =
+    explicitRegionHit ??
+    demonymRegion ??
     null;
 
   if (cleaned.includes(',')) {
@@ -1120,6 +1143,13 @@ function parseActivityType(message: string): string | null {
     return 'Da costituire';
   }
   if (v.includes('startup')) return 'Startup';
+  if (
+    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|impresa agricola|azienda agricola)/.test(
+      v,
+    )
+  ) {
+    return 'PMI';
+  }
   if (v.includes('pmi') || v.includes('piccola') || v.includes('media impresa')) return 'PMI';
   if (v.includes('srl') || v.includes('s r l') || v.includes('spa') || v.includes('s p a') || v.includes('snc') || v.includes('s a s')) return 'PMI';
   if (v.includes('professionista') || v.includes('libero professionista') || v.includes('partita iva')) return 'Professionista';
@@ -1136,30 +1166,35 @@ function extractSectorFromMessage(message: string): string | null {
 
   const n = normalizeForMatch(raw);
   const known = [
-    'turismo',
-    'ristorazione',
-    'commercio',
-    'manifattura',
-    'artigianato',
-    'edilizia',
-    'agricoltura',
-    'pesca',
-    'logistica',
-    'trasporti',
-    'ict',
-    'software',
-    'servizi',
-    'sanita',
-    'formazione',
-    'cultura',
-    'energia',
-    'moda',
-    'design'
+    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola'] },
+    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b'] },
+    { sector: 'ristorazione', hints: ['ristorazione', 'ristorante', 'bar', 'pizzeria', 'food'] },
+    { sector: 'commercio', hints: ['commercio', 'negozio', 'retail', 'ecommerce', 'e commerce'] },
+    { sector: 'manifattura', hints: ['manifattura', 'industria', 'produzione', 'fabbrica'] },
+    { sector: 'artigianato', hints: ['artigianato', 'artigiano', 'bottega'] },
+    { sector: 'edilizia', hints: ['edilizia', 'edile', 'costruzioni', 'cantiere'] },
+    { sector: 'pesca', hints: ['pesca', 'ittico', 'acquacoltura'] },
+    { sector: 'logistica', hints: ['logistica', 'magazzino', 'supply chain'] },
+    { sector: 'trasporti', hints: ['trasporti', 'autotrasporto', 'mobilita'] },
+    { sector: 'ICT', hints: ['ict', 'software', 'saas', 'digitale', 'ai', 'intelligenza artificiale', 'cybersecurity'] },
+    { sector: 'servizi', hints: ['servizi', 'consulenza', 'professionale'] },
+    { sector: 'sanita', hints: ['sanita', 'sanitario', 'medico', 'healthcare'] },
+    { sector: 'formazione', hints: ['formazione', 'didattica', 'academy'] },
+    { sector: 'cultura', hints: ['cultura', 'museo', 'museale', 'spettacolo'] },
+    { sector: 'energia', hints: ['energia', 'energetico', 'fotovoltaico', 'rinnovabile', 'efficientamento'] },
+    { sector: 'moda', hints: ['moda', 'fashion', 'abbigliamento'] },
+    { sector: 'design', hints: ['design', 'arredo', 'interior'] },
   ];
-  for (const k of known) {
-    if (` ${n} `.includes(` ${k} `)) return k.toUpperCase() === 'ICT' ? 'ICT' : k;
+  for (const entry of known) {
+    if (entry.hints.some((hint) => ` ${n} `.includes(` ${normalizeForMatch(hint)} `))) return entry.sector;
   }
   return null;
+}
+
+function isAffirmativeConfirmation(message: string): boolean {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  return /\b(si|sì|ok|confermo|esatto|corretto|va bene|proprio li|proprio li)\b/.test(n);
 }
 
 function extractFundingGoalFromMessage(message: string): string | null {
@@ -1184,6 +1219,14 @@ function extractFundingGoalFromMessage(message: string): string | null {
   const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
   if (!cleaned) return null;
   return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+}
+
+function hasConcreteObjectiveSignal(message: string): boolean {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  return /\b(finanz|invest|acquist|realizz|svilupp|ammodern|digitalizz|ristruttur|espander|assunz|aprire|avviare|avvio|apertura|startup|autoimpiego|fotovolta|macchinar|software|ecommerce|export|internazionalizz)\b/.test(
+    n,
+  );
 }
 
 function isQuestionLike(message: string) {
@@ -1504,8 +1547,12 @@ function mergeProfile(base: UserProfile, updates: Partial<UserProfile>): UserPro
   if (updates.location) {
     next.location = { ...base.location, ...updates.location };
   }
+  if (updates.slotSource) {
+    next.slotSource = { ...(base.slotSource ?? {}), ...(updates.slotSource ?? {}) };
+  }
   // Ensure nested objects exist.
   if (!next.location) next.location = { region: null, municipality: null };
+  if (!next.slotSource) next.slotSource = {};
   return next;
 }
 
@@ -1547,7 +1594,12 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
       profile: {
         ...profile,
         activityType: normalizedActivity,
-        businessExists: inferredBusinessExists ?? profile.businessExists
+        businessExists: inferredBusinessExists ?? profile.businessExists,
+        slotSource: {
+          ...(profile.slotSource ?? {}),
+          activityType: 'explicit',
+          ...(inferredBusinessExists !== null ? { businessExists: 'inferred' as const } : {}),
+        }
       },
       error: null
     };
@@ -1555,21 +1607,55 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
 
   if (step === 'sector') {
     if (trimmed.length < 2) return { profile, error: 'Mi dici il settore con una parola o due?' };
-    return { profile: { ...profile, sector: trimmed }, error: null };
+    return { profile: { ...profile, sector: trimmed, slotSource: { ...(profile.slotSource ?? {}), sector: 'explicit' } }, error: null };
   }
 
   if (step === 'ateco') {
     const lowered = trimmed.toLowerCase();
     if (/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered)) {
       const desc = trimmed.replace(/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/gi, '').trim();
-      return { profile: { ...profile, ateco: desc || null, atecoAnswered: true }, error: null };
+      return {
+        profile: {
+          ...profile,
+          ateco: desc || null,
+          atecoAnswered: true,
+          slotSource: { ...(profile.slotSource ?? {}), ateco: desc ? 'explicit' : 'inferred' },
+        },
+        error: null,
+      };
     }
     if (trimmed.length < 2) return { profile, error: 'Mi scrivi il codice ATECO (anche 2 cifre) oppure una breve descrizione dell’attivita.' };
-    return { profile: { ...profile, ateco: trimmed, atecoAnswered: true }, error: null };
+    return {
+      profile: { ...profile, ateco: trimmed, atecoAnswered: true, slotSource: { ...(profile.slotSource ?? {}), ateco: 'explicit' } },
+      error: null,
+    };
   }
 
   if (step === 'location') {
     const loc = parseRegionAndMunicipality(trimmed);
+    if (!loc.region && profile.locationNeedsConfirmation && profile.location.region) {
+      if (isAffirmativeConfirmation(trimmed)) {
+        return {
+          profile: {
+            ...profile,
+            locationNeedsConfirmation: false,
+            slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
+          },
+          error: null,
+        };
+      }
+      const asksDifferentRegion = /\b(altro|altrove|un altra regione|altra regione|diversa regione)\b/.test(normalizeForMatch(trimmed));
+      if (!asksDifferentRegion) {
+        return {
+          profile: {
+            ...profile,
+            locationNeedsConfirmation: false,
+            slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
+          },
+          error: null,
+        };
+      }
+    }
     if (!loc.region) {
       return { profile, error: 'Mi scrivi la Regione? (es. Lombardia, Lazio, Campania)' };
     }
@@ -1578,6 +1664,7 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
         ...profile,
         location: { region: loc.region, municipality: loc.municipality },
         locationNeedsConfirmation: false,
+        slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
       },
       error: null,
     };
@@ -1586,13 +1673,21 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
   if (step === 'employees') {
     const n = parseEmployees(trimmed);
     if (n === null) return { profile, error: 'Non riesco a capire il numero dipendenti. Puoi scrivere un numero?' };
-    return { profile: { ...profile, employees: n }, error: null };
+    return { profile: { ...profile, employees: n, slotSource: { ...(profile.slotSource ?? {}), employees: 'explicit' } }, error: null };
   }
 
   if (step === 'budget') {
     const lowered = trimmed.toLowerCase();
     if (/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered)) {
-      return { profile: { ...profile, revenueOrBudgetEUR: null, budgetAnswered: true }, error: null };
+      return {
+        profile: {
+          ...profile,
+          revenueOrBudgetEUR: null,
+          budgetAnswered: true,
+          slotSource: { ...(profile.slotSource ?? {}), budget: 'explicit' },
+        },
+        error: null,
+      };
     }
 
     const n = parseBudgetEUR(trimmed);
@@ -1608,7 +1703,8 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
         ...profile,
         revenueOrBudgetEUR: n,
         requestedContributionEUR: profile.requestedContributionEUR ?? parseRequestedContributionEUR(trimmed),
-        budgetAnswered: true
+        budgetAnswered: true,
+        slotSource: { ...(profile.slotSource ?? {}), budget: 'explicit' }
       },
       error: null
     };
@@ -1616,6 +1712,7 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
 
   if (step === 'fundingGoal') {
     if (trimmed.length < 2) return { profile, error: 'Mi descrivi meglio l’obiettivo?' };
+    const hasObjectiveSignal = hasConcreteObjectiveSignal(trimmed);
     const hasOtherSignal =
       Boolean(parseActivityType(trimmed)) ||
       Boolean(detectRegionAnywhere(trimmed)) ||
@@ -1624,6 +1721,10 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
       parseEmployees(trimmed) !== null ||
       parseBudgetEUR(trimmed) !== null ||
       Boolean(parseContributionPreference(trimmed));
+
+    if (!hasObjectiveSignal && hasOtherSignal) {
+      return { profile, error: null };
+    }
 
     if (isGenericFundingGoal(trimmed)) {
       if (hasOtherSignal) return { profile, error: null };
@@ -1636,7 +1737,8 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
       profile: {
         ...profile,
         fundingGoal: trimmed,
-        businessExists: parseBusinessExistsFromMessage(trimmed) ?? profile.businessExists
+        businessExists: parseBusinessExistsFromMessage(trimmed) ?? profile.businessExists,
+        slotSource: { ...(profile.slotSource ?? {}), fundingGoal: 'explicit' }
       },
       error: null
     };
@@ -1650,7 +1752,14 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
         error: "Non mi e chiaro. Preferisci fondo perduto, agevolato, voucher, credito d'imposta o misto?"
       };
     }
-    return { profile: { ...profile, contributionPreference: pref }, error: null };
+    return {
+      profile: {
+        ...profile,
+        contributionPreference: pref,
+        slotSource: { ...(profile.slotSource ?? {}), contributionPreference: 'explicit' },
+      },
+      error: null,
+    };
   }
 
   if (step === 'contactEmail') {
@@ -1720,6 +1829,7 @@ export async function POST(req: Request) {
       if (detectedRegionSignal?.source === 'explicit') {
         extracted.locationNeedsConfirmation = false;
       }
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), location: detectedRegionSignal?.source === 'demonym' ? 'demonym' : 'explicit' };
     }
     const detectedAteco = extractAtecoFromMessage(trimmed);
     const atecoMentioned = normalizeForMatch(trimmed).includes('ateco');
@@ -1727,22 +1837,37 @@ export async function POST(req: Request) {
     if (detectedAteco && (session.step === 'ateco' || atecoMentioned || hasDottedAtecoPattern)) {
       extracted.ateco = detectedAteco;
       extracted.atecoAnswered = true;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), ateco: atecoMentioned ? 'explicit' : 'inferred' };
     }
     const detectedActivity = parseActivityType(trimmed);
-    if (detectedActivity && (session.step === 'activityType' || !session.userProfile.activityType)) extracted.activityType = detectedActivity;
+    if (detectedActivity && (session.step === 'activityType' || !session.userProfile.activityType)) {
+      extracted.activityType = detectedActivity;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), activityType: 'inferred' };
+    }
     const detectedBusinessExists = parseBusinessExistsFromMessage(trimmed);
-    if (detectedBusinessExists !== null) extracted.businessExists = detectedBusinessExists;
+    if (detectedBusinessExists !== null) {
+      extracted.businessExists = detectedBusinessExists;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), businessExists: 'inferred' };
+    }
     const detectedAge = parseAge(trimmed);
-    if (detectedAge !== null) extracted.age = detectedAge;
+    if (detectedAge !== null) {
+      extracted.age = detectedAge;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), age: 'explicit' };
+    }
     const detectedAgeBand = parseAgeBand(trimmed);
-    if (detectedAgeBand) extracted.ageBand = detectedAgeBand;
+    if (detectedAgeBand) {
+      extracted.ageBand = detectedAgeBand;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), ageBand: 'inferred' };
+    }
     const detectedEmployment = parseEmploymentStatus(trimmed);
     if (detectedEmployment && (session.step === 'activityType' || !session.userProfile.employmentStatus)) {
       extracted.employmentStatus = detectedEmployment;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), employmentStatus: 'inferred' };
     }
     const detectedLegalForm = parseLegalForm(trimmed);
     if (detectedLegalForm && (session.step === 'activityType' || !session.userProfile.legalForm)) {
       extracted.legalForm = detectedLegalForm;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), legalForm: 'inferred' };
     }
     const detectedEmployees = parseEmployees(trimmed);
     if (
@@ -1750,6 +1875,7 @@ export async function POST(req: Request) {
       (session.step === 'employees' || (session.userProfile.employees === null && messageMentionsEmployees(trimmed)))
     ) {
       extracted.employees = detectedEmployees;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), employees: 'explicit' };
     }
     const detectedBudget = parseBudgetEUR(trimmed);
     if (
@@ -1758,6 +1884,7 @@ export async function POST(req: Request) {
     ) {
       extracted.revenueOrBudgetEUR = detectedBudget;
       extracted.budgetAnswered = true;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), budget: 'explicit' };
     }
     const detectedRequestedContribution = parseRequestedContributionEUR(trimmed);
     if (
@@ -1765,10 +1892,12 @@ export async function POST(req: Request) {
       (session.step === 'budget' || session.userProfile.requestedContributionEUR === null)
     ) {
       extracted.requestedContributionEUR = detectedRequestedContribution;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), requestedContributionEUR: 'explicit' };
     }
     const detectedPref = parseContributionPreference(trimmed);
     if (detectedPref && (session.step === 'contributionPreference' || !session.userProfile.contributionPreference)) {
       extracted.contributionPreference = detectedPref;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), contributionPreference: 'explicit' };
     }
     const detectedEmail = parseEmail(trimmed);
     if (detectedEmail) extracted.contactEmail = detectedEmail;
@@ -1776,14 +1905,21 @@ export async function POST(req: Request) {
     if (detectedPhone) extracted.contactPhone = detectedPhone;
 
     const detectedSector = extractSectorFromMessage(trimmed);
-    if (detectedSector && (session.step === 'sector' || !session.userProfile.sector)) extracted.sector = detectedSector;
+    if (detectedSector && (session.step === 'sector' || !session.userProfile.sector)) {
+      extracted.sector = detectedSector;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), sector: 'inferred' };
+    }
 
     const detectedGoal = extractFundingGoalFromMessage(trimmed);
-    if (detectedGoal && (session.step === 'fundingGoal' || !session.userProfile.fundingGoal)) extracted.fundingGoal = detectedGoal;
+    if (detectedGoal && (session.step === 'fundingGoal' || !session.userProfile.fundingGoal)) {
+      extracted.fundingGoal = detectedGoal;
+      extracted.slotSource = { ...(extracted.slotSource ?? {}), fundingGoal: 'inferred' };
+    }
 
     let profile = mergeProfile(session.userProfile, extracted);
     if (profile.age !== null) {
       profile.ageBand = profile.age <= 35 ? 'under35' : 'over35';
+      profile.slotSource = { ...(profile.slotSource ?? {}), ageBand: profile.slotSource?.ageBand ?? 'inferred' };
     }
     const extractedChanged = getChangedFields(session.userProfile, profile);
     let profileProgressedThisTurn = extractedChanged.length > 0;
@@ -2001,12 +2137,18 @@ export async function POST(req: Request) {
     // Apply the message as an answer to the expected step (when it makes sense).
     const shouldTreatAsStepAnswer = !hasQaAnswer && !smallTalk && !proceedToMatching; // if we are answering a question or user is just greeting, don't treat it as a strict step answer
     if (shouldTreatAsStepAnswer) {
+      const locationConfirmationReply =
+        session.step === 'location' &&
+        Boolean(profile.locationNeedsConfirmation && profile.location.region) &&
+        (isAffirmativeConfirmation(trimmed) || !/\b(altro|altrove|un altra regione|altra regione|diversa regione)\b/.test(normalizeForMatch(trimmed)));
       // Only validate/consume the step if the relevant field is still missing.
       const shouldConsumeStep =
         (session.step === 'activityType' && !profile.activityType) ||
         (session.step === 'sector' && !profile.sector) ||
         (session.step === 'ateco' && !profile.atecoAnswered) ||
-        (session.step === 'location' && (!profile.location.region || profile.locationNeedsConfirmation) && Boolean(detectedRegion)) ||
+        (session.step === 'location' &&
+          (!profile.location.region || profile.locationNeedsConfirmation) &&
+          (Boolean(detectedRegion) || locationConfirmationReply)) ||
         (session.step === 'employees' && profile.employees === null) ||
         (session.step === 'fundingGoal' && !profile.fundingGoal) ||
         (session.step === 'budget' && !profile.budgetAnswered) ||

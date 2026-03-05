@@ -34,13 +34,14 @@ async function sendMessage(message, state) {
 
 async function run() {
   const demonymState = { cookie: null };
-  await sendMessage('Sono un giovane under35 calabrese, cerco fondo perduto', demonymState);
-  const demonymReply = await sendMessage('voglio aprire una nuova attività imprenditoriale', demonymState);
-  const demonymText = String(demonymReply.assistantText ?? '').toLowerCase();
+  const demonymFirstReply = await sendMessage('Sono un giovane under35 calabrese, cerco fondo perduto', demonymState);
+  const demonymText = String(demonymFirstReply.assistantText ?? '').toLowerCase();
   assert(
     demonymText.includes('calabria') && (demonymText.includes('vuoi avviare') || demonymText.includes('altra regione')),
     'demonym readiness flow should ask contextual location confirmation',
   );
+  const demonymSecondReply = await sendMessage('voglio aprire una nuova attività imprenditoriale', demonymState);
+  assert(demonymSecondReply.nextQuestionField !== 'location', 'demonym flow should ask location confirmation only once');
 
   const genericState = { cookie: null };
   await sendMessage('ciao', genericState);

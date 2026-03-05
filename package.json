@@ -18,7 +18,9 @@
     "smoke:v2": "bash scripts/smoke-v2.sh",
     "scanner:cases": "node scripts/check-scanner-real-cases.mjs",
     "conversation:readiness": "node scripts/check-conversation-readiness.mjs",
-    "conversation:quality": "node scripts/check-conversation-quality.mjs"
+    "conversation:quality": "node scripts/check-conversation-quality.mjs",
+    "conversation:intent-cases": "node scripts/check-conversation-intent-cases.mjs",
+    "stress:safe": "node scripts/stress-safe.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.5.2",

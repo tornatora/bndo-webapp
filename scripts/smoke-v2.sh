@@ -37,6 +37,8 @@ curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'co
 curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"avvio attivita artigianale"}' >/dev/null
 curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"da costituire"}' >/dev/null
 curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"Calabria"}' >/dev/null
+curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"ho 27 anni"}' >/dev/null
+curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"sono disoccupato"}' >/dev/null
 curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"50000"}' >/dev/null
 curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"test@example.com"}' >/dev/null
 handoff_final="$(curl -sS -c "$tmpjar2" -b "$tmpjar2" -X POST "$BASE_URL/api/conversation" -H 'content-type: application/json' -d '{"message":"+39 333 1234567"}')"

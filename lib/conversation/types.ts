@@ -26,6 +26,25 @@ export type UserProfile = {
   contributionPreference: ContributionPreference | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  slotSource?: Partial<
+    Record<
+      | 'activityType'
+      | 'businessExists'
+      | 'sector'
+      | 'ateco'
+      | 'location'
+      | 'age'
+      | 'ageBand'
+      | 'employmentStatus'
+      | 'legalForm'
+      | 'employees'
+      | 'budget'
+      | 'requestedContributionEUR'
+      | 'fundingGoal'
+      | 'contributionPreference',
+      'explicit' | 'demonym' | 'inferred'
+    >
+  >;
 };
 
 export type Step =
@@ -58,6 +77,7 @@ export type ConversationResponseMeta = {
   nextQuestionField?: NextBestField | null;
   profileCompletenessScore?: number;
   scanReadinessReason?: ScanReadinessReason;
+  questionReasonCode?: ScanReadinessReason;
 };
 
 export type ProfileFieldMemory = {
