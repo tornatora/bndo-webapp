@@ -865,6 +865,7 @@ body.scanner-overlay-open {
 
 .chat-view-pane {
   min-height: calc(var(--app-height) - var(--topbar-h));
+  contain: none;
 }
 
 .chat-landing {
@@ -2656,6 +2657,22 @@ body.scanner-overlay-open {
     left: 0 !important;
     right: 0 !important;
   }
+
+  html.keyboard-open .composer-dock,
+  body.keyboard-open .composer-dock {
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+
+  html.keyboard-open .chatgpt-messages,
+  body.keyboard-open .chatgpt-messages {
+    padding-bottom: calc(var(--composer-h) + 24px);
+  }
+
+  html.keyboard-open .chat-bottom-anchor,
+  body.keyboard-open .chat-bottom-anchor {
+    scroll-margin-bottom: calc(var(--composer-h) + 20px);
+  }
 }
 
 .composer-input:disabled {
@@ -3386,6 +3403,17 @@ body {
   .composer-send {
     width: 42px;
     height: 42px;
+  }
+
+  html.keyboard-open .composer-dock,
+  body.keyboard-open .composer-dock {
+    padding-top: 4px;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom));
+  }
+
+  html.keyboard-open .chatgpt-messages,
+  body.keyboard-open .chatgpt-messages {
+    padding-bottom: calc(var(--composer-h) + 18px);
   }
 
   .landing-title-top {

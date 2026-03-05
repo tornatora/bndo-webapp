@@ -130,6 +130,62 @@ function stripRepeatedAssistantIntro(text: string) {
   return text.replace(intro, '').trim();
 }
 
+function tokenizeForSimilarity(value: string) {
+  return normalizeForMatch(value)
+    .split(' ')
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
+}
+
+function isEchoSentence(sentence: string, userMessage: string) {
+  const sNorm = normalizeForMatch(sentence);
+  const uNorm = normalizeForMatch(userMessage);
+  if (!sNorm || !uNorm) return false;
+  if (sNorm === uNorm) return true;
+
+  const echoPrefixes = [
+    'hai scritto',
+    'mi hai detto',
+    'ok hai scritto',
+    'perfetto hai scritto',
+    'stai cercando',
+    'quindi cerchi',
+    'ho capito che'
+  ];
+  if (echoPrefixes.some((prefix) => sNorm.startsWith(prefix))) return true;
+
+  if (uNorm.length >= 18 && sNorm.includes(uNorm)) return true;
+
+  const userTokens = new Set(tokenizeForSimilarity(userMessage));
+  const sentenceTokens = tokenizeForSimilarity(sentence);
+  if (!userTokens.size || !sentenceTokens.length) return false;
+
+  const overlapCount = sentenceTokens.filter((token) => userTokens.has(token)).length;
+  const overlapRatio = overlapCount / sentenceTokens.length;
+  if (overlapRatio >= 0.78 && sentenceTokens.length <= Math.max(8, userTokens.size + 2)) return true;
+  if (overlapCount >= 3 && overlapRatio >= 0.3 && sentenceTokens.length <= 14) return true;
+
+  return false;
+}
+
+function stripUserEchoFromReply(reply: string, userMessage: string) {
+  if (!reply || !userMessage) return reply;
+  const sentences = reply
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!sentences.length) return reply;
+
+  const filtered = sentences.filter((sentence, index) => {
+    const echo = isEchoSentence(sentence, userMessage);
+    if (!echo) return true;
+    // Remove echo sentences, especially at the beginning where they feel robotic.
+    return index > 0 && sentence.length > 90;
+  });
+  if (!filtered.length) return reply;
+  return filtered.join(' ').trim();
+}
+
 function enforceQaModeReply(text: string) {
   const n0 = normalizeForMatch(text);
   if (n0.includes('dimmi pure la domanda') || n0.includes('dimmi pure la prima domanda')) return text.trim();
@@ -509,6 +565,19 @@ function needsFounderEligibilityData(profile: UserProfile) {
   return profile.businessExists === false && (profile.age === null || !profile.employmentStatus);
 }
 
+function hasBusinessContext(profile: UserProfile) {
+  return Boolean(profile.activityType?.trim()) || profile.businessExists !== null;
+}
+
+function isScanReadyEarly(profile: UserProfile) {
+  if (!profile.fundingGoal?.trim()) return false;
+  if (!profile.location?.region?.trim()) return false;
+  if (!hasBusinessContext(profile)) return false;
+  if (!hasTopicSignal(profile)) return false;
+  if (profile.businessExists === false && needsFounderEligibilityData(profile)) return false;
+  return true;
+}
+
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
   if (step === 'activityType' && profile.businessExists === null) {
     return attempt >= 2
@@ -573,6 +642,14 @@ function writeSessionCookie(session: Session) {
     path: '/',
     maxAge: COOKIE_MAX_AGE_SECONDS
   });
+}
+
+function hasCriticalRecapDelta(prev: UserProfile, next: UserProfile) {
+  if (normalizeForMatch(prev.location?.region ?? '') !== normalizeForMatch(next.location?.region ?? '')) return true;
+  if ((prev.businessExists ?? null) !== (next.businessExists ?? null)) return true;
+  if ((prev.age ?? null) !== (next.age ?? null)) return true;
+  if (normalizeForMatch(prev.employmentStatus ?? '') !== normalizeForMatch(next.employmentStatus ?? '')) return true;
+  return false;
 }
 
 function parseEmployees(message: string): number | null {
@@ -1256,7 +1333,7 @@ function computeScanHash(profile: UserProfile) {
 }
 
 function isScanReady(profile: UserProfile) {
-  return getNextStep(profile) === 'ready';
+  return isScanReadyEarly(profile);
 }
 
 function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
@@ -1764,7 +1841,8 @@ export async function POST(req: Request) {
     const seed = `${trimmed}:${JSON.stringify(profile)}`;
     const askedCounts = session.askedCounts ?? {};
     const attempt = (askedCounts[nextStep] ?? 0) + 1;
-    const recap = profileRecap(profile);
+    const shouldEmitRecap = shouldScanNow || hasCriticalRecapDelta(session.userProfile, profile);
+    const recap = shouldEmitRecap ? profileRecap(profile) : null;
     const questionHint = shouldScanNow ? null : questionForStepWithProfile(nextStep, profile, seed, attempt);
     const assistantCore = (() => {
       if (shouldScanNow) {
@@ -1921,9 +1999,10 @@ export async function POST(req: Request) {
     }
 
     const candidateAssistantText = cleanupAssistantText(rawAssistantText);
+    const antiEchoAssistantText = stripUserEchoFromReply(candidateAssistantText, trimmed);
     const dedupedAssistantText = repetition.tooSimilar
-      ? `${candidateAssistantText}\n\n${naturalBridgeQuestion(nextStep, attempt + 1) ?? questionForStepWithProfile(nextStep, profile, seed, attempt + 1)}`
-      : candidateAssistantText;
+      ? `${antiEchoAssistantText}\n\n${naturalBridgeQuestion(nextStep, attempt + 1) ?? questionForStepWithProfile(nextStep, profile, seed, attempt + 1)}`
+      : antiEchoAssistantText;
     const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
     let qaShapedAssistantText =
       llmQaMode && !proceedToMatching && !shouldScanNow ? enforceQaModeReply(dedupedAssistantText) : dedupedAssistantText;

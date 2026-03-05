@@ -193,6 +193,10 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const [rotateIdx, setRotateIdx] = useState(1);
   const [fitScale, setFitScale] = useState(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail'>(resolvedInitialView);
   const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail', boolean>>({
@@ -208,16 +212,25 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const overlayProgressTimerRef = useRef<number | null>(null);
   const lockAutoBottomScrollRef = useRef(false);
   const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const focusLockTimerRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
 
     const root = document.documentElement;
+    const body = document.body;
     const viewport = window.visualViewport;
 
     const syncViewportHeight = () => {
       const next = Math.round(viewport?.height ?? window.innerHeight);
       root.style.setProperty('--app-height', `${next}px`);
+
+      const mobile = window.matchMedia('(max-width: 899px)').matches;
+      const keyboardLikely = mobile && window.innerHeight - next > 120;
+      setIsMobileViewport(mobile);
+      setIsKeyboardOpen(keyboardLikely);
+      root.classList.toggle('keyboard-open', keyboardLikely);
+      body.classList.toggle('keyboard-open', keyboardLikely);
     };
 
     syncViewportHeight();
@@ -231,6 +244,8 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       window.removeEventListener('orientationchange', syncViewportHeight);
       viewport?.removeEventListener('resize', syncViewportHeight);
       viewport?.removeEventListener('scroll', syncViewportHeight);
+      root.classList.remove('keyboard-open');
+      body.classList.remove('keyboard-open');
     };
   }, []);
 
@@ -321,7 +336,19 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   useEffect(() => {
     return () => {
       stopOverlayProgressLoop();
+      if (focusLockTimerRef.current !== null) {
+        window.clearTimeout(focusLockTimerRef.current);
+        focusLockTimerRef.current = null;
+      }
     };
+  }, []);
+
+  const blurComposerInput = useCallback(() => {
+    setInputBlurSignal((prev) => prev + 1);
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+      active.blur();
+    }
   }, []);
 
   function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
@@ -354,19 +381,29 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     }
 
     lockAutoBottomScrollRef.current = true;
+    if (isMobileViewport || isKeyboardOpen || isComposerFocused) {
+      blurComposerInput();
+    }
+
     const raf = requestAnimationFrame(() => {
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      requestAnimationFrame(() => {
+        node.scrollIntoView({ behavior: isMobileViewport ? 'auto' : 'smooth', block: 'start' });
+      });
     });
-    const unlockTimer = window.setTimeout(() => {
+    focusLockTimerRef.current = window.setTimeout(() => {
       lockAutoBottomScrollRef.current = false;
       setFocusResultMessageId((current) => (current === focusResultMessageId ? null : current));
-    }, 700);
+      focusLockTimerRef.current = null;
+    }, 1500);
 
     return () => {
       cancelAnimationFrame(raf);
-      window.clearTimeout(unlockTimer);
+      if (focusLockTimerRef.current !== null) {
+        window.clearTimeout(focusLockTimerRef.current);
+        focusLockTimerRef.current = null;
+      }
     };
-  }, [focusResultMessageId, messages.length, view]);
+  }, [blurComposerInput, focusResultMessageId, isComposerFocused, isKeyboardOpen, isMobileViewport, messages.length, view]);
 
   useLayoutEffect(() => {
     if (view !== 'chat') return;
@@ -460,6 +497,9 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
 
     const upsertScanMessages = (payload: ScanResponse) => {
       lockAutoBottomScrollRef.current = true;
+      if (isMobileViewport || isKeyboardOpen || isComposerFocused) {
+        blurComposerInput();
+      }
       setMessages((prev) => {
         const withoutCurrentScan = prev.filter((entry) => !(('scanToken' in entry ? entry.scanToken : null) === scanToken));
         const next: ChatMessage[] = [
@@ -503,6 +543,9 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     };
 
     setIsScanning(true);
+    if (isMobileViewport || isKeyboardOpen || isComposerFocused) {
+      blurComposerInput();
+    }
     setScanOverlayProgress(8);
     setScanOverlayStepIndex(0);
     startOverlayProgressLoop();
@@ -817,6 +860,9 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                   disabled={isTyping || isScanning}
                   onSend={onSend}
                   onReset={resetConversation}
+                  focusMode={isMobileViewport ? 'manual' : 'desktop'}
+                  blurSignal={inputBlurSignal}
+                  onComposerFocusChange={setIsComposerFocused}
                 />
               </div>
             </div>
