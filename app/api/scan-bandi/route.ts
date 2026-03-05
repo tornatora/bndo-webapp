@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { readBandiCache, readBundledBandiSeed } from '@/lib/bandiCache';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import { STRATEGIC_SCANNER_DOCS } from '@/lib/strategicScannerDocs';
+import { normalizeProfileInput } from '@/lib/matching/profileNormalizer';
+import {
+  applyEconomicThresholdFilter,
+  computeDynamicAmountThreshold,
+  computeEconomicReliability,
+  sanitizeUnreliableEconomicLabels,
+} from '@/lib/matching/economicReliability';
+import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { buildRefineQuestionV3 } from '@/lib/matching/refineQuestion';
+import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
+import { evaluateHardEligibility } from '@/lib/matching/hardEligibility';
 
 export const runtime = 'nodejs';
 
@@ -131,6 +141,7 @@ type ScanResult = {
   hardStatus?: 'eligible' | 'unknown' | 'not_eligible';
   whyFit?: string[] | null;
   missingRequirements?: string[] | null;
+  bookingUrl?: string | null;
 };
 
 type Candidate = {
@@ -167,6 +178,98 @@ type IncentiviDoc = {
   url?: string;
   score?: number;
 };
+
+let localDocsLookupPromise: Promise<Map<string, IncentiviDoc>> | null = null;
+
+function strategicDocToIncentiviDoc(rawDoc: unknown): IncentiviDoc {
+  const doc = (rawDoc ?? {}) as Record<string, unknown>;
+  return {
+    id: (typeof doc.id === 'string' || typeof doc.id === 'number') ? doc.id : undefined,
+    title: typeof doc.title === 'string' ? doc.title : undefined,
+    description: typeof doc.description === 'string' ? doc.description : undefined,
+    authorityName: typeof doc.authorityName === 'string' ? doc.authorityName : undefined,
+    openDate: typeof doc.openDate === 'string' ? doc.openDate : undefined,
+    closeDate: typeof doc.closeDate === 'string' ? doc.closeDate : undefined,
+    regions:
+      Array.isArray(doc.regions) ? doc.regions.map((entry) => String(entry)) : typeof doc.regions === 'string' ? doc.regions : undefined,
+    sectors:
+      Array.isArray(doc.sectors) ? doc.sectors.map((entry) => String(entry)) : typeof doc.sectors === 'string' ? doc.sectors : undefined,
+    beneficiaries:
+      Array.isArray(doc.beneficiaries)
+        ? doc.beneficiaries.map((entry) => String(entry))
+        : typeof doc.beneficiaries === 'string'
+          ? doc.beneficiaries
+          : undefined,
+    dimensions:
+      Array.isArray(doc.dimensions)
+        ? doc.dimensions.map((entry) => String(entry))
+        : typeof doc.dimensions === 'string'
+          ? doc.dimensions
+          : undefined,
+    purposes:
+      Array.isArray(doc.purposes) ? doc.purposes.map((entry) => String(entry)) : typeof doc.purposes === 'string' ? doc.purposes : undefined,
+    supportForm:
+      Array.isArray(doc.supportForm)
+        ? doc.supportForm.map((entry) => String(entry))
+        : typeof doc.supportForm === 'string'
+          ? doc.supportForm
+          : undefined,
+    ateco: Array.isArray(doc.ateco) ? doc.ateco.map((entry) => String(entry)) : typeof doc.ateco === 'string' ? doc.ateco : undefined,
+    costMin: doc.costMin as string | number | undefined,
+    costMax: doc.costMax as string | number | undefined,
+    grantMin: doc.grantMin as string | number | undefined,
+    grantMax: doc.grantMax as string | number | undefined,
+    coverageMinPercent: doc.coverageMinPercent as string | number | undefined,
+    coverageMaxPercent: doc.coverageMaxPercent as string | number | undefined,
+    displayAmountLabel: typeof doc.displayAmountLabel === 'string' ? doc.displayAmountLabel : undefined,
+    displayProjectAmountLabel: typeof doc.displayProjectAmountLabel === 'string' ? doc.displayProjectAmountLabel : undefined,
+    displayCoverageLabel: typeof doc.displayCoverageLabel === 'string' ? doc.displayCoverageLabel : undefined,
+    institutionalLink: typeof doc.institutionalLink === 'string' ? doc.institutionalLink : undefined,
+    url: typeof doc.url === 'string' ? doc.url : undefined,
+    score: typeof doc.score === 'number' ? doc.score : undefined,
+  };
+}
+
+function grantIdLookupKeys(grantId: string): string[] {
+  const trimmed = String(grantId || '').trim();
+  if (!trimmed) return [];
+  const raw = trimmed.replace(/^incentivi-/i, '').trim();
+  const keys = new Set<string>([trimmed, raw]);
+  if (raw && /^\d+$/.test(raw)) keys.add(`incentivi-${raw}`);
+  return Array.from(keys).filter(Boolean);
+}
+
+function docLookupKeys(doc: IncentiviDoc): string[] {
+  const id = String(doc.id ?? '').trim();
+  if (!id) return [];
+  const keys = new Set<string>([id, `incentivi-${id}`]);
+  return Array.from(keys);
+}
+
+async function getLocalDocsLookup(): Promise<Map<string, IncentiviDoc>> {
+  if (!localDocsLookupPromise) {
+    localDocsLookupPromise = (async () => {
+      const hybrid = await loadHybridDatasetDocs();
+      const docs = hybrid.docs.length > 0 ? hybrid.docs : STRATEGIC_SCANNER_DOCS.map(strategicDocToIncentiviDoc);
+      const lookup = new Map<string, IncentiviDoc>();
+      for (const doc of docs) {
+        for (const key of docLookupKeys(doc)) {
+          if (!lookup.has(key)) lookup.set(key, doc);
+        }
+      }
+      return lookup;
+    })();
+  }
+  return localDocsLookupPromise;
+}
+
+function getLocalDocByGrantId(grantId: string, lookup: Map<string, IncentiviDoc>): IncentiviDoc | null {
+  for (const key of grantIdLookupKeys(grantId)) {
+    const doc = lookup.get(key);
+    if (doc) return doc;
+  }
+  return null;
+}
 
 const SOUTH_REGION_SET = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
 const CENTER_NORTH_REGION_SET = new Set([
@@ -293,7 +396,9 @@ function extractMoneyValuesFromText(text: string): number[] {
   if (!text.trim()) return [];
 
   const values = Array.from(
-    text.matchAll(/(?:€\s*)?\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?(?:\s*(?:mila|milione|milioni|mln|mld))?(?:\s*(?:euro|eur|€))?/gi),
+    text.matchAll(
+      /(?:€\s*\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d{1,3}(?:[.\s]\d{3})+(?:,\d+)?(?:\s*(?:euro|eur|€))?|\d{4,}(?:[.,]\d+)?(?:\s*(?:euro|eur|€))?|\d+(?:[.,]\d+)?\s*(?:mila|milione|milioni|mln|mld))/gi,
+    ),
   )
     .map((match) => parseMoneyValue(match[0]))
     .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
@@ -388,7 +493,62 @@ function hardStatusPriority(status: ScanResult['hardStatus']): number {
   return 2;
 }
 
-function sortCandidatesForDisplay(candidates: Candidate[], pinnedStrategicTitles: string[] = []): Candidate[] {
+const RESTO_TITLE_HINTS = ['resto al sud', 'resto al sud 2 0', 'resto al sud 2.0'];
+const FUSESE_TITLE_HINTS = ['fusese', 'fund for self employment and self entrepreneurship'];
+const ON_TITLE_HINTS = ['oltre nuove imprese a tasso zero', 'nuove imprese a tasso zero'];
+
+type ProfilePriorityRule = {
+  tokens: string[];
+  score: number;
+};
+
+function resultTitleAndSourceNorm(result: ScanResult) {
+  return normalizeForMatch([result.title, result.sourceUrl].filter(Boolean).join(' '));
+}
+
+function hasAnyHint(textNorm: string, hints: string[]) {
+  return hints.some((hint) => textNorm.includes(normalizeForMatch(hint)));
+}
+
+function isRestoResult(result: ScanResult) {
+  return hasAnyHint(resultTitleAndSourceNorm(result), RESTO_TITLE_HINTS);
+}
+
+function isFuseseResult(result: ScanResult) {
+  return hasAnyHint(resultTitleAndSourceNorm(result), FUSESE_TITLE_HINTS);
+}
+
+function isOnResult(result: ScanResult) {
+  return hasAnyHint(resultTitleAndSourceNorm(result), ON_TITLE_HINTS);
+}
+
+function southYouthStartupPriorityRules(enabled: boolean): ProfilePriorityRule[] {
+  if (!enabled) return [];
+  return [
+    { tokens: RESTO_TITLE_HINTS, score: 3 },
+    { tokens: FUSESE_TITLE_HINTS, score: 2 },
+    { tokens: ON_TITLE_HINTS, score: 1 },
+  ];
+}
+
+function profilePriorityScoreFromRules(result: ScanResult, rules: ProfilePriorityRule[]): number {
+  if (!rules.length) return 0;
+  const textNorm = resultTitleAndSourceNorm(result);
+  let best = 0;
+  for (const rule of rules) {
+    if (!rule.tokens.length) continue;
+    if (hasAnyHint(textNorm, rule.tokens) && rule.score > best) {
+      best = rule.score;
+    }
+  }
+  return best;
+}
+
+function sortCandidatesForDisplay(
+  candidates: Candidate[],
+  pinnedStrategicTitles: string[] = [],
+  profilePriorityRules: ProfilePriorityRule[] = [],
+): Candidate[] {
   const pinnedNorm = pinnedStrategicTitles.map((entry) => normalizeForMatch(entry)).filter(Boolean);
   const isPinned = (result: ScanResult) => {
     if (!pinnedNorm.length) return false;
@@ -399,13 +559,17 @@ function sortCandidatesForDisplay(candidates: Candidate[], pinnedStrategicTitles
   return [...candidates].sort((a, b) => {
     const aPinned = isPinned(a.result);
     const bPinned = isPinned(b.result);
-    if (aPinned !== bPinned) return aPinned ? -1 : 1;
-
-    const availabilityDelta = availabilityPriority(a.result.availabilityStatus) - availabilityPriority(b.result.availabilityStatus);
-    if (availabilityDelta !== 0) return availabilityDelta;
+    const aProfilePriority = profilePriorityScoreFromRules(a.result, profilePriorityRules);
+    const bProfilePriority = profilePriorityScoreFromRules(b.result, profilePriorityRules);
+    const strategicPriorityA = (aPinned ? 100 : 0) + aProfilePriority;
+    const strategicPriorityB = (bPinned ? 100 : 0) + bProfilePriority;
+    if (strategicPriorityA !== strategicPriorityB) return strategicPriorityB - strategicPriorityA;
 
     const hardDelta = hardStatusPriority(a.result.hardStatus) - hardStatusPriority(b.result.hardStatus);
     if (hardDelta !== 0) return hardDelta;
+
+    const availabilityDelta = availabilityPriority(a.result.availabilityStatus) - availabilityPriority(b.result.availabilityStatus);
+    if (availabilityDelta !== 0) return availabilityDelta;
 
     const coverageDelta = coveragePriorityFromResult(b.result) - coveragePriorityFromResult(a.result);
     if (coverageDelta !== 0) return coverageDelta;
@@ -428,7 +592,13 @@ type ChatStrictContext = {
 
 const CHAT_STRICT_STRATEGIC_TITLES = [
   'resto al sud',
+  'resto al sud 2 0',
+  'resto al sud 2.0',
+  'fusese',
+  'fund for self employment and self entrepreneurship',
   'autoimpiego centro nord',
+  'oltre nuove imprese a tasso zero',
+  'nuove imprese a tasso zero',
   'smart start',
   'nuova sabatini',
   'pidnext',
@@ -499,6 +669,301 @@ function applyChatStrictCandidateFilter(candidates: Candidate[], context: ChatSt
   const medium = candidates.filter((entry) => passesChatStrictCandidate(entry.result, context, false));
   if (medium.length > 0) return medium;
   return [];
+}
+
+function hasStrategicTitleHint(result: ScanResult) {
+  const titleNorm = normalizeForMatch(result.title);
+  return CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
+}
+
+function normalizeTitleDedupeKey(title: string): string {
+  return normalizeForMatch(title)
+    .replace(/\b(anno|edizione|misura|bando|avviso|contributi)\b/g, ' ')
+    .replace(/\b\d{4}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mergeEconomicOffer(
+  currentOffer: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const base = currentOffer && typeof currentOffer === 'object' ? currentOffer : {};
+  return { ...base, ...patch };
+}
+
+function applyStrategicResultOverrides(result: ScanResult): ScanResult {
+  const titleNorm = normalizeForMatch(result.title);
+  const sourceNorm = normalizeForMatch(result.sourceUrl ?? '');
+  const hints = `${titleNorm} ${sourceNorm}`.trim();
+
+  if (hints.includes('resto al sud')) {
+    const economicOffer = mergeEconomicOffer(result.economicOffer, {
+      costMin: 10_000,
+      costMax: 200_000,
+      displayProjectAmountLabel: 'Da € 10.000 a € 200.000',
+      displayCoverageLabel: '70% - 100%',
+      estimatedCoverageMinPercent: 70,
+      estimatedCoverageMaxPercent: 100,
+      estimatedCoverageLabel: '70% - 100%',
+    });
+    return {
+      ...result,
+      authorityName: result.authorityName || 'Invitalia',
+      aidForm: result.aidForm || 'Contributo/Fondo perduto',
+      aidIntensity: '70% - 100%',
+      economicOffer,
+    };
+  }
+
+  if (hints.includes('autoimpiego centro nord') || hints.includes('autoimpiego centro-nord')) {
+    const economicOffer = mergeEconomicOffer(result.economicOffer, {
+      costMax: 200_000,
+      displayProjectAmountLabel: 'Fino a € 200.000',
+      displayCoverageLabel: '60% - 100%',
+      estimatedCoverageMinPercent: 60,
+      estimatedCoverageMaxPercent: 100,
+      estimatedCoverageLabel: '60% - 100%',
+    });
+    return {
+      ...result,
+      authorityName: result.authorityName || 'Invitalia',
+      aidForm: result.aidForm || 'Contributo/Fondo perduto, Voucher',
+      aidIntensity: '60% - 100%',
+      economicOffer,
+    };
+  }
+
+  if (hints.includes('fusese') || hints.includes('fund for self employment and self entrepreneurship')) {
+    return {
+      ...result,
+      authorityName: result.authorityName || 'Regione Calabria',
+      aidForm: result.aidForm || 'Contributo/Fondo perduto',
+      economicOffer: mergeEconomicOffer(result.economicOffer, {}),
+    };
+  }
+
+  return result;
+}
+
+type ResultAmountFacts = {
+  grantMaxEUR: number | null;
+  projectMaxEUR: number | null;
+  referenceMaxEUR: number | null;
+};
+
+function extractAmountsFromLabel(value: unknown): number[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  return extractMoneyValuesFromText(value).filter((entry) => Number.isFinite(entry) && entry > 0);
+}
+
+function resultAmountFacts(result: ScanResult): ResultAmountFacts {
+  const economic = result.economicOffer && typeof result.economicOffer === 'object' ? result.economicOffer : null;
+
+  const grantCandidates = [
+    parseMoneyValue(economic?.grantMin),
+    parseMoneyValue(economic?.grantMax),
+    ...extractAmountsFromLabel(economic?.displayAmountLabel),
+  ].filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+
+  const projectCandidates = [
+    parseMoneyValue(economic?.costMin),
+    parseMoneyValue(economic?.costMax),
+    parseMoneyValue(result.budgetTotal),
+    ...extractAmountsFromLabel(economic?.displayProjectAmountLabel),
+  ].filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+
+  const grantMaxEUR = grantCandidates.length ? Math.max(...grantCandidates) : null;
+  const projectMaxEUR = projectCandidates.length ? Math.max(...projectCandidates) : null;
+  const fallbackFromLabels = [
+    ...extractAmountsFromLabel(economic?.displayAmountLabel),
+    ...extractAmountsFromLabel(economic?.displayProjectAmountLabel),
+  ];
+  const fallbackMax = fallbackFromLabels.length ? Math.max(...fallbackFromLabels) : null;
+  const referenceMaxEUR = grantMaxEUR ?? projectMaxEUR ?? fallbackMax;
+
+  return { grantMaxEUR, projectMaxEUR, referenceMaxEUR };
+}
+
+function hasReliableEconomicDataResult(result: ScanResult): boolean {
+  const facts = resultAmountFacts(result);
+  if (facts.grantMaxEUR !== null && facts.grantMaxEUR >= 1_000) return true;
+  if (facts.projectMaxEUR !== null && facts.projectMaxEUR >= 2_000) return true;
+  if (facts.referenceMaxEUR !== null && facts.referenceMaxEUR >= 1_000 && coveragePriorityFromResult(result) > 0) return true;
+  return false;
+}
+
+function withEconomicToVerify(result: ScanResult): ScanResult {
+  const existing = result.economicOffer && typeof result.economicOffer === 'object' ? result.economicOffer : {};
+  const aidNorm = normalizeForMatch(result.aidForm ?? '');
+  const isFondoPerduto = /(fondo perduto|contributo)/.test(aidNorm);
+  const coverageLabel = isFondoPerduto ? 'Da verificare' : '0%';
+  return {
+    ...result,
+    aidIntensity: coverageLabel,
+    economicOffer: {
+      ...existing,
+      displayAmountLabel: 'Da verificare',
+      displayProjectAmountLabel: 'Da verificare',
+      displayCoverageLabel: coverageLabel,
+      estimatedCoverageLabel: coverageLabel,
+      estimatedCoverageMinPercent: null,
+      estimatedCoverageMaxPercent: null,
+    },
+  };
+}
+
+function computeChatMinRelevantAmount(targetAmount: number | null): number {
+  if (targetAmount === null || !Number.isFinite(targetAmount) || targetAmount <= 0) return 2_000;
+  if (targetAmount >= 100_000) return 15_000;
+  if (targetAmount >= 40_000) return 8_000;
+  if (targetAmount >= 15_000) return 4_000;
+  return 2_000;
+}
+
+function hasMicroTicketIntent(context: ChatStrictContext, contributionPreference: string | null): boolean {
+  const intentNorm = normalizeForMatch([context.fundingGoal, context.sector, context.activityType, contributionPreference].filter(Boolean).join(' '));
+  if (!intentNorm) return false;
+  return /(voucher|assessment|assesment|smau|fiera|fiere|servizi brevi|audit|check up|diagnosi|roadmap|orientamento digitale)/.test(
+    intentNorm,
+  );
+}
+
+function isBusinessTargetResult(result: ScanResult): boolean {
+  const searchText = normalizeResultSearchText(result);
+  if (!isContributionFocusedText(searchText)) return false;
+  if (!isBusinessTargetText(searchText)) return false;
+
+  const nonBusinessOnly = /(borsa di studio|borse di studio|student|tirocin|inserimento lavorativo|formazione professionale)/.test(searchText);
+  const hasBusinessSignals = /(impresa|azienda|pmi|startup|autoimpiego|lavoro autonomo|professionist)/.test(searchText);
+  if (nonBusinessOnly && !hasBusinessSignals) return false;
+
+  return true;
+}
+
+function dedupeCandidatesByTitle(candidates: Candidate[]): Candidate[] {
+  const seen = new Set<string>();
+  const deduped: Candidate[] = [];
+  for (const candidate of candidates) {
+    const key = normalizeTitleDedupeKey(candidate.result.title);
+    if (!key) {
+      deduped.push(candidate);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(candidate);
+  }
+  return deduped;
+}
+
+function mergeStrategicRecallCandidates(args: {
+  base: Candidate[];
+  recall: Candidate[];
+  pinnedStrategicTitles?: string[];
+  profilePriorityRules?: ProfilePriorityRule[];
+}) {
+  const { base, recall, pinnedStrategicTitles = [], profilePriorityRules = [] } = args;
+  if (!recall.length) return base;
+
+  const mergedById = new Map<string, Candidate>();
+  for (const candidate of base) mergedById.set(candidate.result.id, candidate);
+  for (const candidate of recall) {
+    if (!mergedById.has(candidate.result.id)) {
+      mergedById.set(candidate.result.id, candidate);
+    }
+  }
+
+  return dedupeCandidatesByTitle(
+    sortCandidatesForDisplay([...mergedById.values()], pinnedStrategicTitles, profilePriorityRules),
+  );
+}
+
+function applyChatPrecisionPolicy(args: {
+  candidates: Candidate[];
+  context: ChatStrictContext;
+  contributionPreference: string | null;
+  targetAmount: number | null;
+  pinnedStrategicTitles?: string[];
+  profilePriorityRules?: ProfilePriorityRule[];
+  enforceGoal?: boolean;
+}): Candidate[] {
+  const {
+    candidates,
+    context,
+    contributionPreference,
+    targetAmount,
+    pinnedStrategicTitles = [],
+    profilePriorityRules = [],
+    enforceGoal = true,
+  } = args;
+
+  const sorted = sortCandidatesForDisplay(candidates, pinnedStrategicTitles, profilePriorityRules);
+  const normalizedProfile = normalizeProfileInput({
+    region: context.region,
+    sector: context.sector,
+    fundingGoal: context.fundingGoal,
+    activityType: context.activityType,
+    contributionPreference,
+    requestedContributionEUR: targetAmount,
+    revenueOrBudgetEUR: targetAmount,
+  });
+  const dynamicThreshold = computeDynamicAmountThreshold(normalizedProfile);
+  const allowMicroTicket = dynamicThreshold.microTicketIntent;
+  const filtered: Candidate[] = [];
+
+  for (const candidate of sorted) {
+    let result = applyStrategicResultOverrides(candidate.result);
+    const authorityTrusted = classifyAuthorityPriority(result.authorityName).trusted;
+    const strategicTitle = hasStrategicTitleHint(result);
+    if (!authorityTrusted && !strategicTitle) continue;
+    if (!isBusinessTargetResult(result)) continue;
+    if (!passesChatStrictCandidate(result, context, enforceGoal)) continue;
+    if (!computeEconomicReliability(result).reliable) {
+      result = sanitizeUnreliableEconomicLabels(result);
+    }
+
+    const amountFacts = resultAmountFacts(result);
+    const relevantAmount = amountFacts.grantMaxEUR ?? amountFacts.projectMaxEUR ?? amountFacts.referenceMaxEUR;
+    if (!allowMicroTicket) {
+      if (relevantAmount !== null && relevantAmount < dynamicThreshold.minRelevantAmount) continue;
+    }
+
+    filtered.push({ ...candidate, result });
+  }
+
+  return dedupeCandidatesByTitle(applyEconomicThresholdFilter(filtered, dynamicThreshold));
+}
+
+function filterNearMissesForChat(args: {
+  nearMisses: Candidate[];
+  context: ChatStrictContext;
+  contributionPreference: string | null;
+  targetAmount: number | null;
+  limit: number;
+  pinnedStrategicTitles?: string[];
+  profilePriorityRules?: ProfilePriorityRule[];
+}): Candidate[] {
+  const { nearMisses, context, contributionPreference, targetAmount, limit, pinnedStrategicTitles = [], profilePriorityRules = [] } = args;
+  const policy = applyChatPrecisionPolicy({
+    candidates: nearMisses,
+    context,
+    contributionPreference,
+    targetAmount,
+    pinnedStrategicTitles,
+    profilePriorityRules,
+    enforceGoal: false,
+  });
+
+  return policy
+    .filter((entry) => {
+      const probability = Math.max(
+        0,
+        Math.min(100, entry.result.probabilityScore ?? Math.round((entry.result.matchScore ?? 0) * 100)),
+      );
+      return probability >= 35 || (entry.result.matchScore ?? 0) >= 0.35;
+    })
+    .slice(0, Math.min(limit, 6));
 }
 
 function extractGrantRangeFromSentence(sentence: string): { min: number | null; max: number | null } | null {
@@ -648,6 +1113,99 @@ function resolveDocEconomicData(doc: IncentiviDoc): LocalEconomicData {
   };
 }
 
+function normalizeRange(min: number | null, max: number | null): { min: number | null; max: number | null } {
+  if (min === null && max === null) return { min: null, max: null };
+  if (min === null) return { min: max, max };
+  if (max === null) return { min, max: min };
+  return min <= max ? { min, max } : { min: max, max: min };
+}
+
+function sanitizeEconomicOfferForResult(args: {
+  grantId: string;
+  aidForm: string | null;
+  economicOffer: Record<string, unknown> | null;
+  localDoc: IncentiviDoc | null;
+}): Record<string, unknown> | null {
+  const { grantId, aidForm, economicOffer, localDoc } = args;
+  const base = economicOffer && typeof economicOffer === 'object' ? economicOffer : {};
+  const localEconomic = localDoc ? resolveDocEconomicData(localDoc).economicOffer : null;
+  const merged = localEconomic && typeof localEconomic === 'object' ? { ...base, ...localEconomic } : { ...base };
+
+  if (/incentivi-7753$/i.test(grantId)) {
+    Object.assign(merged, {
+      grantMin: 2_000,
+      grantMax: 10_000,
+      costMin: 4_000,
+      costMax: 20_000,
+      estimatedCoverageMinPercent: 50,
+      estimatedCoverageMaxPercent: 60,
+      displayAmountLabel: 'Da € 2.000 a € 10.000',
+      displayProjectAmountLabel: 'Da € 4.000 a € 20.000',
+      displayCoverageLabel: '50% - 60%',
+      estimatedCoverageLabel: '50% - 60%',
+    });
+  }
+
+  const grantRange = normalizeRange(parseMoneyValue(merged.grantMin), parseMoneyValue(merged.grantMax));
+  const costRange = normalizeRange(parseMoneyValue(merged.costMin), parseMoneyValue(merged.costMax));
+  const projectLabelRaw =
+    typeof merged.displayProjectAmountLabel === 'string' && merged.displayProjectAmountLabel.trim()
+      ? merged.displayProjectAmountLabel.trim()
+      : null;
+  const amountLabelRaw =
+    typeof merged.displayAmountLabel === 'string' && merged.displayAmountLabel.trim() ? merged.displayAmountLabel.trim() : null;
+  const coverageLabelRaw =
+    typeof merged.displayCoverageLabel === 'string' && merged.displayCoverageLabel.trim() ? merged.displayCoverageLabel.trim() : null;
+  const coverageRange = normalizeRange(
+    parsePercentValue(merged.estimatedCoverageMinPercent),
+    parsePercentValue(merged.estimatedCoverageMaxPercent),
+  );
+
+  const labelProjectMax = projectLabelRaw ? Math.max(...extractAmountsFromLabel(projectLabelRaw), 0) : 0;
+  const labelAmountMax = amountLabelRaw ? Math.max(...extractAmountsFromLabel(amountLabelRaw), 0) : 0;
+  const projectReliable =
+    (costRange.max !== null && costRange.max >= 1_000) ||
+    (costRange.min !== null && costRange.min >= 1_000) ||
+    labelProjectMax >= 1_000;
+  const amountReliable =
+    (grantRange.max !== null && grantRange.max >= 1_000) ||
+    (grantRange.min !== null && grantRange.min >= 1_000) ||
+    labelAmountMax >= 1_000;
+
+  const aidNorm = normalizeForMatch(aidForm ?? '');
+  const isFondoPerduto = /(fondo perduto|contributo)/.test(aidNorm);
+  const coverageReliable =
+    coverageRange.min !== null ||
+    coverageRange.max !== null ||
+    (typeof coverageLabelRaw === 'string' && /\d+(?:[.,]\d+)?\s*%/.test(coverageLabelRaw));
+
+  const displayProjectAmountLabel = projectReliable
+    ? projectLabelRaw || formatRange(costRange.min, costRange.max) || (amountReliable ? amountLabelRaw : null) || 'Da verificare'
+    : 'Da verificare';
+  const displayAmountLabel = amountReliable
+    ? amountLabelRaw || formatRange(grantRange.min, grantRange.max) || displayProjectAmountLabel
+    : 'Da verificare';
+  const displayCoverageLabel = isFondoPerduto
+    ? coverageReliable
+      ? coverageLabelRaw || formatCoverageLabel(coverageRange.min, coverageRange.max) || 'Da verificare'
+      : 'Da verificare'
+    : coverageLabelRaw || '0%';
+
+  return {
+    ...merged,
+    grantMin: grantRange.min,
+    grantMax: grantRange.max,
+    costMin: costRange.min,
+    costMax: costRange.max,
+    estimatedCoverageMinPercent: coverageRange.min,
+    estimatedCoverageMaxPercent: coverageRange.max,
+    displayAmountLabel,
+    displayProjectAmountLabel,
+    displayCoverageLabel,
+    estimatedCoverageLabel: displayCoverageLabel,
+  };
+}
+
 function classifyAidSupport(value: string | null | undefined): 'fondo_perduto' | 'agevolato' | 'credito' | 'voucher' | 'misto' | 'altro' {
   const norm = normalizeForMatch(value ?? '');
   if (!norm) return 'altro';
@@ -684,6 +1242,15 @@ function toAtecoCodes(raw: string | null): string[] {
     .map((entry) => entry.trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+function parseAgeBandValue(value: unknown): 'under35' | 'over35' | null {
+  if (typeof value !== 'string') return null;
+  const norm = normalizeForMatch(value);
+  if (!norm) return null;
+  if (/\bunder\s*35\b|\bu35\b|meno di 35|sotto i 35|<\s*35|giovane\b/.test(norm)) return 'under35';
+  if (/\bover\s*35\b|oltre 35|piu di 35|sopra i 35|>\s*35/.test(norm)) return 'over35';
+  return null;
 }
 
 function buildScannerProfilePayload(args: {
@@ -749,13 +1316,34 @@ function inferBusinessExists(
     [activityType, fundingGoal, cleanString(rawProfile.businessStage, 120)].filter(Boolean).join(' '),
   );
   if (!businessHints) return null;
-  if (/(da aprire|da costituire|costituend|nuova impresa|startup|avviare|autoimpiego|lavoro autonomo|libero professionista)/.test(businessHints)) {
+  if (
+    /(da aprire|da costituire|costituend|nuova impresa|startup|avviare|aprire|avvio attivita|apertura attivita|attivita imprenditorial|iniziativa imprenditorial|autoimpiego|lavoro autonomo|libero professionista)/.test(
+      businessHints,
+    )
+  ) {
     return false;
   }
   if (/(gia attiva|già attiva|esistente|impresa attiva|azienda attiva)/.test(businessHints)) {
     return true;
   }
   return null;
+}
+
+function isSouthYouthStartupProfile(args: {
+  businessExists: boolean | null;
+  region: string | null;
+  age: number | null;
+  ageBand?: 'under35' | 'over35' | null;
+  employmentStatus: string | null;
+}) {
+  const { businessExists, region, age, ageBand, employmentStatus } = args;
+  if (businessExists !== false) return false;
+  if (!region || !SOUTH_REGION_SET.has(region)) return false;
+  const youthByAge = age !== null && age >= 18 && age <= 35;
+  const youthByBand = ageBand === 'under35';
+  if (!youthByAge && !youthByBand) return false;
+  const employmentNorm = normalizeForMatch(employmentStatus ?? '');
+  return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
 }
 
 type BusinessStageMatch = { ok: boolean; score: number; matched: boolean; strict: boolean };
@@ -839,9 +1427,10 @@ function matchDemographicConstraints(args: {
   doc: IncentiviDoc;
   rawProfile: Record<string, unknown>;
   age: number | null;
+  ageBand?: 'under35' | 'over35' | null;
   employmentStatus: string | null;
 }): DemographicMatch {
-  const { doc, rawProfile, age, employmentStatus } = args;
+  const { doc, rawProfile, age, ageBand = null, employmentStatus } = args;
   const text = normalizeForMatch(
     [
       doc.title,
@@ -874,7 +1463,8 @@ function matchDemographicConstraints(args: {
   const requiresYoung = /(under 35|18 e 35|18 ai 35|18-35|18 35|giovanil|giovani)/.test(text);
   const requiresDisoccupato = /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(text);
 
-  const ageOk = requiresYoung ? age !== null && age >= 18 && age <= 35 : true;
+  const youngSignal = ageBand === 'under35' || (age !== null && age >= 18 && age <= 35);
+  const ageOk = requiresYoung ? youngSignal : true;
   const genderOk = requiresFemale ? isFemale : true;
   const employmentOk = requiresDisoccupato
     ? /(disoccupat|inoccupat|neet|senza lavoro|non occupat|working poor)/.test(employmentNorm)
@@ -898,8 +1488,13 @@ function matchGoalIntent(fundingGoal: string | null, doc: IncentiviDoc): { ok: b
   const intentTokens = new Set<string>();
   const add = (values: string[]) => values.map(normalizeForMatch).forEach((value) => intentTokens.add(value));
 
-  if (/(avvia|aprire|nuova impresa|startup|start up|autoimpiego|lavoro autonomo|libero professionista)/.test(goalNorm)) {
+  if (
+    /(avvia|aprire|nuova impresa|startup|start up|autoimpiego|lavoro autonomo|libero professionista|avvio attivita|apertura attivita|attivita imprenditorial|iniziativa imprenditorial)/.test(
+      goalNorm,
+    )
+  ) {
     add(['nuova impresa', 'startup', 'start up', 'autoimpiego', 'lavoro autonomo', 'aspiranti imprenditori', 'imprenditoria']);
+    add(['attivita imprenditoriale', 'iniziativa imprenditoriale', 'avvio attivita', 'apertura attivita']);
   }
   if (/(donna|donne|femmin|imprenditoria femminile|impresa femminile)/.test(goalNorm)) {
     add(['imprenditoria femminile', 'impresa femminile', 'donna', 'donne', 'femminile']);
@@ -1224,6 +1819,31 @@ async function scanViaScannerApi(args: {
     },
     Math.max(18_000, SCANNER_API_TIMEOUT_MS),
   );
+  const localDocsLookup = await getLocalDocsLookup().catch(() => null);
+
+  const sanitizeLatestItem = (item: ScannerLatestItem): ScannerLatestItem => {
+    const localDoc = localDocsLookup ? getLocalDocByGrantId(item.grantId, localDocsLookup) : null;
+    const sanitizedEconomic = sanitizeEconomicOfferForResult({
+      grantId: item.grantId,
+      aidForm: item.aidForm,
+      economicOffer: item.economicOffer,
+      localDoc,
+    });
+    const budgetFromEconomic = parseMoneyValue(sanitizedEconomic?.costMax) ?? parseMoneyValue(sanitizedEconomic?.grantMax);
+    const normalizedAidIntensity =
+      typeof sanitizedEconomic?.displayCoverageLabel === 'string' && sanitizedEconomic.displayCoverageLabel.trim()
+        ? sanitizedEconomic.displayCoverageLabel.trim()
+        : item.aidIntensity;
+    return {
+      ...item,
+      aidIntensity: normalizedAidIntensity,
+      economicOffer: sanitizedEconomic,
+      budgetTotal: budgetFromEconomic ?? item.budgetTotal,
+    };
+  };
+
+  const latestItems = (latest.items ?? []).map(sanitizeLatestItem);
+  const latestNearMisses = (latest.nearMisses ?? []).map(sanitizeLatestItem);
 
   const strictPreference = classifyContributionPreference(contributionPreference);
   const toCandidate = (item: ScannerLatestItem, includeNearMissHints = false): Candidate | null => {
@@ -1281,23 +1901,69 @@ async function scanViaScannerApi(args: {
     };
   };
 
-  const mappedAll: Candidate[] = (latest.items ?? [])
+  const mappedAllRaw: Candidate[] = latestItems
     .filter((item) => item.hardStatus !== 'not_eligible')
     .map((item) => toCandidate(item))
     .filter((entry): entry is Candidate => Boolean(entry));
+  const mappedAll = mappedAllRaw.map((entry) => ({ ...entry, result: applyStrategicResultOverrides(entry.result) }));
+
+  const scannerRegionCanonical = region ? canonicalizeRegion(region) : null;
+  const southYouthStartupProfile = isSouthYouthStartupProfile({
+    businessExists: scannerProfile.businessExists,
+    region: scannerRegionCanonical,
+    age: scannerProfile.age ?? null,
+    employmentStatus: scannerProfile.employmentStatus ?? null,
+  });
+  const profilePriorityRules = southYouthStartupPriorityRules(southYouthStartupProfile);
+  const pinnedStrategicTitles = southYouthStartupProfile ? ['resto al sud', 'fusese', 'oltre nuove imprese a tasso zero'] : [];
 
   const chatStrictEnabled = channel === 'chat' && strictness === 'high';
   const strictFiltered = chatStrictEnabled ? applyChatStrictCandidateFilter(mappedAll, strictContext) : mappedAll;
-  const mapped = sortCandidatesForDisplay(strictFiltered).slice(0, limit);
+  const targetAmount = scannerProfile.targetAmount ?? scannerProfile.plannedInvestment ?? null;
+  const precisionFiltered = chatStrictEnabled
+    ? applyChatPrecisionPolicy({
+        candidates: strictFiltered,
+        context: strictContext,
+        contributionPreference,
+        targetAmount,
+        pinnedStrategicTitles,
+        profilePriorityRules,
+      })
+    : strictFiltered;
+  const mappedPoolBase = chatStrictEnabled ? (precisionFiltered.length > 0 ? precisionFiltered : strictFiltered) : strictFiltered;
+  const strategicRecallPool = southYouthStartupProfile
+    ? mappedAll.filter(
+        (entry) =>
+          entry.result.hardStatus !== 'not_eligible' &&
+          (isRestoResult(entry.result) || isFuseseResult(entry.result) || isOnResult(entry.result)),
+      )
+    : [];
+  const mappedOrdered = southYouthStartupProfile
+    ? mergeStrategicRecallCandidates({
+        base: mappedPoolBase,
+        recall: strategicRecallPool,
+        pinnedStrategicTitles,
+        profilePriorityRules,
+      })
+    : dedupeCandidatesByTitle(sortCandidatesForDisplay(mappedPoolBase, pinnedStrategicTitles, profilePriorityRules));
+  const mapped = mappedOrdered.slice(0, limit);
 
-  const nearMissesRaw: Candidate[] = (latest.nearMisses ?? [])
+  const nearMissesRaw: Candidate[] = latestNearMisses
     .filter((item) => item.hardStatus === 'not_eligible')
     .map((item) => toCandidate(item, true))
     .filter((entry): entry is Candidate => Boolean(entry))
-    .slice(0, Math.min(limit, 6));
+    .map((entry) => ({ ...entry, result: applyStrategicResultOverrides(entry.result) }));
   const nearMisses = chatStrictEnabled
-    ? nearMissesRaw.filter((entry) => passesChatStrictCandidate(entry.result, strictContext, false))
-    : nearMissesRaw;
+    ? filterNearMissesForChat({
+        nearMisses: nearMissesRaw,
+        context: strictContext,
+        contributionPreference,
+        targetAmount,
+        limit,
+        pinnedStrategicTitles,
+        profilePriorityRules,
+      })
+    : nearMissesRaw.slice(0, Math.min(limit, 6));
 
   const strictMatchesFound = strictPreference.strict
     ? mapped.some((entry) => entry.contributionMatched)
@@ -1771,6 +2437,40 @@ function applyStrategicDocOverrides(
       openDate: doc.openDate || '2026-02-20T00:00:00',
       closeDate: doc.closeDate || '2026-04-16T00:00:00',
       url: doc.url || '/it/catalogo/pr-marche-fesr-20212027-intervento-1341-partecipazione-delle-imprese-alla-fiera-smau',
+    };
+  }
+
+  if (
+    (hints.includes('cosenza') && hints.includes('creazione nuove imprese')) ||
+    (hints.includes('bando creazione nuove imprese') && hints.includes('iv edizione'))
+  ) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Camera di Commercio, Industria, Artigianato e Agricoltura di Cosenza',
+      description: [
+        typeof doc.description === 'string' && doc.description.trim() ? doc.description.trim() : null,
+        "Il bando copre in parte i costi di avvio per aspiranti imprenditori e nuove imprese nella provincia di Cosenza.",
+      ]
+        .filter(Boolean)
+        .join(' '),
+      regions: mergeList(doc.regions, ['Calabria']),
+      sectors: mergeList(doc.sectors, ['Commercio', 'Servizi', 'Turismo', 'Artigianato', 'ICT', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Aspiranti imprenditori', 'Nuova impresa']),
+      purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      costMin: 4_000,
+      costMax: 20_000,
+      grantMin: 2_000,
+      grantMax: 10_000,
+      displayAmountLabel: 'Da € 2.000 a € 10.000',
+      displayProjectAmountLabel: 'Da € 4.000 a € 20.000',
+      displayCoverageLabel: '50% - 60%',
+      coverageMinPercent: 50,
+      coverageMaxPercent: 60,
+      openDate: doc.openDate || '2026-03-04T00:00:00',
+      closeDate: doc.closeDate || '2026-09-30T00:00:00',
+      url: doc.url || '/it/catalogo/cciaa-cosenza-bando-creazione-nuove-imprese-iv-edizione',
     };
   }
 
@@ -2846,13 +3546,21 @@ function buildHighSignalGoalPhrases(textNorm: string) {
       'allestimenti espositivi',
     ]);
   }
-  if (/(autoimpiego|nuova impresa|startup|start up|lavoro autonomo|libero professionista|aprire attivita|avviare attivita)/.test(textNorm)) {
+  if (
+    /(autoimpiego|nuova impresa|startup|start up|lavoro autonomo|libero professionista|aprire attivita|avviare attivita|avvio attivita|apertura attivita|attivita imprenditorial|iniziativa imprenditorial)/.test(
+      textNorm,
+    )
+  ) {
     add([
       'autoimpiego',
       'nuova impresa',
       'avvio impresa',
       'avvio di impresa',
       'nuova attivita',
+      'attivita imprenditoriale',
+      'iniziativa imprenditoriale',
+      'avvio attivita',
+      'apertura attivita',
       'lavoro autonomo',
       'libero professionista',
       'aspiranti imprenditori',
@@ -3474,7 +4182,10 @@ function prefilterDocsForFastMode(args: {
   const atecoDigits = extractAtecoDigitsFromText(ateco ?? '');
   const strategicTitleHints = [
     'resto al sud',
+    'fusese',
+    'fund for self employment and self entrepreneurship',
     'autoimpiego centro nord',
+    'oltre nuove imprese a tasso zero',
     'smart start',
     'nuova sabatini',
     'musei d impresa',
@@ -3594,6 +4305,9 @@ export async function POST(req: Request) {
     const userRegionCanonical = region ? canonicalizeRegion(region) : null;
     const employees = cleanNumber(rawProfile.employees);
     const age = cleanNumber(rawProfile.age ?? rawProfile.founderAge);
+    const ageBand =
+      parseAgeBandValue(rawProfile.ageBand ?? rawProfile.founderAgeBand) ??
+      (age !== null ? (age <= 35 ? 'under35' : 'over35') : null);
     const employmentStatus =
       cleanString(rawProfile.employmentStatus, 80) ??
       cleanString(rawProfile.occupationalStatus, 80) ??
@@ -3625,6 +4339,23 @@ export async function POST(req: Request) {
       employmentStatus,
     });
     const businessExists = scannerProfile.businessExists;
+    const normalizedProfile = normalizeProfileInput({
+      ...rawProfile,
+      region,
+      location: rawLocation ?? { region, municipality: null },
+      sector,
+      fundingGoal,
+      ateco,
+      activityType,
+      contributionPreference,
+      revenueOrBudgetEUR: budget,
+      requestedContributionEUR: requestedContribution,
+      age,
+      ageBand,
+      employmentStatus,
+      businessExists,
+    });
+    const caseProfileResolution = resolveCaseProfiles(normalizedProfile);
     const strictContext: ChatStrictContext = {
       region: userRegionCanonical,
       sector,
@@ -3632,6 +4363,8 @@ export async function POST(req: Request) {
       activityType,
       businessExists,
     };
+    const matchingVersion = process.env.MATCHING_ENGINE_V4?.trim() === 'false' ? 'v3' : 'v4';
+    const profilePriorityApplied = caseProfileResolution.activeCaseIds.length > 0;
 
     if (SCANNER_API_ENABLED && mode !== 'fast') {
       try {
@@ -3659,7 +4392,24 @@ export async function POST(req: Request) {
           resultsCount: scannerResults.length,
         });
 
-        const scannerTopPickBandoId = scannerResults[0]?.id ?? null;
+        const scannerResultsWithBooking = scannerResults.map((item) => ({
+          ...item,
+          bookingUrl: buildBookingUrl(bookingBase, {
+            bandoId: item.id,
+            region,
+            sector,
+          }),
+        }));
+        const scannerNearMissesWithBooking = scannerNearMisses.map((item) => ({
+          ...item,
+          bookingUrl: buildBookingUrl(bookingBase, {
+            bandoId: item.id,
+            region,
+            sector,
+          }),
+        }));
+
+        const scannerTopPickBandoId = scannerResultsWithBooking[0]?.id ?? null;
         const scannerBookingUrl = buildBookingUrl(bookingBase, {
           bandoId: scannerTopPickBandoId,
           region,
@@ -3682,13 +4432,22 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
           phase: 'full',
+          matchingVersion,
+          profilePriorityApplied,
           explanation: scannerExplanation,
-          results: scannerResults,
-          nearMisses: scannerNearMisses,
+          results: scannerResultsWithBooking,
+          nearMisses: scannerNearMissesWithBooking,
           qualityBand: scannerQualityBand,
           refineQuestion: scannerRefineQuestion ?? undefined,
           topPickBandoId: scannerTopPickBandoId,
           bookingUrl: scannerBookingUrl,
+          diagnostics:
+            process.env.MATCHING_DIAGNOSTICS === 'true'
+              ? {
+                  rejectedByGate: {},
+                  activeCaseIds: caseProfileResolution.activeCaseIds,
+                }
+              : undefined,
         });
       } catch (scannerError) {
         console.error('scan-bandi scanner-api fallback', {
@@ -3699,11 +4458,8 @@ export async function POST(req: Request) {
 
     let docs: IncentiviDoc[] = [];
     const loadFallbackDocs = async () => {
-      const cached = await readBandiCache<IncentiviDoc>();
-      if ((cached?.docs?.length ?? 0) > 0) return cached!.docs;
-
-      const bundled = await readBundledBandiSeed<IncentiviDoc>();
-      return bundled?.docs ?? [];
+      const snapshot = await loadHybridDatasetDocs();
+      return snapshot.docs;
     };
 
     if (mode === 'fast') {
@@ -3796,6 +4552,7 @@ export async function POST(req: Request) {
           doc,
           rawProfile,
           age,
+          ageBand,
           employmentStatus,
         });
         const goalIntentMatch = matchGoalIntent(fundingGoal, doc);
@@ -3965,8 +4722,16 @@ export async function POST(req: Request) {
             })()
           : null;
 
+        const resultId = doc.id ? `incentivi-${String(doc.id)}` : `incentivi-${Math.random().toString(16).slice(2)}`;
+        const aidForm = asStringArray(doc.supportForm).join(', ') || null;
+        const sanitizedEconomicOffer = sanitizeEconomicOfferForResult({
+          grantId: resultId,
+          aidForm,
+          economicOffer: economic.economicOffer,
+          localDoc: doc,
+        });
         const result: ScanResult = {
-          id: doc.id ? `incentivi-${String(doc.id)}` : `incentivi-${Math.random().toString(16).slice(2)}`,
+          id: resultId,
           title: doc.title ?? 'Incentivo (Incentivi.gov)',
           authorityName: doc.authorityName ?? 'Incentivi.gov',
           deadlineAt: deadline,
@@ -3976,7 +4741,7 @@ export async function POST(req: Request) {
           matchReasons: matchReasons.slice(0, 3),
           mismatchFlags: mismatchFlags.slice(0, 3),
           score: localScore,
-          grantId: doc.id ? `incentivi-${String(doc.id)}` : undefined,
+          grantId: resultId,
           grantTitle: doc.title ?? 'Incentivo (Incentivi.gov)',
           authority: doc.authorityName ?? 'Incentivi.gov',
           officialUrl: buildSourceUrl(doc),
@@ -3984,15 +4749,23 @@ export async function POST(req: Request) {
           openingDate: openDate ? openDate.toISOString() : null,
           deadlineDate: deadline,
           availabilityStatus: openDate && now.getTime() < openDate.getTime() ? 'incoming' : 'open',
-          aidForm: asStringArray(doc.supportForm).join(', ') || null,
-          aidIntensity: economic.aidIntensity,
-          budgetTotal: economic.budgetTotal,
-          economicOffer: economic.economicOffer,
+          aidForm,
+          aidIntensity:
+            typeof sanitizedEconomicOffer?.displayCoverageLabel === 'string'
+              ? String(sanitizedEconomicOffer.displayCoverageLabel)
+              : economic.aidIntensity,
+          budgetTotal: parseMoneyValue(sanitizedEconomicOffer?.costMax) ?? parseMoneyValue(sanitizedEconomicOffer?.grantMax) ?? economic.budgetTotal,
+          economicOffer: sanitizedEconomicOffer,
           probabilityScore: Math.round(localScore * 100),
           hardStatus: mismatchFlags.length === 0 ? 'eligible' : 'unknown',
           whyFit: matchReasons.slice(0, 3),
           missingRequirements: mismatchFlags.slice(0, 3),
         };
+        const hardEligibility = evaluateHardEligibility({
+          result,
+          profile: normalizedProfile,
+          strategicTitleTokens: [...CHAT_STRICT_STRATEGIC_TITLES, ...caseProfileResolution.pinnedStrategicTitles],
+        });
 
         return {
           isOpen,
@@ -4007,9 +4780,28 @@ export async function POST(req: Request) {
           strictTextOk,
           relaxedTextOk,
           contributionMatched: contribution.matched,
+          hardEligibilityPassed: hardEligibility.passed,
+          hardEligibilityDiagnostics: hardEligibility.diagnostics,
           result
         };
       });
+    const rejectedByGate = mapped.reduce<Record<string, number>>((acc, entry) => {
+      if (!entry.isOpen) acc.notOpen = (acc.notOpen ?? 0) + 1;
+      if (!entry.regionOk) acc.territory = (acc.territory ?? 0) + 1;
+      if (!entry.atecoOk) acc.ateco = (acc.ateco ?? 0) + 1;
+      if (!entry.beneficiariesOk) acc.beneficiaries = (acc.beneficiaries ?? 0) + 1;
+      if (!entry.businessStageOk) acc.businessStage = (acc.businessStage ?? 0) + 1;
+      if (!entry.demographicsOk) acc.demographics = (acc.demographics ?? 0) + 1;
+      if (!entry.goalIntentOk) acc.goalIntent = (acc.goalIntent ?? 0) + 1;
+      if (!entry.strategicOk) acc.strategic = (acc.strategic ?? 0) + 1;
+      if (!entry.hardEligibilityPassed) acc.hardEligibility = (acc.hardEligibility ?? 0) + 1;
+      for (const gate of entry.hardEligibilityDiagnostics ?? []) {
+        const key = `hard:${gate}`;
+        acc[key] = (acc[key] ?? 0) + 1;
+      }
+      if (!entry.economicReliable) acc.economicReliability = (acc.economicReliability ?? 0) + 1;
+      return acc;
+    }, {});
     const openAndRegionStrict = mapped.filter(
       (x) =>
         x.isOpen &&
@@ -4020,6 +4812,7 @@ export async function POST(req: Request) {
         x.demographicsOk &&
         x.goalIntentOk &&
         x.strategicOk &&
+        x.hardEligibilityPassed &&
         x.economicReliable,
     );
     const openAndRegion =
@@ -4034,7 +4827,8 @@ export async function POST(req: Request) {
               x.businessStageOk &&
               x.demographicsOk &&
               x.goalIntentOk &&
-              x.strategicOk,
+              x.strategicOk &&
+              x.hardEligibilityPassed,
           );
     const strictTextPool = wantsTopic ? openAndRegion.filter((x) => x.strictTextOk) : openAndRegion;
     const relaxedTextPool = wantsTopic ? openAndRegion.filter((x) => x.relaxedTextOk) : openAndRegion;
@@ -4057,32 +4851,31 @@ export async function POST(req: Request) {
             ? relaxedGoalIntentPool
             : relaxedTextPool;
 
-    const pinnedStrategicTitles: string[] = [];
+    const southYouthStartupProfile = isSouthYouthStartupProfile({
+      businessExists,
+      region: userRegionCanonical,
+      age,
+      ageBand,
+      employmentStatus,
+    });
+    const pinnedStrategicTitles: string[] = [...caseProfileResolution.pinnedStrategicTitles];
     const employmentNorm = normalizeForMatch(employmentStatus ?? '');
     const profileSignalNorm = normalizeForMatch([sector, fundingGoal, activityType].filter(Boolean).join(' '));
+    const under35Signal = (age !== null && age >= 18 && age <= 35) || ageBand === 'under35';
     if (
       businessExists === false &&
       userRegionCanonical &&
       CENTER_NORTH_REGION_SET.has(userRegionCanonical) &&
-      age !== null &&
-      age >= 18 &&
-      age <= 35 &&
+      under35Signal &&
       /(disoccupat|inoccupat|neet|gol|working poor|senza lavoro|non occupat)/.test(employmentNorm) &&
       !/(agricolt|pesca|acquacolt)/.test(normalizeForMatch(sector ?? ''))
     ) {
       pinnedStrategicTitles.push('autoimpiego centro nord');
     }
-    if (
-      businessExists === false &&
-      userRegionCanonical &&
-      SOUTH_REGION_SET.has(userRegionCanonical) &&
-      age !== null &&
-      age >= 18 &&
-      age <= 35 &&
-      /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm) &&
-      contributionPrefInfo.kind === 'fondo_perduto'
-    ) {
+    if (southYouthStartupProfile) {
       pinnedStrategicTitles.push('resto al sud');
+      pinnedStrategicTitles.push('fusese');
+      pinnedStrategicTitles.push('oltre nuove imprese a tasso zero');
     }
     if (
       businessExists === false &&
@@ -4147,6 +4940,7 @@ export async function POST(req: Request) {
       pinnedStrategicTitles.push('cciaa bologna');
     }
 
+    const pinnedStrategicTitlesUnique = Array.from(new Set(pinnedStrategicTitles));
     const candidateMap = new Map<string, Candidate>();
     for (const entry of chosenTextPool) {
       candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
@@ -4164,16 +4958,57 @@ export async function POST(req: Request) {
         continue;
       }
       const titleNorm = normalizeForMatch(entry.result.title);
-      if (!pinnedStrategicTitles.some((pinned) => titleNorm.includes(pinned))) continue;
+      if (!pinnedStrategicTitlesUnique.some((pinned) => titleNorm.includes(pinned))) continue;
       candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
     }
 
-    const candidates: Candidate[] = [...candidateMap.values()];
-    const sortedBase = sortCandidatesForDisplay(candidates, pinnedStrategicTitles);
+    const candidates: Candidate[] = [...candidateMap.values()].map((entry) => ({
+      ...entry,
+      result: applyStrategicResultOverrides(entry.result),
+    }));
+    const profilePriorityRules = [
+      ...caseProfileResolution.profilePriorityRules,
+      ...southYouthStartupPriorityRules(southYouthStartupProfile),
+    ];
+    const sortedBase = dedupeCandidatesByTitle(sortCandidatesForDisplay(candidates, pinnedStrategicTitlesUnique, profilePriorityRules));
     const chatStrictEnabled = channel === 'chat' && strictness === 'high';
-    const sorted = chatStrictEnabled ? applyChatStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
+    const strictSorted = chatStrictEnabled ? applyChatStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
+    const targetAmount = requestedContribution ?? budget ?? null;
+    const precisionSorted = chatStrictEnabled
+      ? applyChatPrecisionPolicy({
+          candidates: strictSorted,
+          context: strictContext,
+          contributionPreference,
+          targetAmount,
+          pinnedStrategicTitles: pinnedStrategicTitlesUnique,
+          profilePriorityRules,
+        })
+      : strictSorted;
+    const sortedBasePool = chatStrictEnabled ? (precisionSorted.length > 0 ? precisionSorted : strictSorted) : strictSorted;
+    const strategicRecallPool: Candidate[] = southYouthStartupProfile
+      ? mapped
+          .filter(
+            (entry) =>
+              entry.isOpen &&
+              entry.regionOk &&
+              entry.businessStageOk &&
+              entry.demographicsOk &&
+              entry.strategicOk &&
+              entry.result.hardStatus !== 'not_eligible' &&
+              (isRestoResult(entry.result) || isFuseseResult(entry.result) || isOnResult(entry.result)),
+          )
+          .map((entry) => ({ result: applyStrategicResultOverrides(entry.result), contributionMatched: entry.contributionMatched }))
+      : [];
+    const sorted = southYouthStartupProfile
+      ? mergeStrategicRecallCandidates({
+          base: sortedBasePool,
+          recall: strategicRecallPool,
+          pinnedStrategicTitles: pinnedStrategicTitlesUnique,
+          profilePriorityRules,
+        })
+      : sortedBasePool;
 
-    const qualityThreshold = 0.56;
+    const qualityThreshold = southYouthStartupProfile ? 0.35 : 0.56;
     const pickFrom = (pool: Candidate[]) => {
       return pool.filter((x) => x.result.score >= qualityThreshold).slice(0, limit);
     };
@@ -4207,8 +5042,34 @@ export async function POST(req: Request) {
       pickedCandidates = pickFrom(sorted);
     }
 
+    if (southYouthStartupProfile) {
+      const strategicFront = sorted.filter((candidate) => {
+        if (candidate.result.hardStatus === 'not_eligible') return false;
+        return isRestoResult(candidate.result) || isFuseseResult(candidate.result) || isOnResult(candidate.result);
+      });
+      if (strategicFront.length > 0) {
+        const byId = new Set<string>();
+        const merged: Candidate[] = [];
+        for (const candidate of [...strategicFront, ...pickedCandidates]) {
+          if (byId.has(candidate.result.id)) continue;
+          merged.push(candidate);
+          byId.add(candidate.result.id);
+          if (merged.length >= limit) break;
+        }
+        pickedCandidates = merged;
+      }
+    }
+
     const items = pickedCandidates.map((c) => c.result);
-    const topScore = items[0]?.matchScore ?? null;
+    const itemsWithBooking = items.map((item) => ({
+      ...item,
+      bookingUrl: buildBookingUrl(bookingBase, {
+        bandoId: item.id,
+        region,
+        sector,
+      }),
+    }));
+    const topScore = itemsWithBooking[0]?.matchScore ?? null;
     const qualityBand = qualityBandFromScore(topScore);
     const refineQuestion = buildRefineQuestion({
       region,
@@ -4221,15 +5082,18 @@ export async function POST(req: Request) {
       resultsCount: items.length
     });
 
-    const topPickBandoId = items[0]?.id ?? null;
+    const topPickBandoId = itemsWithBooking[0]?.id ?? null;
     const bookingUrl = buildBookingUrl(bookingBase, {
       bandoId: topPickBandoId,
       region,
       sector
     });
+    const refineQuestionV3 = buildRefineQuestionV3({ missingSignals: [], fallback: refineQuestion ?? null });
 
     return NextResponse.json({
       phase: mode,
+      matchingVersion,
+      profilePriorityApplied,
       explanation: buildExplanation({
         region,
         sector,
@@ -4238,14 +5102,21 @@ export async function POST(req: Request) {
         strictPreferenceLabel: contributionPrefInfo.label,
         strictPreferenceRequested: contributionPrefInfo.strict,
         strictMatchesFound,
-        resultsCount: items.length
+        resultsCount: itemsWithBooking.length
       }),
-      results: items,
+      results: itemsWithBooking,
       nearMisses: [],
       qualityBand,
-      refineQuestion: refineQuestion ?? undefined,
+      refineQuestion: refineQuestionV3 ?? undefined,
       topPickBandoId,
-      bookingUrl
+      bookingUrl,
+      diagnostics:
+        process.env.MATCHING_DIAGNOSTICS === 'true'
+          ? {
+              rejectedByGate,
+              activeCaseIds: caseProfileResolution.activeCaseIds,
+            }
+          : undefined,
     });
   } catch (e) {
     if (e instanceof z.ZodError) {

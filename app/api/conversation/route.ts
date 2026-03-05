@@ -10,6 +10,8 @@ import { composeAssistantReply } from '@/lib/conversation/responseComposer';
 import { applyTonePolicy } from '@/lib/conversation/tonePolicy';
 import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowledge/measureStatus';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
+import { normalizeProfileInput } from '@/lib/matching/profileNormalizer';
+import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import type { ContributionPreference, ConversationMode, NextBestField, Session, Step, UserProfile } from '@/lib/conversation/types';
 
@@ -17,6 +19,7 @@ export const runtime = 'nodejs';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const AI_CHAT_V2_ENABLED = process.env.AI_CHAT_V2?.trim() !== 'false';
+const CHAT_DETERMINISTIC_V3 = process.env.CHAT_DETERMINISTIC_V3?.trim() !== 'false';
 
 const COOKIE_NAME = 'bndo_assistant_session';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
@@ -58,8 +61,12 @@ function withConversationMeta(args: {
   aiSource: 'openai' | 'disabled' | 'budget' | 'error' | null;
   needsClarification: boolean;
   hasErrorPrompt?: boolean;
+  nextQuestionField?: NextBestField | null;
+  profileCompletenessScore?: number;
+  scanReadinessReason?: string;
 }) {
-  const nextBestField: NextBestField | null = nextBestFieldFromStep(args.step);
+  const nextBestField: NextBestField | null =
+    typeof args.nextQuestionField !== 'undefined' ? args.nextQuestionField : nextBestFieldFromStep(args.step);
   return {
     userProfile: args.userProfile,
     step: args.step,
@@ -67,13 +74,16 @@ function withConversationMeta(args: {
     readyToScan: args.readyToScan,
     mode: args.mode,
     nextBestField,
+    nextQuestionField: nextBestField,
     aiSource: args.aiSource,
     assistantConfidence: inferConfidence({
       aiSource: args.aiSource,
       hasErrorPrompt: args.hasErrorPrompt,
       needsClarification: args.needsClarification
     }),
-    needsClarification: args.needsClarification
+    needsClarification: args.needsClarification,
+    profileCompletenessScore: args.profileCompletenessScore,
+    scanReadinessReason: args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
   };
 }
 
@@ -226,9 +236,67 @@ function enforceQaModeReply(text: string) {
 
   const filtered = sentences.filter((s) => !hasNudge(s));
   const core = (filtered.length ? filtered : sentences).join(' ').trim();
-  if (!core || core.length < 20) return 'Dimmi pure la tua domanda e ti rispondo in modo concreto.';
+  if (!core || core.length < 20) return 'Fai pure la tua domanda, ti rispondo in modo concreto.';
   if (/[?]$/.test(core)) return core;
-  return `${core} Dimmi pure la prossima domanda.`;
+  return core;
+}
+
+function enforceConsultantDirectness(
+  text: string,
+  args: {
+    shouldScanNow: boolean;
+    questionHint: string | null;
+  },
+) {
+  const { shouldScanNow, questionHint } = args;
+  if (!text) return text;
+
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (shouldScanNow) {
+    return 'Perfetto, avvio ora lo scanner BNDO per trovare i bandi più compatibili.';
+  }
+
+  const fluffPattern =
+    /(se vuoi|quando vuoi|appena vuoi|dimmi pure la prossima domanda|posso affinare|ti aiuto subito|posso aiutarti|fammi sapere|se ti va|quando preferisci|allora|ottimo|perfetto,|in ogni caso)/i;
+
+  const compact = sentences.filter((sentence) => {
+    if (!sentence) return false;
+    if (fluffPattern.test(sentence) && !sentence.includes('?')) return false;
+    return true;
+  });
+
+  const finalSentences: string[] = [];
+  let hasQuestion = false;
+  for (const sentence of compact) {
+    const normalized = normalizeForMatch(sentence);
+    if (!normalized) continue;
+    const isQuestion = sentence.includes('?');
+    if (isQuestion && hasQuestion) continue;
+    if (isQuestion) hasQuestion = true;
+    finalSentences.push(sentence);
+    if (finalSentences.length >= 2) break;
+  }
+
+  const joinedBeforeHint = finalSentences.join(' ').trim();
+  const hasDataRequestPattern = /(dimmi|indicami|mi dai|mi dici|confermi|serve|per filtrare|per capire)/i.test(joinedBeforeHint);
+  if (!hasQuestion && questionHint && finalSentences.length < 2 && !hasDataRequestPattern) {
+    finalSentences.push(questionHint);
+    hasQuestion = questionHint.includes('?');
+  }
+
+  const joined = finalSentences.join(' ').trim();
+  if (!joined && questionHint) return questionHint;
+  if (!joined) return 'Dammi un dettaglio in più e faccio un match preciso.';
+  if (joined.length > 170) {
+    const short = joined.slice(0, 170);
+    const end = Math.max(short.lastIndexOf('.'), short.lastIndexOf('?'), short.lastIndexOf('!'));
+    return end >= 70 ? short.slice(0, end + 1).trim() : `${short.replace(/[.,;:\s]+$/g, '').trim()}.`;
+  }
+  return joined;
 }
 
 type AiGenerationResult = {
@@ -287,7 +355,8 @@ async function generateAssistantTextWithOpenAI(args: {
     '- Rispondi in italiano, tono quasi amichevole, umano e professionale.',
     '- Rispondi sempre prima alla domanda dell’utente in modo concreto e pertinente.',
     '- Usa un linguaggio da consulente senior: preciso, chiaro, pragmatico ma caldo.',
-    '- Lunghezza: 2-6 frasi, senza giri di parole.',
+    '- Lunghezza: 1-2 frasi, dirette e operative.',
+    '- Evita preamboli, filler e ripetizioni: vai subito al punto.',
     '- Mai usare markdown, simboli di elenco o formattazioni speciali.',
     '- Chiedi al massimo una sola domanda per turno.',
     '- Non ripetere domande gia risposte o appena fatte.',
@@ -307,9 +376,9 @@ async function generateAssistantTextWithOpenAI(args: {
     '- Se hai gia risposto in modo completo, puoi chiudere anche senza domanda finale.',
     avoidReply ? `- Non ripetere questa formulazione o struttura: ${JSON.stringify(avoidReply)}` : null,
     '',
-    "Se l'utente fa una richiesta conversazionale (es: 'possiamo prima parlare?'), rispondi in modo umano e rassicurante.",
+    "Se l’utente fa una richiesta conversazionale (es: 'possiamo prima parlare?'), rispondi in modo umano e rassicurante.",
     'Se l’utente scrive solo un saluto (ciao/salve) al primo messaggio, rispondi ESATTAMENTE con:',
-    "Ciao, sono il tuo assistente BNDO. Per quale motivo vorresti partecipare ad un BNDO? Hai già un'attività o devi costituirla? A cosa ti servono i fondi?"
+    "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare."
   ]
     .filter(Boolean)
     .join('\n');
@@ -386,8 +455,8 @@ async function generateAssistantTextWithOpenAI(args: {
         content: [{ type: 'input_text', text: history ? `${user}\n\nContesto recente:\n${history}` : user }]
       }
     ],
-    temperature: 0.45,
-    max_output_tokens: 260
+    temperature: 0.3,
+    max_output_tokens: 120
   } as const;
 
   try {
@@ -439,6 +508,29 @@ const IT_REGIONS = [
   'Veneto'
 ] as const;
 
+const REGION_DEMONYM_MAP: Array<{ region: (typeof IT_REGIONS)[number]; tokens: string[] }> = [
+  { region: 'Abruzzo', tokens: ['abruzzese', 'abruzzesi'] },
+  { region: 'Basilicata', tokens: ['lucano', 'lucana', 'lucani', 'lucane', 'basilicatese', 'basilicatesi'] },
+  { region: 'Calabria', tokens: ['calabrese', 'calabresi'] },
+  { region: 'Campania', tokens: ['campano', 'campana', 'campani', 'campane'] },
+  { region: 'Emilia-Romagna', tokens: ['emiliano', 'emiliana', 'emiliani', 'emiliane', 'romagnolo', 'romagnola', 'romagnoli', 'romagnole'] },
+  { region: 'Friuli-Venezia Giulia', tokens: ['friulano', 'friulana', 'friulani', 'friulane', 'giuliano', 'giuliana', 'giuliani', 'giuliane'] },
+  { region: 'Lazio', tokens: ['laziale', 'laziali'] },
+  { region: 'Liguria', tokens: ['ligure', 'liguri'] },
+  { region: 'Lombardia', tokens: ['lombardo', 'lombarda', 'lombardi', 'lombarde'] },
+  { region: 'Marche', tokens: ['marchigiano', 'marchigiana', 'marchigiani', 'marchigiane'] },
+  { region: 'Molise', tokens: ['molisano', 'molisana', 'molisani', 'molisane'] },
+  { region: 'Piemonte', tokens: ['piemontese', 'piemontesi'] },
+  { region: 'Puglia', tokens: ['pugliese', 'pugliesi'] },
+  { region: 'Sardegna', tokens: ['sardo', 'sarda', 'sardi', 'sarde'] },
+  { region: 'Sicilia', tokens: ['siciliano', 'siciliana', 'siciliani', 'siciliane'] },
+  { region: 'Toscana', tokens: ['toscano', 'toscana', 'toscani', 'toscane'] },
+  { region: 'Trentino-Alto Adige', tokens: ['trentini', 'trentino', 'altoatesino', 'altoatesina', 'sudtirolese', 'sudtirolesi'] },
+  { region: 'Umbria', tokens: ['umbro', 'umbra', 'umbri', 'umbre'] },
+  { region: "Valle d'Aosta", tokens: ['valdostano', 'valdostana', 'valdostani', 'valdostane'] },
+  { region: 'Veneto', tokens: ['veneto', 'veneta', 'veneti', 'venete'] },
+];
+
 function emptyProfile(): UserProfile {
   return {
     activityType: null,
@@ -447,7 +539,9 @@ function emptyProfile(): UserProfile {
     ateco: null,
     atecoAnswered: false,
     location: { region: null, municipality: null },
+    locationNeedsConfirmation: false,
     age: null,
+    ageBand: null,
     employmentStatus: null,
     legalForm: null,
     employees: null,
@@ -470,7 +564,9 @@ function isProfileEmpty(p: UserProfile) {
     p.atecoAnswered === false &&
     !p.location?.region &&
     !p.location?.municipality &&
+    !p.locationNeedsConfirmation &&
     p.age === null &&
+    !p.ageBand &&
     !p.employmentStatus &&
     !p.legalForm &&
     p.employees === null &&
@@ -489,6 +585,13 @@ function isGenericFundingGoal(text: string) {
   if (!n) return true;
   const words = n.split(' ').filter(Boolean);
   if (words.length <= 2) return true;
+  if (
+    /(cerco fondo perduto|cerco contribut|cerco agevolaz|voglio fondo perduto|voglio contribut|cerco un bando|voglio un bando)/.test(
+      n,
+    )
+  ) {
+    return true;
+  }
 
   const generic = [
     'bando',
@@ -537,7 +640,7 @@ function isGenericFundingGoal(text: string) {
   const hasSpecific = specific.some((s) => n.includes(s));
   if (hasSpecific) return false;
 
-  return words.length <= 6;
+  return words.length <= 12;
 }
 
 function hasTopicSignal(profile: UserProfile) {
@@ -557,28 +660,84 @@ function hasPrecisionSignal(profile: UserProfile) {
       profile.sector ||
       profile.employees !== null ||
       profile.requestedContributionEUR !== null ||
-      (profile.age !== null && Boolean(profile.employmentStatus))
+      ((profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35') &&
+        Boolean(profile.employmentStatus))
   );
 }
 
+function hasAgeSignal(profile: UserProfile) {
+  return profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35';
+}
+
 function needsFounderEligibilityData(profile: UserProfile) {
-  return profile.businessExists === false && (profile.age === null || !profile.employmentStatus);
+  return profile.businessExists === false && (!hasAgeSignal(profile) || !profile.employmentStatus);
 }
 
 function hasBusinessContext(profile: UserProfile) {
   return Boolean(profile.activityType?.trim()) || profile.businessExists !== null;
 }
 
-function isScanReadyEarly(profile: UserProfile) {
-  if (!profile.fundingGoal?.trim()) return false;
-  if (!profile.location?.region?.trim()) return false;
-  if (!hasBusinessContext(profile)) return false;
-  if (!hasTopicSignal(profile)) return false;
-  if (profile.businessExists === false && needsFounderEligibilityData(profile)) return false;
-  return true;
+const SOUTH_PRIORITY_REGIONS = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
+
+type ScanMissingSignal = 'fundingGoal' | 'location' | 'businessContext' | 'founderEligibility' | 'topicPrecision';
+type ScanAdaptiveReadiness = {
+  ready: boolean;
+  missingSignals: ScanMissingSignal[];
+  southYouthStartupPriority: boolean;
+};
+
+function isSouthYouthStartupPriorityProfile(profile: UserProfile) {
+  if (profile.businessExists !== false) return false;
+  const regionRaw = profile.location?.region?.trim() ?? '';
+  if (!regionRaw) return false;
+  const region = IT_REGIONS.find((entry) => normalizeForMatch(entry) === normalizeForMatch(regionRaw)) ?? regionRaw;
+  if (!SOUTH_PRIORITY_REGIONS.has(region)) return false;
+  const age = profile.age ?? null;
+  const youthByAge = age !== null && age >= 18 && age <= 35;
+  const youthByBand = profile.ageBand === 'under35';
+  if (!youthByAge && !youthByBand) return false;
+  const employmentNorm = normalizeForMatch(profile.employmentStatus ?? '');
+  return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
+}
+
+function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
+  const missingSignals: ScanMissingSignal[] = [];
+  const southYouthStartupPriority = isSouthYouthStartupPriorityProfile(profile);
+
+  if (!profile.fundingGoal?.trim()) missingSignals.push('fundingGoal');
+  if (!profile.location?.region?.trim() || profile.locationNeedsConfirmation) missingSignals.push('location');
+  if (!hasBusinessContext(profile)) missingSignals.push('businessContext');
+  if (profile.businessExists === false && needsFounderEligibilityData(profile)) missingSignals.push('founderEligibility');
+
+  const hasTopic = hasTopicSignal(profile);
+  const hasPrecision = hasPrecisionSignal(profile);
+  const goalText = profile.fundingGoal?.trim() ?? '';
+  const goalIsGeneric = goalText ? isGenericFundingGoal(goalText) : true;
+  if (!hasTopic || (!southYouthStartupPriority && goalIsGeneric && !hasPrecision)) {
+    missingSignals.push('topicPrecision');
+  }
+
+  return {
+    ready: missingSignals.length === 0,
+    missingSignals,
+    southYouthStartupPriority,
+  };
 }
 
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
+  if (step === 'location' && profile.locationNeedsConfirmation && profile.location?.region) {
+    return `Perfetto, ho ${profile.location.region} come riferimento. Vuoi avviare l'attività in ${profile.location.region} o in un'altra regione?`;
+  }
+
+  if (attempt >= 2) {
+    if (step === 'location') return 'Mi basta la regione (es. Calabria) e chiudo il filtro territoriale.';
+    if (step === 'sector') return 'Indicami solo il settore principale (es. turismo, commercio, digitale).';
+    if (step === 'ateco') return 'Se lo conosci, indicami il codice ATECO (anche 2 cifre).';
+    if (step === 'budget') return "Mi dai un importo indicativo dell'investimento o del contributo richiesto?";
+    if (step === 'fundingGoal') return 'Qual è la spesa principale che vuoi finanziare?';
+    if (step === 'contributionPreference') return 'Preferisci fondo perduto, finanziamento agevolato o misto?';
+  }
+
   if (step === 'activityType' && profile.businessExists === null) {
     return attempt >= 2
       ? "Per continuare mi confermi solo questo: hai gia un'attivita attiva oppure devi costituirla?"
@@ -587,36 +746,78 @@ function questionForStepWithProfile(step: Step, profile: UserProfile, seed: stri
 
   if (step === 'activityType' && needsFounderEligibilityData(profile)) {
     return attempt >= 2
-      ? "Per chiudere il check requisiti mi servono entrambi i dati: eta e stato occupazionale (occupato/disoccupato/inoccupato/neet)."
-      : "Per verificare misure come Resto al Sud 2.0 mi servono due dati: eta e stato occupazionale (occupato/disoccupato/inoccupato/neet).";
+      ? "Per chiudere il check requisiti mi servono entrambi i dati: età (o conferma under35/over35) e stato occupazionale."
+      : "Per verificare le misure corrette mi servono due dati: età (anche under35/over35) e stato occupazionale.";
   }
 
   return questionFor(step, seed, attempt);
 }
 
 function getNextStep(profile: UserProfile): Step {
-  // Collect goal first, then business stage, then territory and strict constraints.
-  if (!profile.fundingGoal) return 'fundingGoal';
-  if (!profile.activityType || profile.businessExists === null) return 'activityType';
-  if (!profile.location.region) return 'location';
-  if (needsFounderEligibilityData(profile)) return 'activityType';
-
-  const hasTopic = hasTopicSignal(profile);
-  if (!hasTopic) return 'fundingGoal';
-
-  // Ask at least one precision field before first scan.
-  if (!hasPrecisionSignal(profile)) return 'budget';
-
-  const activityTypeNorm = normalizeForMatch(profile.activityType ?? '');
-  const isToBeFounded = activityTypeNorm.includes('costitu') || activityTypeNorm.includes('avvia');
-
-  // Optional refinements (asked only if missing and user keeps the conversation going).
-  if (!profile.budgetAnswered) return 'budget';
-  if (!profile.contributionPreference) return 'contributionPreference';
-  if (!profile.atecoAnswered) return 'ateco';
-  if (!profile.sector && profile.fundingGoal && profile.fundingGoal.trim().length >= 8) return 'sector';
-  if (!isToBeFounded && profile.employees === null) return 'employees';
+  if (profile.locationNeedsConfirmation && profile.location?.region) return 'location';
+  const readiness = isScanReadyAdaptive(profile);
+  if (readiness.missingSignals.includes('fundingGoal')) return 'fundingGoal';
+  if (readiness.missingSignals.includes('businessContext')) return 'activityType';
+  if (readiness.missingSignals.includes('location')) return 'location';
+  if (readiness.missingSignals.includes('founderEligibility')) return 'activityType';
+  if (readiness.missingSignals.includes('topicPrecision')) {
+    if (!profile.sector?.trim()) return 'sector';
+    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
+    if (!profile.contributionPreference?.trim()) return 'contributionPreference';
+    if (!profile.atecoAnswered) return 'ateco';
+    return 'fundingGoal';
+  }
   return 'ready';
+}
+
+function fallbackStepAfterStall(step: Step, profile: UserProfile): Step {
+  if (step === 'activityType') {
+    if (needsFounderEligibilityData(profile)) return 'activityType';
+    if (profile.businessExists === null) {
+      if (!profile.location?.region || profile.locationNeedsConfirmation) return 'location';
+      if (!profile.fundingGoal) return 'fundingGoal';
+      if (!profile.sector) return 'sector';
+      return 'budget';
+    }
+    return 'fundingGoal';
+  }
+  if (step === 'fundingGoal') {
+    if (profile.businessExists === null) return 'activityType';
+    if (!profile.location?.region || profile.locationNeedsConfirmation) return 'location';
+    if (!profile.sector) return 'sector';
+  }
+  if (step === 'location') {
+    if (profile.businessExists === null) return 'activityType';
+    if (needsFounderEligibilityData(profile)) return 'activityType';
+    if (!profile.fundingGoal) return 'fundingGoal';
+  }
+  if (step === 'sector') {
+    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
+    if (!profile.contributionPreference) return 'contributionPreference';
+  }
+  if (step === 'budget') {
+    if (!profile.sector) return 'sector';
+    if (!profile.contributionPreference) return 'contributionPreference';
+  }
+  if (step === 'contributionPreference') {
+    if (!profile.sector) return 'sector';
+    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
+  }
+  if (step === 'ateco') {
+    if (!profile.sector) return 'sector';
+    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
+  }
+  return step;
+}
+
+function scanReadinessReasonForStep(step: Step, profile: UserProfile): string {
+  if (step === 'ready') return 'ready';
+  if (step === 'location') return 'missing:location';
+  if (step === 'fundingGoal') return 'missing:fundingGoal';
+  if (step === 'activityType') {
+    return needsFounderEligibilityData(profile) ? 'missing:founderEligibility' : 'missing:businessContext';
+  }
+  return 'missing:topicPrecision';
 }
 
 function readSessionCookie(): Session | null {
@@ -683,7 +884,7 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   if (!n) return null;
 
   if (
-    /(da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
+    /(da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
       n
     )
   ) {
@@ -707,6 +908,38 @@ function parseAge(message: string): number | null {
   const age = Number.parseInt(match[1], 10);
   if (!Number.isFinite(age) || age < 16 || age > 100) return null;
   return age;
+}
+
+function parseAgeBand(message: string): UserProfile['ageBand'] {
+  const lowered = normalizeForMatch(message);
+  if (!lowered) return null;
+  if (/\bunder\s*35\b|\bu35\b|meno di 35|sotto i 35|<\s*35|giovane\b/.test(lowered)) return 'under35';
+  if (/\bover\s*35\b|oltre 35|piu di 35|sopra i 35|>\s*35/.test(lowered)) return 'over35';
+  return null;
+}
+
+function detectRegionByDemonym(message: string): string | null {
+  const norm = normalizeForMatch(message);
+  if (!norm) return null;
+  for (const entry of REGION_DEMONYM_MAP) {
+    if (entry.tokens.some((token) => ` ${norm} `.includes(` ${normalizeForMatch(token)} `))) {
+      return entry.region;
+    }
+  }
+  return null;
+}
+
+type RegionSignal = { region: string; source: 'explicit' | 'demonym' };
+
+function detectRegionSignal(message: string): RegionSignal | null {
+  const norm = normalizeForMatch(message);
+  for (const r of IT_REGIONS) {
+    const rn = normalizeForMatch(r);
+    if (` ${norm} `.includes(` ${rn} `)) return { region: r, source: 'explicit' };
+  }
+  const demonymRegion = detectRegionByDemonym(message);
+  if (demonymRegion) return { region: demonymRegion, source: 'demonym' };
+  return null;
 }
 
 function parseEmploymentStatus(message: string): string | null {
@@ -798,6 +1031,7 @@ function parseRegionAndMunicipality(message: string): { region: string | null; m
   const regionHit =
     IT_REGIONS.find((r) => normalizeForMatch(r) === norm) ??
     IT_REGIONS.find((r) => normalizeForMatch(r).includes(norm) || norm.includes(normalizeForMatch(r))) ??
+    detectRegionByDemonym(cleaned) ??
     null;
 
   if (cleaned.includes(',')) {
@@ -815,12 +1049,7 @@ function parseRegionAndMunicipality(message: string): { region: string | null; m
 }
 
 function detectRegionAnywhere(message: string): string | null {
-  const norm = normalizeForMatch(message);
-  for (const r of IT_REGIONS) {
-    const rn = normalizeForMatch(r);
-    if (` ${norm} `.includes(` ${rn} `)) return r;
-  }
-  return null;
+  return detectRegionSignal(message)?.region ?? null;
 }
 
 function userIsStatingOwnLocation(message: string) {
@@ -836,7 +1065,8 @@ function userIsStatingOwnLocation(message: string) {
     n.includes('mi trovo in') ||
     n.includes('mi trovo a') ||
     n.includes('azienda in') ||
-    n.includes('attivita in')
+    n.includes('attivita in') ||
+    Boolean(detectRegionByDemonym(message))
   );
 }
 
@@ -878,6 +1108,10 @@ function parseActivityType(message: string): string | null {
     v.includes('devo avviare') ||
     v.includes('voglio avviare') ||
     v.includes('vorrei avviare') ||
+    v.includes('voglio aprire') ||
+    v.includes('vorrei aprire') ||
+    v.includes('sto avviando') ||
+    v.includes('sto aprendo') ||
     v.includes('avviare') ||
     v.includes('aprire attivita') ||
     v.includes('avvio attivita') ||
@@ -1120,10 +1354,7 @@ function isExplicitAnswerForStep(step: Step, message: string) {
 function genericQuestionReply(message: string) {
   const n = normalizeForMatch(message);
   if (!n || (!isQuestionLike(message) && !message.includes('?'))) return null;
-  return [
-    'Certo, domanda legittima.',
-    'Posso aiutarti a capire in modo pratico cosa conviene fare, quali misure sono adatte al tuo caso e quali errori evitare prima della domanda.'
-  ].join(' ');
+  return 'Certo. Ti rispondo in modo pratico su requisiti, tempistiche e scelta del bando più adatto al tuo caso.';
 }
 
 function getNextHandoffStep(profile: UserProfile): Step {
@@ -1170,57 +1401,31 @@ function answerFinanceQuestion(message: string): string | null {
   if (!n) return null;
 
   if (n.includes('resto al sud')) {
-    return [
-      'Resto al Sud e un incentivo pensato per avvio o rafforzamento di attivita nelle aree ammesse, con mix tra contributo e finanziamento.',
-      'La compatibilita dipende da territorio, profilo del beneficiario e tipologia di spese.',
-      'Se mi dici regione e cosa vuoi realizzare, ti faccio subito una pre-valutazione concreta.'
-    ].join('\n');
+    return 'Resto al Sud sostiene avvio o sviluppo di nuove attività nelle aree ammesse, con mix tra contributo e finanziamento. Se mi dai regione e obiettivo, ti dico subito se sei compatibile.';
   }
 
   if (n.includes('autoimpiego') || (n.includes('centro') && n.includes('nord'))) {
-    return [
-      'Autoimpiego Centro-Nord e una misura per avviare attivita nelle regioni ammesse, con requisiti specifici sul profilo del proponente.',
-      'In genere contano territorio, beneficiario, spese e coerenza del progetto.',
-      'Se mi dai regione, tipo di realta e obiettivo, ti dico subito se sei in traiettoria.'
-    ].join('\n');
+    return 'Autoimpiego Centro-Nord è una misura per nuove attività nelle regioni ammesse. Conta la coerenza tra territorio, profilo del proponente e spese previste.';
   }
 
   if (n.includes('differenza') && (n.includes('fondo perduto') || n.includes('contributo'))) {
-    return [
-      "In breve: il fondo perduto copre una parte delle spese e non si restituisce, di solito dopo rendicontazione.",
-      "Il finanziamento agevolato e un prestito con condizioni migliori rispetto al mercato.",
-      "Voucher e credito d'imposta sono strumenti piu specifici: il primo spesso su spese mirate, il secondo come compensazione fiscale."
-    ].join('\n');
+    return "Fondo perduto: quota che non restituisci. Finanziamento agevolato: prestito con condizioni migliori; voucher e credito d'imposta sono strumenti mirati su spese specifiche.";
   }
 
   if (n.includes('ateco') && (n.includes('cos') || n.includes('che') || n.includes('trovo') || n.includes('dove'))) {
-    return [
-      "Il codice ATECO identifica l'attivita economica principale.",
-      'Di solito lo trovi in visura camerale, oppure nella documentazione fiscale.',
-      "Se non lo conosci, descrivimi cosa fai e ti aiuto a orientarti sull'ATECO piu probabile."
-    ].join('\n');
+    return "Il codice ATECO identifica l'attività economica principale. Se non lo conosci, descrivimi cosa fai e ti propongo il codice più probabile.";
   }
 
   if (n.includes('de minimis')) {
-    return [
-      'Il de minimis e un tetto massimo di aiuti pubblici che puoi ricevere in un periodo, di norma su 3 esercizi finanziari.',
-      'Se un bando rientra in de minimis, devi considerare anche eventuali aiuti gia ottenuti nello stesso periodo.',
-      'Se vuoi, dimmi se hai gia ricevuto contributi negli ultimi 3 anni e in che importo.'
-    ].join('\n');
+    return 'Il de minimis è un tetto di aiuti pubblici su 3 esercizi. Per capire la tua capienza devo sapere se hai già ricevuto contributi negli ultimi 3 anni.';
   }
 
   if (n.includes('a sportello')) {
-    return [
-      'Un bando a sportello viene valutato in ordine di arrivo: conviene preparare documenti e domanda in anticipo.',
-      'Un bando a graduatoria ha una finestra di presentazione e poi una classifica: conta molto il punteggio del progetto.'
-    ].join('\n');
+    return 'A sportello: conta l’ordine di invio, quindi preparazione anticipata. A graduatoria: conta il punteggio del progetto entro una finestra temporale.';
   }
 
   if (n.includes('spese ammiss')) {
-    return [
-      'Le spese ammissibili cambiano da bando a bando, ma spesso includono investimenti, digitalizzazione, consulenze e in alcuni casi opere o personale.',
-      'Per darti una risposta precisa mi serve il nome del bando, oppure il tuo obiettivo di investimento.'
-    ].join('\n');
+    return 'Le spese ammissibili dipendono dal bando: in genere investimenti, digitalizzazione, consulenze e talvolta personale/opere. Se mi dai il nome del bando, ti rispondo in modo preciso.';
   }
 
   const hasFinanceKeywords =
@@ -1234,10 +1439,7 @@ function answerFinanceQuestion(message: string): string | null {
     n.includes('finanza') ||
     n.includes('requisit');
   if (hasFinanceKeywords && n.length >= 14) {
-    return [
-      'Dipende dal bando specifico (ente, territorio, beneficiari e spese ammissibili cambiano molto).',
-      'Se mi dici regione e cosa vuoi finanziare, posso risponderti in modo puntuale e trovare subito i bandi piu adatti.'
-    ].join('\n');
+    return 'Dipende dal bando specifico: cambiano ente, territorio, beneficiari e spese. Se mi dici regione e obiettivo, ti rispondo in modo puntuale.';
   }
 
   return null;
@@ -1259,11 +1461,7 @@ function answerMetaQuestion(message: string): string | null {
 
   if (!asksWho) return null;
 
-  return [
-    'Ti aiuto esattamente come farebbe un consulente BNDO: chiarisco dubbi su requisiti, spese ammissibili, de minimis, tempistiche e strategia di candidatura.',
-    'Poi faccio il matching con i bandi realmente compatibili con il tuo caso, spiegandoti anche perche alcuni bandi vanno esclusi.',
-    'Se vuoi partiamo dalla tua domanda, poi passiamo ai dati minimi per una valutazione precisa.'
-  ].join('\n');
+  return 'Ti aiuto come un consulente BNDO: chiarisco i dubbi e poi faccio il matching sui bandi davvero compatibili, spiegando perché gli altri vanno esclusi.';
 }
 
 function answerConversationalIntent(message: string): string | null {
@@ -1271,15 +1469,15 @@ function answerConversationalIntent(message: string): string | null {
   if (!n) return null;
 
   if (n.includes('possiamo prima parlare') || n.includes('parliamo prima') || n.includes('prima parliamo')) {
-    return "Certo, assolutamente. Facciamolo in modo semplice e pratico.";
+    return 'Certo. Partiamo dalla tua domanda e poi passiamo al matching.';
   }
 
   if (wantsQuestionsFirst(message)) {
-    return 'Assolutamente si. Dimmi pure la prima domanda e rispondo in modo concreto.';
+    return 'Certo, fai pure la prima domanda.';
   }
 
   if (n.includes('non ho capito') || n.includes('spiegami meglio') || n.includes('fammi capire')) {
-    return 'Va benissimo, ti spiego in modo chiaro passo passo.';
+    return 'Chiaro, te lo rispiego in modo semplice e diretto.';
   }
 
   if (n.includes('non so da dove iniziare') || n.includes('non so come iniziare')) {
@@ -1321,6 +1519,7 @@ function computeScanHash(profile: UserProfile) {
     region: profile.location?.region ?? null,
     municipality: profile.location?.municipality ?? null,
     age: profile.age ?? null,
+    ageBand: profile.ageBand ?? null,
     employmentStatus: profile.employmentStatus ?? null,
     legalForm: profile.legalForm ?? null,
     employees: profile.employees ?? null,
@@ -1333,7 +1532,7 @@ function computeScanHash(profile: UserProfile) {
 }
 
 function isScanReady(profile: UserProfile) {
-  return isScanReadyEarly(profile);
+  return isScanReadyAdaptive(profile).ready;
 }
 
 function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
@@ -1374,7 +1573,14 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
     if (!loc.region) {
       return { profile, error: 'Mi scrivi la Regione? (es. Lombardia, Lazio, Campania)' };
     }
-    return { profile: { ...profile, location: { region: loc.region, municipality: loc.municipality } }, error: null };
+    return {
+      profile: {
+        ...profile,
+        location: { region: loc.region, municipality: loc.municipality },
+        locationNeedsConfirmation: false,
+      },
+      error: null,
+    };
   }
 
   if (step === 'employees') {
@@ -1498,7 +1704,8 @@ export async function POST(req: Request) {
 
     // Extract high-signal fields from any message (even if it's not the expected step).
     const extracted: Partial<UserProfile> = {};
-    const detectedRegion = detectRegionAnywhere(trimmed);
+    const detectedRegionSignal = detectRegionSignal(trimmed);
+    const detectedRegion = detectedRegionSignal?.region ?? null;
     const existingRegion = session.userProfile.location.region;
     const isRegionChange =
       Boolean(existingRegion && detectedRegion) &&
@@ -1507,7 +1714,13 @@ export async function POST(req: Request) {
       existingRegion === null ||
       session.step === 'location' ||
       (userIsStatingOwnLocation(trimmed) && (isRegionChange || /in realt|corregg|ho sbagliat|non sono/i.test(trimmed)));
-    if (detectedRegion && canOverrideRegion) extracted.location = { region: detectedRegion, municipality: null };
+    if (detectedRegion && canOverrideRegion) {
+      extracted.location = { region: detectedRegion, municipality: null };
+      extracted.locationNeedsConfirmation = detectedRegionSignal?.source === 'demonym';
+      if (detectedRegionSignal?.source === 'explicit') {
+        extracted.locationNeedsConfirmation = false;
+      }
+    }
     const detectedAteco = extractAtecoFromMessage(trimmed);
     const atecoMentioned = normalizeForMatch(trimmed).includes('ateco');
     const hasDottedAtecoPattern = /\b\d{2}\.\d{1,2}(?:\.\d{1,2})?\b/.test(trimmed);
@@ -1521,6 +1734,8 @@ export async function POST(req: Request) {
     if (detectedBusinessExists !== null) extracted.businessExists = detectedBusinessExists;
     const detectedAge = parseAge(trimmed);
     if (detectedAge !== null) extracted.age = detectedAge;
+    const detectedAgeBand = parseAgeBand(trimmed);
+    if (detectedAgeBand) extracted.ageBand = detectedAgeBand;
     const detectedEmployment = parseEmploymentStatus(trimmed);
     if (detectedEmployment && (session.step === 'activityType' || !session.userProfile.employmentStatus)) {
       extracted.employmentStatus = detectedEmployment;
@@ -1567,6 +1782,9 @@ export async function POST(req: Request) {
     if (detectedGoal && (session.step === 'fundingGoal' || !session.userProfile.fundingGoal)) extracted.fundingGoal = detectedGoal;
 
     let profile = mergeProfile(session.userProfile, extracted);
+    if (profile.age !== null) {
+      profile.ageBand = profile.age <= 35 ? 'under35' : 'over35';
+    }
     const extractedChanged = getChangedFields(session.userProfile, profile);
     let profileProgressedThisTurn = extractedChanged.length > 0;
     if (extractedChanged.length) {
@@ -1590,7 +1808,7 @@ export async function POST(req: Request) {
     // This prevents stale cookies (previous profile) from producing unrelated "refine your search" replies.
     if (greeting && smallTalk && !qa && !measureUpdateReply) {
       const assistantText =
-        "Ciao, sono il tuo assistente BNDO. Per quale motivo vorresti partecipare ad un BNDO? Hai già un'attività o devi costituirla? A cosa ti servono i fondi?";
+        "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare.";
 
       // Reset to a fresh profile on greeting-only, to avoid leaking old region/ATECO into a new chat.
       const freshProfile = mergeProfile(emptyProfile(), extracted);
@@ -1628,7 +1846,7 @@ export async function POST(req: Request) {
     // Special: first-touch greeting should feel human and set context.
     if (greeting && isNewSession && !qa && !measureUpdateReply) {
       const assistantText =
-        "Ciao, sono il tuo assistente BNDO. Per quale motivo vorresti partecipare ad un BNDO? Hai già un'attività o devi costituirla? A cosa ti servono i fondi?";
+        "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare.";
 
       const askedCounts = session.askedCounts ?? {};
       const attempt = (askedCounts.fundingGoal ?? 0) + 1;
@@ -1788,7 +2006,7 @@ export async function POST(req: Request) {
         (session.step === 'activityType' && !profile.activityType) ||
         (session.step === 'sector' && !profile.sector) ||
         (session.step === 'ateco' && !profile.atecoAnswered) ||
-        (session.step === 'location' && !profile.location.region) ||
+        (session.step === 'location' && (!profile.location.region || profile.locationNeedsConfirmation) && Boolean(detectedRegion)) ||
         (session.step === 'employees' && profile.employees === null) ||
         (session.step === 'fundingGoal' && !profile.fundingGoal) ||
         (session.step === 'budget' && !profile.budgetAnswered) ||
@@ -1832,60 +2050,76 @@ export async function POST(req: Request) {
     }
 
     // Decide next step and whether we should scan now.
+    const scanReadiness = isScanReadyAdaptive(profile);
     const nextStep = getNextStep(profile);
-    const scanReady = isScanReady(profile);
+    const scanReady = scanReadiness.ready;
     const scanHash = scanReady ? computeScanHash(profile) : null;
     const lastScanHash = session.lastScanHash ?? null;
     const shouldScanNow = Boolean(scanReady && scanHash && scanHash !== lastScanHash && !smallTalk);
-
     const seed = `${trimmed}:${JSON.stringify(profile)}`;
     const askedCounts = session.askedCounts ?? {};
-    const attempt = (askedCounts[nextStep] ?? 0) + 1;
+    const rawAttempt = (askedCounts[nextStep] ?? 0) + 1;
+    const stalledOnSameField = session.lastAskedStep === nextStep && !profileProgressedThisTurn && rawAttempt > 2;
+    const effectiveNextStep = stalledOnSameField ? fallbackStepAfterStall(nextStep, profile) : nextStep;
+    const attempt = (askedCounts[effectiveNextStep] ?? 0) + 1;
+    const completenessScore = profileCompletenessScore(
+      normalizeProfileInput({
+        activityType: profile.activityType,
+        businessExists: profile.businessExists,
+        sector: profile.sector,
+        ateco: profile.ateco,
+        location: profile.location,
+        age: profile.age,
+        ageBand: profile.ageBand,
+        employmentStatus: profile.employmentStatus,
+        fundingGoal: profile.fundingGoal,
+        contributionPreference: profile.contributionPreference,
+        revenueOrBudgetEUR: profile.revenueOrBudgetEUR,
+        requestedContributionEUR: profile.requestedContributionEUR,
+      }),
+      scanReadiness.missingSignals,
+    );
+    const readinessCode = scanReadinessReasonForStep(effectiveNextStep, profile);
     const shouldEmitRecap = shouldScanNow || hasCriticalRecapDelta(session.userProfile, profile);
     const recap = shouldEmitRecap ? profileRecap(profile) : null;
-    const questionHint = shouldScanNow ? null : questionForStepWithProfile(nextStep, profile, seed, attempt);
+    const questionHint = shouldScanNow ? null : questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
     const assistantCore = (() => {
       if (shouldScanNow) {
-        return [recap, 'Perfetto, ci siamo. Avvio ora lo scanner BNDO per trovare i bandi piu compatibili con il tuo profilo.']
-          .filter(Boolean)
-          .join('\n');
+        return 'Perfetto, avvio ora lo scanner BNDO per trovare i bandi piu compatibili.';
       }
       if (smallTalk && scanReady) {
-        return "Se vuoi posso affinare ancora la ricerca su ATECO, tipo di contributo e importi per rendere il match ancora piu preciso.";
+        return 'Per affinare il match, dimmi solo un dato tra ATECO, importo o contributo preferito.';
       }
       if (smallTalk && !scanReady) {
-        const hello = greeting ? 'Ciao, piacere. ' : '';
-        return `${hello}${questionForStepWithProfile(nextStep, profile, seed, attempt)}`;
+        return questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
       }
-      if (nextStep === 'ready') {
-        return 'Se vuoi posso affinare ulteriormente la ricerca su ATECO, forma di contributo e importi. Dimmi pure da cosa vuoi partire.';
+      if (effectiveNextStep === 'ready') {
+        return 'Se vuoi, affino subito il match: dammi il dato più importante tra ATECO, importo o forma di contributo.';
       }
-      const q = questionHint ?? questionForStepWithProfile(nextStep, profile, seed, attempt);
-      // Consultant tone: a short reason only on first attempt.
+      const q = questionHint ?? questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
+      if (attempt > 1) return q;
       const reason =
-        attempt > 1
-          ? null
-          : nextStep === 'location'
-            ? 'Mi serve la regione per evitare di proporti bandi fuori territorio.'
-            : nextStep === 'activityType'
-              ? profile.businessExists === null
-                ? "Mi serve per capire subito se cercare misure per impresa gia attiva o per nuova apertura."
-                : needsFounderEligibilityData(profile)
-                  ? "Mi serve per verificare subito l'ammissibilita su bandi come Resto al Sud 2.0 e Autoimpiego."
-                  : "Serve per capire subito in quali platee di beneficiari puoi rientrare."
-              : nextStep === 'fundingGoal'
-                ? "Piu sei specifico sull'obiettivo, piu il match diventa realmente utile."
-                : nextStep === 'budget'
-                  ? 'Con una stima degli importi posso filtrare misure realistiche per il tuo caso.'
-                : null;
-      return [recap, reason, q].filter(Boolean).join('\n');
+        effectiveNextStep === 'location'
+          ? profile.locationNeedsConfirmation && profile.location?.region
+            ? null
+            : 'Mi serve la regione.'
+          : effectiveNextStep === 'activityType'
+            ? profile.businessExists === null
+              ? "Mi serve capire se l'attività è già attiva o da aprire."
+              : needsFounderEligibilityData(profile)
+                ? 'Mi servono età e stato occupazionale.'
+                : null
+            : effectiveNextStep === 'budget'
+              ? 'Mi serve un importo indicativo.'
+              : null;
+      return [reason, q].filter(Boolean).join(' ');
     })();
 
     const llmQaMode = qaModeActive || prefersChatBeforeProfiling;
     const repeatedStepNoProgress = session.lastAskedStep === nextStep && !profileProgressedThisTurn;
     const assistantText = (() => {
       if (llmQaMode && smallTalk) return 'Certo, dimmi pure la domanda che vuoi farmi.';
-      const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(nextStep, attempt);
+      const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(effectiveNextStep, attempt);
       if (measureUpdateReply)
         return composeAssistantReply({
           directAnswer: measureUpdateReply,
@@ -1932,7 +2166,10 @@ export async function POST(req: Request) {
       return assistantCore;
     })();
 
-    const shouldBypassOpenAI = Boolean(shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply);
+    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike));
+    const shouldBypassOpenAI = Boolean(
+      shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply || (CHAT_DETERMINISTIC_V3 && !faqLikeTurn),
+    );
     const openAiResult = shouldBypassOpenAI
       ? { text: null, source: 'disabled' as const }
       : await generateAssistantTextWithOpenAI({
@@ -2001,24 +2238,30 @@ export async function POST(req: Request) {
     const candidateAssistantText = cleanupAssistantText(rawAssistantText);
     const antiEchoAssistantText = stripUserEchoFromReply(candidateAssistantText, trimmed);
     const dedupedAssistantText = repetition.tooSimilar
-      ? `${antiEchoAssistantText}\n\n${naturalBridgeQuestion(nextStep, attempt + 1) ?? questionForStepWithProfile(nextStep, profile, seed, attempt + 1)}`
+      ? `${antiEchoAssistantText}\n\n${
+          naturalBridgeQuestion(effectiveNextStep, attempt + 1) ?? questionForStepWithProfile(effectiveNextStep, profile, seed, attempt + 1)
+        }`
       : antiEchoAssistantText;
     const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
     let qaShapedAssistantText =
       llmQaMode && !proceedToMatching && !shouldScanNow ? enforceQaModeReply(dedupedAssistantText) : dedupedAssistantText;
     if (llmQaMode && metaQa) {
-      qaShapedAssistantText = `${metaQa.trim()}\n\nDimmi pure la prossima domanda.`;
+      qaShapedAssistantText = metaQa.trim();
     }
     if (prefersChatBeforeProfiling && conversationalReply) {
-      qaShapedAssistantText = `${conversationalReply.trim()}\n\nDimmi pure la prossima domanda.`;
+      qaShapedAssistantText = conversationalReply.trim();
     }
     if (llmQaMode && qaDirectFallback && qaShapedAssistantText.length < 70) {
-      qaShapedAssistantText = `${qaDirectFallback}\n\nDimmi pure la prossima domanda.`;
+      qaShapedAssistantText = qaDirectFallback;
     }
     const introStrippedAssistantText = !isNewSession
       ? (stripRepeatedAssistantIntro(qaShapedAssistantText) || qaShapedAssistantText)
       : qaShapedAssistantText;
-    const finalAssistantText = applyTonePolicy(introStrippedAssistantText, 'quasi_amichevole');
+    const directAssistantText = enforceConsultantDirectness(introStrippedAssistantText, {
+      shouldScanNow,
+      questionHint,
+    });
+    const finalAssistantText = applyTonePolicy(directAssistantText, 'quasi_amichevole');
 
     const prevTurns = session.recentTurns ?? [];
     const nextTurns = [...prevTurns, { role: 'user' as const, text: trimmed }, { role: 'assistant' as const, text: finalAssistantText }]
@@ -2026,12 +2269,12 @@ export async function POST(req: Request) {
 
     const nextSession: Session = {
       // When we trigger a scan, keep the next refinement step in session so the user can answer immediately after results.
-      step: shouldScanNow ? nextStep : smallTalk && scanReady ? 'ready' : nextStep,
+      step: shouldScanNow ? effectiveNextStep : smallTalk && scanReady ? 'ready' : effectiveNextStep,
       userProfile: profile,
       profileMemory,
       lastScanHash: shouldScanNow ? scanHash : lastScanHash,
-      askedCounts: { ...askedCounts, [nextStep]: attempt },
-      lastAskedStep: nextStep,
+      askedCounts: { ...askedCounts, [effectiveNextStep]: attempt },
+      lastAskedStep: effectiveNextStep,
       recentTurns: nextTurns,
       humanHandoffRequested: false,
       humanHandoffCompleted: false,
@@ -2050,9 +2293,9 @@ export async function POST(req: Request) {
       qaModeActive: Boolean(llmQaMode || questionLike || conversationalIntent)
     });
     const needsClarification =
-      nextStep !== 'ready' &&
+      effectiveNextStep !== 'ready' &&
       !shouldScanNow &&
-      (Boolean(questionHint) || Boolean(naturalBridgeQuestion(nextStep, attempt)) || Boolean(repetition.tooSimilar));
+      (Boolean(questionHint) || Boolean(naturalBridgeQuestion(effectiveNextStep, attempt)) || Boolean(repetition.tooSimilar));
     return NextResponse.json(
       withConversationMeta({
         userProfile: nextSession.userProfile,
@@ -2061,7 +2304,10 @@ export async function POST(req: Request) {
         readyToScan: shouldScanNow,
         mode,
         aiSource: openAiResult.source,
-        needsClarification
+        needsClarification,
+        nextQuestionField: nextBestFieldFromStep(effectiveNextStep),
+        profileCompletenessScore: completenessScore,
+        scanReadinessReason: readinessCode,
       })
     );
   } catch (e) {

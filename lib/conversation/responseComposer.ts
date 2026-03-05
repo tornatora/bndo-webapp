@@ -22,10 +22,10 @@ export function composeAssistantReply(args: {
   mode: ConversationMode;
 }) {
   const { directAnswer, recap, bridgeQuestion, mode } = args;
+  const hasQuestion = (value: string) => value.includes('?');
   const chunks: string[] = [];
   if (directAnswer) chunks.push(directAnswer.trim());
-  if (recap && mode !== 'qa') chunks.push(recap.trim());
-  if (bridgeQuestion && mode !== 'scan_ready') chunks.push(bridgeQuestion.trim());
+  if (!directAnswer && recap && mode !== 'qa') chunks.push(recap.trim());
+  if (bridgeQuestion && mode !== 'scan_ready' && !hasQuestion(chunks.join(' '))) chunks.push(bridgeQuestion.trim());
   return pickFirstQuestion(chunks.filter(Boolean).join('\n\n'));
 }
-

@@ -16,8 +16,6 @@ interface CoverageResponse {
   missingItemsOpen: number;
 }
 
-const SCANNER_MATCHES_EVENT = 'bndo:scanner-matches-updated';
-
 interface ProfileFormState {
   businessExists: boolean;
   activityType: string;
@@ -256,6 +254,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingStepScrollRef = useRef(false);
   const overlayProgressTimerRef = useRef<number | null>(null);
+  const runIdRef = useRef(0);
 
   const scrollScannerViewportToTop = (behavior: ScrollBehavior = 'smooth') => {
     const pane = formRef.current?.closest('.mainpane');
@@ -382,25 +381,6 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       .then(setCoverage)
       .catch(() => setCoverage(null));
   }, []);
-
-  useEffect(() => {
-    const onScannerMatchesUpdated = (event: Event) => {
-      if (matching) return;
-      const detail = (event as CustomEvent<{ phase?: 'fast' | 'full' }>).detail;
-      if (!detail || detail.phase !== 'full') return;
-      apiRequest<MatchLatestResponse>('/api/v1/matching/latest', 'GET')
-        .then((latest) => {
-          setMatchItems(latest.items);
-          setNearMissItems(latest.nearMisses ?? []);
-        })
-        .catch(() => null);
-    };
-
-    window.addEventListener(SCANNER_MATCHES_EVENT, onScannerMatchesUpdated as EventListener);
-    return () => {
-      window.removeEventListener(SCANNER_MATCHES_EVENT, onScannerMatchesUpdated as EventListener);
-    };
-  }, [matching]);
 
   const stepOneReady = useMemo(() => {
     const hasRegion = Boolean(profile.region.trim());
@@ -570,6 +550,10 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       return;
     }
 
+    const currentRunId = runIdRef.current + 1;
+    runIdRef.current = currentRunId;
+    const isStaleRun = () => runIdRef.current !== currentRunId;
+
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -585,10 +569,13 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
 
     try {
       await saveProfile();
+      if (isStaleRun()) return;
       setOverlayProgress((prev) => Math.max(prev, 30));
       await apiRequest('/api/v1/matching/run', 'POST', null, {});
+      if (isStaleRun()) return;
       setOverlayProgress((prev) => Math.max(prev, 64));
       const latest = await apiRequest<MatchLatestResponse>('/api/v1/matching/latest', 'GET');
+      if (isStaleRun()) return;
 
       stopOverlayProgressLoop();
       setMatchItems(latest.items);
@@ -598,12 +585,14 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       await wait(90);
       shouldScrollResults = true;
     } catch (err) {
+      if (isStaleRun()) return;
       stopOverlayProgressLoop();
       setOverlayProgress(100);
       setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
       await wait(90);
       setError((err as Error).message || 'Errore durante la ricerca');
     } finally {
+      if (isStaleRun()) return;
       stopOverlayProgressLoop();
       setMatching(false);
       if (shouldScrollResults) {

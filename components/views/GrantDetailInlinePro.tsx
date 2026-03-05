@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { ProgressBarPro as ProgressBar } from '@/components/views/ProgressBarPro';
-import { apiRequest } from '@/lib/scannerPublicApi';
 
 interface GrantDetail {
   id: string;
@@ -313,6 +312,16 @@ export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
     setDetail(null);
     setExplain(null);
 
+    const fetchWithTimeout = async (url: string, timeoutMs = 4_000) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { cache: 'no-store', signal: controller.signal });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
     const normalizeGrant = (rawGrant: GrantDetail): GrantDetail => ({
       ...rawGrant,
       beneficiaries: Array.isArray(rawGrant.beneficiaries) ? rawGrant.beneficiaries : [],
@@ -320,10 +329,7 @@ export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
       officialAttachments: Array.isArray(rawGrant.officialAttachments) ? rawGrant.officialAttachments : []
     });
 
-    Promise.all([
-      fetch(`/api/grants/${encodeURIComponent(id)}`, { cache: 'no-store' }),
-      fetch(`/api/grants/${encodeURIComponent(id)}/explainability`, { cache: 'no-store' })
-    ])
+    Promise.all([fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}`), fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}/explainability`)])
       .then(async ([grantRes, explainRes]) => {
         const grantJson = (await grantRes.json().catch(() => null)) as GrantDetail | { error?: string } | null;
         const explainJson = (await explainRes.json().catch(() => null)) as Explainability | { error?: string } | null;
@@ -339,27 +345,13 @@ export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
         setDetail(normalizeGrant(grantJson as GrantDetail));
         setExplain(explainJson as Explainability);
       })
-      .catch(async (primaryError) => {
-        try {
-          const [grant, explainability] = await Promise.all([
-            apiRequest<GrantDetail>(`/api/v1/grants/${id}`, 'GET'),
-            apiRequest<Explainability>(`/api/v1/grants/${id}/explainability`, 'GET')
-          ]);
-
-          if (cancelled) return;
-          setDetail(normalizeGrant(grant));
-          setExplain(explainability);
-          setError(null);
-        } catch (fallbackError) {
-          if (cancelled) return;
-          const message =
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : primaryError instanceof Error
-                ? primaryError.message
-                : 'Errore caricamento dettaglio';
-          setError(message);
-        }
+      .catch((primaryError) => {
+        if (cancelled) return;
+        const message =
+          primaryError instanceof Error
+            ? primaryError.message
+            : 'Errore caricamento dettaglio. Riprova tra qualche secondo.';
+        setError(message);
       });
 
     return () => {

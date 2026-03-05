@@ -425,6 +425,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      scanner_dataset_snapshots: {
+        Row: {
+          id: string;
+          source: string;
+          version_hash: string;
+          fetched_at: string;
+          is_active: boolean;
+          doc_count: number;
+          docs_json: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          source: string;
+          version_hash: string;
+          fetched_at?: string;
+          is_active?: boolean;
+          doc_count?: number;
+          docs_json?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          source?: string;
+          version_hash?: string;
+          fetched_at?: string;
+          is_active?: boolean;
+          doc_count?: number;
+          docs_json?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       consultant_threads: {
         Row: {
           id: string;

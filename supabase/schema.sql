@@ -189,6 +189,17 @@ create table if not exists public.consultant_messages (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.scanner_dataset_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  source text not null,
+  version_hash text not null,
+  fetched_at timestamptz not null default now(),
+  is_active boolean not null default false,
+  doc_count integer not null default 0,
+  docs_json jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_profiles_company on public.profiles(company_id);
 create index if not exists idx_quiz_submissions_created_at on public.quiz_submissions(created_at desc);
 create index if not exists idx_tender_matches_company on public.tender_matches(company_id);
@@ -196,6 +207,10 @@ create index if not exists idx_tender_applications_company on public.tender_appl
 create index if not exists idx_consultant_messages_thread_created on public.consultant_messages(thread_id, created_at);
 create index if not exists idx_consultant_participants_profile_thread
   on public.consultant_thread_participants(profile_id, thread_id);
+create index if not exists idx_scanner_dataset_snapshots_active_fetched
+  on public.scanner_dataset_snapshots (is_active, fetched_at desc);
+create index if not exists idx_scanner_dataset_snapshots_version
+  on public.scanner_dataset_snapshots (version_hash);
 
 -- -----------------------------------------------------
 -- Helper functions
@@ -267,6 +282,7 @@ alter table public.application_documents enable row level security;
 alter table public.consultant_threads enable row level security;
 alter table public.consultant_thread_participants enable row level security;
 alter table public.consultant_messages enable row level security;
+alter table public.scanner_dataset_snapshots enable row level security;
 
 drop policy if exists "profiles_select_own_or_ops" on public.profiles;
 create policy "profiles_select_own_or_ops"
@@ -444,6 +460,12 @@ with check (
       and (public.is_company_member(ct.company_id) or public.is_ops_user())
   )
 );
+
+drop policy if exists "scanner snapshots ops read" on public.scanner_dataset_snapshots;
+create policy "scanner snapshots ops read"
+on public.scanner_dataset_snapshots
+for select
+using (public.is_ops_user());
 
 -- No policies for leads/quiz_submissions/onboarding_credentials: access only through service role.
 

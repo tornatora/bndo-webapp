@@ -25,6 +25,48 @@ const cases = [
     },
   },
   {
+    id: 'south-youth-startup-priority',
+    expectIncludes: ['Resto al Sud 2.0', 'FUSESE', 'Oltre Nuove imprese a tasso zero'],
+    expectOrder: ['Resto al Sud 2.0', 'FUSESE', 'Oltre Nuove imprese a tasso zero'],
+    expectMustNotInclude: ['Smart Money', 'Borsa di studio'],
+    payload: {
+      userProfile: {
+        region: 'Calabria',
+        businessExists: false,
+        activityType: 'Da costituire',
+        legalForm: 'Ditta individuale',
+        employmentStatus: 'Disoccupato',
+        founderAge: 27,
+        fundingGoal: 'Aprire una nuova attività imprenditoriale',
+        contributionPreference: null,
+      },
+      mode: 'fast',
+      channel: 'chat',
+      strictness: 'high',
+      limit: 10,
+    },
+  },
+  {
+    id: 'south-youth-startup-ageband-priority',
+    expectIncludes: ['Resto al Sud 2.0', 'FUSESE', 'Oltre Nuove imprese a tasso zero'],
+    expectOrder: ['Resto al Sud 2.0', 'FUSESE', 'Oltre Nuove imprese a tasso zero'],
+    expectMustNotInclude: ['Smart Money', 'Borsa di studio'],
+    payload: {
+      userProfile: {
+        region: 'Calabria',
+        businessExists: false,
+        ageBand: 'under35',
+        employmentStatus: 'Disoccupato',
+        fundingGoal: 'Aprire una nuova attività imprenditoriale',
+        contributionPreference: 'fondo_perduto',
+      },
+      mode: 'fast',
+      channel: 'chat',
+      strictness: 'high',
+      limit: 10,
+    },
+  },
+  {
     id: 'autoimpiego-centro-nord',
     expectFirst: 'Autoimpiego Centro-Nord',
     expectAmount: 'Fino a € 200.000',
@@ -182,6 +224,31 @@ const cases = [
     },
   },
   {
+    id: 'cosenza-creazione-nuove-imprese-iv',
+    expectIncludes: ['creazione nuove imprese'],
+    expectById: {
+      id: 'incentivi-7753',
+      amountAnyOf: ['Da € 4.000 a € 20.000', 'Da verificare'],
+      coverageAnyOf: ['50% - 60%', 'Da verificare'],
+    },
+    payload: {
+      userProfile: {
+        region: 'Calabria',
+        businessExists: false,
+        activityType: 'Startup',
+        legalForm: 'Ditta individuale',
+        employmentStatus: 'Disoccupato',
+        founderAge: 29,
+        sector: 'Commercio',
+        fundingGoal: 'Creazione nuova impresa in Calabria',
+        contributionPreference: 'fondo perduto',
+        revenueOrBudgetEUR: 20000,
+        requestedContributionEUR: 10000,
+      },
+      limit: 10,
+    },
+  },
+  {
     id: 'nuova-impresa-piccoli-comuni-lombardia',
     expectFirst: 'Nuova Impresa - Piccoli Comuni e Frazioni 2026',
     expectAmount: 'Da € 3.000 a € 50.000',
@@ -307,6 +374,19 @@ function firstResultData(data) {
   };
 }
 
+function resultDataById(data, lookupId) {
+  const list = Array.isArray(data?.results) ? data.results : [];
+  const found = list.find((item) => String(item?.id || '').toLowerCase() === String(lookupId || '').toLowerCase());
+  if (!found) return null;
+  const economic = found?.economicOffer && typeof found.economicOffer === 'object' ? found.economicOffer : null;
+  return {
+    id: String(found.id || ''),
+    title: String(found?.title || found?.grantTitle || ''),
+    amount: typeof economic?.displayProjectAmountLabel === 'string' ? economic.displayProjectAmountLabel : null,
+    coverage: typeof economic?.displayCoverageLabel === 'string' ? economic.displayCoverageLabel : null,
+  };
+}
+
 async function runCase(testCase) {
   const response = await fetch(`${baseUrl}/api/scan-bandi`, {
     method: 'POST',
@@ -332,6 +412,32 @@ async function runCase(testCase) {
     }
   }
 
+  if (Array.isArray(testCase.expectMustNotInclude)) {
+    for (const denied of testCase.expectMustNotInclude) {
+      if (resultTitles.some((title) => title.toLowerCase().includes(denied.toLowerCase()))) {
+        throw new Error(`${testCase.id}: expected to exclude "${denied}", got ${resultTitles.join(' | ')}`);
+      }
+    }
+  }
+
+  if (Array.isArray(testCase.expectOrder) && testCase.expectOrder.length > 1) {
+    let prevIndex = -1;
+    for (const expected of testCase.expectOrder) {
+      const idx = resultTitles.findIndex((title) => title.toLowerCase().includes(expected.toLowerCase()));
+      if (idx === -1) {
+        throw new Error(
+          `${testCase.id}: expected ordered item "${expected}" in results, got ${resultTitles.length ? resultTitles.join(' | ') : '[]'}`,
+        );
+      }
+      if (idx <= prevIndex) {
+        throw new Error(
+          `${testCase.id}: expected order ${testCase.expectOrder.join(' > ')}, got ${resultTitles.join(' | ')}`,
+        );
+      }
+      prevIndex = idx;
+    }
+  }
+
   if (typeof testCase.expectFirst === 'string') {
     if (!first.title.toLowerCase().includes(testCase.expectFirst.toLowerCase())) {
       throw new Error(`${testCase.id}: expected first "${testCase.expectFirst}", got ${first.title || '[]'}`);
@@ -347,6 +453,33 @@ async function runCase(testCase) {
   if (typeof testCase.expectCoverage === 'string') {
     if ((first.coverage || '').trim() !== testCase.expectCoverage.trim()) {
       throw new Error(`${testCase.id}: expected coverage "${testCase.expectCoverage}", got "${first.coverage || ''}"`);
+    }
+  }
+
+  if (testCase.expectById && typeof testCase.expectById.id === 'string') {
+    const byId = resultDataById(data, testCase.expectById.id);
+    if (!byId) {
+      throw new Error(`${testCase.id}: expected result id "${testCase.expectById.id}" not found`);
+    }
+    if (Array.isArray(testCase.expectById.amountAnyOf)) {
+      const ok = testCase.expectById.amountAnyOf.some((expected) => (byId.amount || '').trim() === String(expected).trim());
+      if (!ok) {
+        throw new Error(
+          `${testCase.id}: expected amount for ${testCase.expectById.id} in [${testCase.expectById.amountAnyOf.join(
+            ', ',
+          )}], got "${byId.amount || ''}"`,
+        );
+      }
+    }
+    if (Array.isArray(testCase.expectById.coverageAnyOf)) {
+      const ok = testCase.expectById.coverageAnyOf.some((expected) => (byId.coverage || '').trim() === String(expected).trim());
+      if (!ok) {
+        throw new Error(
+          `${testCase.id}: expected coverage for ${testCase.expectById.id} in [${testCase.expectById.coverageAnyOf.join(
+            ', ',
+          )}], got "${byId.coverage || ''}"`,
+        );
+      }
     }
   }
 

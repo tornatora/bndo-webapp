@@ -342,7 +342,7 @@ function toLegacyProfile(body: unknown): LocalScannerProfile {
   };
 }
 
-async function runLocalMatching(mode: 'fast' | 'full' = 'full'): Promise<LocalMatchLatestResponse> {
+async function runLocalMatching(mode: 'fast' | 'full' = 'fast'): Promise<LocalMatchLatestResponse> {
   const profile = readStorage<LocalScannerProfile>(LOCAL_PROFILE_KEY);
   if (!profile) {
     throw new ApiError(400, 'Profilo scanner mancante. Compila il form prima di avviare la ricerca.');
@@ -493,8 +493,6 @@ export async function apiRequest<T>(
 
   if (path === '/api/v1/matching/run' && method === 'POST') {
     const latest = await runLocalMatching('fast');
-    // Upgrade in background with full precision payload.
-    void runLocalMatching('full').catch(() => null);
     return ({ run: latest.run } as unknown) as T;
   }
 

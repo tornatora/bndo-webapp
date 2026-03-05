@@ -19,7 +19,9 @@ type UserProfile = {
   ateco?: string | null;
   atecoAnswered?: boolean;
   location?: { region?: string | null; municipality?: string | null } | null;
+  locationNeedsConfirmation?: boolean;
   age?: number | null;
+  ageBand?: 'under35' | 'over35' | null;
   employmentStatus?: string | null;
   legalForm?: string | null;
   employees?: number | null;
@@ -60,8 +62,22 @@ type ConversationResponse = {
     | 'contactEmail'
     | 'contactPhone'
     | null;
+  nextQuestionField?:
+    | 'activityType'
+    | 'sector'
+    | 'ateco'
+    | 'location'
+    | 'employees'
+    | 'fundingGoal'
+    | 'budget'
+    | 'contributionPreference'
+    | 'contactEmail'
+    | 'contactPhone'
+    | null;
   assistantConfidence?: number;
   needsClarification?: boolean;
+  profileCompletenessScore?: number;
+  scanReadinessReason?: string;
   error?: string;
 };
 
@@ -83,20 +99,22 @@ type ScanResponse = {
     aidIntensity?: string | null;
     budgetTotal?: number | null;
     economicOffer?: Record<string, unknown> | null;
+    bookingUrl?: string | null;
   }>;
   nearMisses?: BandoResult[];
   qualityBand?: 'high' | 'medium' | 'low';
   refineQuestion?: string;
+  matchingVersion?: 'v2' | 'v3' | string;
+  profilePriorityApplied?: boolean;
+  diagnostics?: { rejectedByGate?: Record<string, number>; activeCaseIds?: string[] };
   topPickBandoId: string | null;
   bookingUrl: string;
 };
 
 type ChatMessage =
-  | { id: string; role: 'assistant' | 'user'; kind: 'text'; body: string }
+  | { id: string; role: 'assistant' | 'user'; kind: 'text'; body: string; scanToken?: string }
   | { id: string; role: 'assistant'; kind: 'results'; explanation: string; results: BandoResult[]; nearMisses?: BandoResult[]; scanToken?: string }
-  | { id: string; role: 'assistant'; kind: 'cta'; bookingUrl: string; scanToken?: string };
-
-const CTA_TEXT = 'Vuoi partecipare a questo BANDO con BNDO? Prenota una consulenza con un nostro consulente.';
+  ;
 const LANDING_TITLE_PREFIX = 'Vorresti partecipare ad un BNDO?';
 const LANDING_TECH = ['Matching AI', 'Piattaforma con professionisti umani'] as const;
 const LANDING_ROTATING_FULL = [
@@ -178,6 +196,50 @@ type ChatWindowProps = {
   initialGrantId?: string | null;
 };
 
+function normalizeHashString(value: string | null | undefined) {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function buildScanProfileHash(profile: UserProfile) {
+  const normalized = {
+    activityType: normalizeHashString(profile.activityType),
+    businessExists: profile.businessExists ?? null,
+    sector: normalizeHashString(profile.sector),
+    ateco: normalizeHashString(profile.ateco),
+    location: {
+      region: normalizeHashString(profile.location?.region),
+      municipality: normalizeHashString(profile.location?.municipality)
+    },
+    age: profile.age ?? null,
+    ageBand: normalizeHashString(profile.ageBand ?? null),
+    employmentStatus: normalizeHashString(profile.employmentStatus),
+    revenueOrBudgetEUR: profile.revenueOrBudgetEUR ?? null,
+    requestedContributionEUR: profile.requestedContributionEUR ?? null,
+    fundingGoal: normalizeHashString(profile.fundingGoal),
+    contributionPreference: normalizeHashString(profile.contributionPreference),
+  };
+  return JSON.stringify(normalized);
+}
+
+function isInformativeRefineAnswer(text: string) {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  if (
+    /^(ok|okay|okey|si|sì|yes|va bene|perfetto|bene|capito|chiaro|grazie|grazie mille|ottimo|top|ricevuto)[.!?]*$/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+
+  const tokens = normalized.split(' ').filter(Boolean);
+  if (tokens.length >= 4) return true;
+  if (/\d/.test(normalized)) return true;
+  return /(regione|attivita|impresa|startup|avviare|aprire|settore|ateco|disoccup|occupaz|neet|eta|anni|import|budget|fatturat|fondo perduto|prestito|contribut)/.test(
+    normalized,
+  );
+}
+
 export function ChatWindow({ initialView = 'chat', initialGrantId = null }: ChatWindowProps = {}) {
   const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' =
     initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail'
@@ -213,6 +275,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const lockAutoBottomScrollRef = useRef(false);
   const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const focusLockTimerRef = useRef<number | null>(null);
+  const scanInFlightRef = useRef(false);
+  const activeScanTokenRef = useRef<string | null>(null);
+  const interactionVersionRef = useRef(0);
+  const awaitingRefineAnswerRef = useRef(false);
+  const lastRenderedScanHashRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
@@ -363,8 +430,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     if (view !== 'chat') return;
     if (lockAutoBottomScrollRef.current) return;
     const lastMessage = messages[messages.length - 1];
-    const isResultCluster =
-      lastMessage?.role === 'assistant' && (lastMessage.kind === 'results' || lastMessage.kind === 'cta');
+    const isResultCluster = lastMessage?.role === 'assistant' && lastMessage.kind === 'results';
     if (isResultCluster) return;
     const behavior: ScrollBehavior = messages.length <= 1 ? 'auto' : 'smooth';
     scrollToBottom(behavior);
@@ -471,77 +537,78 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     };
   }, [messages.length, rotateIdx, view]);
 
-  function refinePromptFor(step: ConversationResponse['step']) {
-    if (step === 'ateco') {
-      return 'Per rendere il match ancora piu preciso: hai il codice ATECO? (anche 2 cifre). Se non lo sai, scrivi “non so” + cosa fai in 1 frase.';
-    }
-    if (step === 'contributionPreference') {
-      return 'Preferisci una forma specifica? (fondo perduto / finanziamento agevolato / voucher / credito d’imposta / misto)';
-    }
-    if (step === 'employees') {
-      return 'Quanti dipendenti/addetti avete indicativamente?';
-    }
-    if (step === 'budget') {
-      return 'Hai un budget o fatturato indicativo da considerare? (es. 50k). Se non lo sai: “non so”.';
-    }
-    if (step === 'sector') {
-      return 'In che settore operi? (es. turismo, commercio, manifattura, ICT)';
-    }
-    return null;
-  }
-
-  async function runScan(nextProfile: UserProfile, refineStep?: ConversationResponse['step']) {
+  async function runScan(
+    nextProfile: UserProfile,
+    _refineStep?: ConversationResponse['step'],
+    scanProfileHash?: string,
+    interactionVersionAtStart?: number,
+  ) {
+    if (scanInFlightRef.current) return;
+    scanInFlightRef.current = true;
     const scanToken = uid();
+    activeScanTokenRef.current = scanToken;
     const resultMessageId = `${scanToken}-results`;
-    const ctaMessageId = `${scanToken}-cta`;
+    const followupMessageId = `${scanToken}-followup`;
+    const timeoutMessageId = `${scanToken}-timeout`;
+    const startInteractionVersion = interactionVersionAtStart ?? interactionVersionRef.current;
+    let timedOut = false;
+    let timeoutId: number | null = null;
 
-    const upsertScanMessages = (payload: ScanResponse) => {
+    const appendScanMessages = (payload: ScanResponse) => {
       lockAutoBottomScrollRef.current = true;
       if (isMobileViewport || isKeyboardOpen || isComposerFocused) {
         blurComposerInput();
       }
-      setMessages((prev) => {
-        const withoutCurrentScan = prev.filter((entry) => !(('scanToken' in entry ? entry.scanToken : null) === scanToken));
-        const next: ChatMessage[] = [
-          ...withoutCurrentScan,
-          {
-            id: resultMessageId,
-            role: 'assistant',
-            kind: 'results',
-            explanation: payload.explanation,
-            results: payload.results,
-            nearMisses: payload.nearMisses ?? [],
-            scanToken
-          }
-        ];
 
-        if (payload.topPickBandoId && payload.bookingUrl) {
-          next.push({
-            id: ctaMessageId,
-            role: 'assistant',
-            kind: 'cta',
-            bookingUrl: payload.bookingUrl,
-            scanToken
-          });
+      const shouldAskTargetedRefine =
+        Boolean(payload.refineQuestion) &&
+        (payload.qualityBand === 'low' || payload.results.length === 0 || (payload.nearMisses ?? []).length === 0);
+      const followupText = shouldAskTargetedRefine
+        ? `Questi bandi sono interessanti? Vuoi rispondere ad altre domande così capisco meglio la tua situazione e affino la ricerca?\n\n${payload.refineQuestion}`
+        : 'Questi bandi sono interessanti? Vuoi rispondere ad altre domande così capisco meglio la tua situazione e affino la ricerca?';
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: resultMessageId,
+          role: 'assistant',
+          kind: 'results',
+          explanation: payload.explanation,
+          results: payload.results,
+          nearMisses: payload.nearMisses ?? [],
+          scanToken
+        },
+        {
+          id: followupMessageId,
+          role: 'assistant',
+          kind: 'text',
+          body: followupText,
+          scanToken
         }
-        return next;
-      });
+      ]);
       setFocusResultMessageId(resultMessageId);
     };
 
-    const maybeAskRefinement = (payload: ScanResponse) => {
-      const topScore = ((payload.results?.[0] as any)?.matchScore ?? (payload.results?.[0] as any)?.score) as number | undefined;
-      const shouldRefine =
-        Boolean(payload.refineQuestion) || payload.results.length === 0 || (typeof topScore === 'number' && topScore < 0.66);
-      const prompt = refineStep ? refinePromptFor(refineStep) : null;
-      if (shouldRefine && prompt && !payload.refineQuestion) {
-        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: prompt }]);
-      }
-      if (payload.refineQuestion) {
-        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: payload.refineQuestion! }]);
-      }
+    const handleNoResults = (payload: ScanResponse) => {
+      const refineText =
+        payload.refineQuestion?.trim() ||
+        "Per essere preciso mi serve un dettaglio in più: settore principale e importo indicativo dell'investimento.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: followupMessageId,
+          role: 'assistant',
+          kind: 'text',
+          body: refineText,
+          scanToken,
+        },
+      ]);
+      lockAutoBottomScrollRef.current = false;
+      setFocusResultMessageId(null);
+      awaitingRefineAnswerRef.current = true;
     };
 
+    awaitingRefineAnswerRef.current = false;
     setIsScanning(true);
     if (isMobileViewport || isKeyboardOpen || isComposerFocused) {
       blurComposerInput();
@@ -549,39 +616,59 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     setScanOverlayProgress(8);
     setScanOverlayStepIndex(0);
     startOverlayProgressLoop();
+    timeoutId = window.setTimeout(() => {
+      if (activeScanTokenRef.current !== scanToken) return;
+      timedOut = true;
+      stopOverlayProgressLoop();
+      setIsScanning(false);
+      scanInFlightRef.current = false;
+      awaitingRefineAnswerRef.current = true;
+      setScanOverlayProgress((prev) => Math.max(prev, 92));
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: timeoutMessageId,
+          role: 'assistant',
+          kind: 'text',
+          body:
+            "Per evitare attese lunghe, fammi un ultimo dettaglio (settore o importo indicativo) e rilancio subito la ricerca precisa.",
+          scanToken,
+        },
+      ]);
+    }, 8000);
 
     try {
-      const fastRes = await fetch('/api/scan-bandi', {
+      const scanRes = await fetch('/api/scan-bandi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userProfile: nextProfile, limit: 10, mode: 'fast', channel: 'chat', strictness: 'high' })
       });
-      const fastJson = (await fastRes.json()) as ScanResponse & { error?: string };
-      if (!fastRes.ok) throw new Error(fastJson.error ?? 'Scan non riuscito.');
+      const scanJson = (await scanRes.json()) as ScanResponse & { error?: string };
+      if (activeScanTokenRef.current !== scanToken) return;
+      if (!scanRes.ok) throw new Error(scanJson.error ?? 'Scan non riuscito.');
+      if (timedOut && interactionVersionRef.current !== startInteractionVersion) {
+        activeScanTokenRef.current = null;
+        return;
+      }
 
       stopOverlayProgressLoop();
       setScanOverlayProgress(100);
       setScanOverlayStepIndex(4);
-      upsertScanMessages(fastJson);
-      await new Promise((resolve) => setTimeout(resolve, 90));
-
-      // Upgrade in background with full precision ordering/data.
-      void (async () => {
-        try {
-          const fullRes = await fetch('/api/scan-bandi', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userProfile: nextProfile, limit: 10, mode: 'full', channel: 'chat', strictness: 'high' })
-          });
-          const fullJson = (await fullRes.json()) as ScanResponse & { error?: string };
-          if (!fullRes.ok) return;
-          upsertScanMessages(fullJson);
-          maybeAskRefinement(fullJson);
-        } catch {
-          // Ignore background refresh failures, keep fast snapshot.
+      if ((scanJson.results?.length ?? 0) === 0) {
+        handleNoResults(scanJson);
+      } else {
+        if (timedOut) {
+          setMessages((prev) => prev.filter((msg) => msg.id !== timeoutMessageId));
         }
-      })();
+        appendScanMessages(scanJson);
+      }
+      lastRenderedScanHashRef.current = scanProfileHash ?? buildScanProfileHash(nextProfile);
+      if ((scanJson.results?.length ?? 0) > 0) {
+        awaitingRefineAnswerRef.current = true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 90));
     } catch (e) {
+      if (activeScanTokenRef.current !== scanToken) return;
       stopOverlayProgressLoop();
       setScanOverlayProgress(100);
       setScanOverlayStepIndex(4);
@@ -597,14 +684,22 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
           }
         ];
       });
+      awaitingRefineAnswerRef.current = false;
     } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (activeScanTokenRef.current === scanToken) {
+        activeScanTokenRef.current = null;
+      }
       setIsScanning(false);
+      scanInFlightRef.current = false;
     }
   }
 
   async function onSend(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    interactionVersionRef.current += 1;
+    const interactionVersion = interactionVersionRef.current;
 
     setMessages((prev) => [...prev, { id: uid(), role: 'user', kind: 'text', body: trimmed }]);
 
@@ -633,7 +728,14 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       }
 
       if (json.readyToScan) {
-        await runScan(json.userProfile, json.step);
+        const profileHash = buildScanProfileHash(json.userProfile);
+        const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
+        const shouldRunFirstScan = lastRenderedScanHashRef.current === null && hasProfileDelta;
+        const refineAnswerInformative = isInformativeRefineAnswer(trimmed);
+        const shouldRunRefineScan = awaitingRefineAnswerRef.current && hasProfileDelta && refineAnswerInformative;
+        if ((shouldRunFirstScan || shouldRunRefineScan) && !scanInFlightRef.current) {
+          await runScan(json.userProfile, json.step, profileHash, interactionVersion);
+        }
       }
     } catch (e) {
       setMessages((prev) => [
@@ -657,6 +759,10 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     setScanOverlayStepIndex(0);
     lockAutoBottomScrollRef.current = false;
     setFocusResultMessageId(null);
+    scanInFlightRef.current = false;
+    activeScanTokenRef.current = null;
+    awaitingRefineAnswerRef.current = false;
+    lastRenderedScanHashRef.current = null;
     setMessages([]);
     setProfile({});
     setStep('location');
@@ -809,24 +915,6 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                         >
                           <MessageBubble role="assistant">
                             <BandiResults explanation={m.explanation} results={m.results} nearMisses={m.nearMisses} />
-                          </MessageBubble>
-                        </div>
-                      );
-                    if (m.kind === 'cta')
-                      return (
-                        <div
-                          key={m.id}
-                          ref={(node) => {
-                            messageNodeRefs.current[m.id] = node;
-                          }}
-                        >
-                          <MessageBubble role="assistant">
-                            <div className="cta-wrap">
-                              <div className="cta-note">{CTA_TEXT}</div>
-                              <a className="cta-button" href={m.bookingUrl} target="_blank" rel="noreferrer">
-                                Prenota consulenza
-                              </a>
-                            </div>
                           </MessageBubble>
                         </div>
                       );

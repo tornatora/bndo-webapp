@@ -16,7 +16,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "smoke:v2": "bash scripts/smoke-v2.sh",
-    "scanner:cases": "node scripts/check-scanner-real-cases.mjs"
+    "scanner:cases": "node scripts/check-scanner-real-cases.mjs",
+    "conversation:readiness": "node scripts/check-conversation-readiness.mjs",
+    "conversation:quality": "node scripts/check-conversation-quality.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.5.2",

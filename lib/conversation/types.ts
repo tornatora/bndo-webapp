@@ -13,7 +13,9 @@ export type UserProfile = {
   ateco: string | null;
   atecoAnswered: boolean;
   location: { region: string | null; municipality: string | null };
+  locationNeedsConfirmation?: boolean;
   age: number | null;
+  ageBand?: 'under35' | 'over35' | null;
   employmentStatus: string | null;
   legalForm: string | null;
   employees: number | null;
@@ -42,6 +44,21 @@ export type Step =
 export type NextBestField = Exclude<Step, 'ready'>;
 
 export type ConversationMode = 'qa' | 'profiling' | 'handoff' | 'scan_ready';
+
+export type ScanReadinessReason =
+  | 'ready'
+  | 'missing:fundingGoal'
+  | 'missing:location'
+  | 'missing:businessContext'
+  | 'missing:founderEligibility'
+  | 'missing:topicPrecision'
+  | 'missing:unknown';
+
+export type ConversationResponseMeta = {
+  nextQuestionField?: NextBestField | null;
+  profileCompletenessScore?: number;
+  scanReadinessReason?: ScanReadinessReason;
+};
 
 export type ProfileFieldMemory = {
   lastUpdatedAt: string;

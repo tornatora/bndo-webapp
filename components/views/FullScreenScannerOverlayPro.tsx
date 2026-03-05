@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-
 export const SCAN_OVERLAY_STEPS = [
   'Scansione fonti ufficiali nazionali',
   'Scansione fonti regionali e Camere di Commercio',
@@ -27,40 +25,10 @@ export function FullScreenScannerOverlayPro({
   activeStepIndex,
   currentStepLabel,
 }: FullScreenScannerOverlayProProps) {
-  const isControlled = progress !== undefined || activeStepIndex !== undefined || currentStepLabel !== undefined;
-
-  const minDurationMs = 5600;
-  const [internalIdx, setInternalIdx] = useState(0);
-  const [internalProgress, setInternalProgress] = useState(0);
-  const startAtRef = useRef<number>(0);
-
-  useEffect(() => {
-    if (!open || isControlled) return;
-    startAtRef.current = Date.now();
-    setInternalIdx(0);
-    setInternalProgress(0);
-
-    const progressId = setInterval(() => {
-      const elapsed = Date.now() - startAtRef.current;
-      const next = Math.max(0, Math.min(100, (elapsed / minDurationMs) * 100));
-      setInternalProgress(next);
-      const stepIndex = Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.floor((next / 100) * SCAN_OVERLAY_STEPS.length));
-      setInternalIdx(stepIndex);
-    }, 90);
-
-    return () => {
-      clearInterval(progressId);
-    };
-  }, [open, isControlled]);
-
   if (!open) return null;
 
-  const safeProgress = isControlled
-    ? clampProgress(progress ?? (activeStepIndex !== undefined ? ((activeStepIndex + 1) / SCAN_OVERLAY_STEPS.length) * 100 : 0))
-    : internalProgress;
-  const safeStepIndex = isControlled
-    ? Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.max(0, activeStepIndex ?? toStepFromProgress(safeProgress)))
-    : internalIdx;
+  const safeProgress = clampProgress(progress ?? (activeStepIndex !== undefined ? ((activeStepIndex + 1) / SCAN_OVERLAY_STEPS.length) * 100 : 0));
+  const safeStepIndex = Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.max(0, activeStepIndex ?? toStepFromProgress(safeProgress)));
   const activeLabel = currentStepLabel ?? SCAN_OVERLAY_STEPS[safeStepIndex] ?? SCAN_OVERLAY_STEPS[0];
 
   const stepStatus = (stepIndex: number): 'done' | 'active' | 'pending' => {

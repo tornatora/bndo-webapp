@@ -24,6 +24,7 @@ export type BandoResult = {
   aidIntensity?: string | null;
   budgetTotal?: number | null;
   economicOffer?: Record<string, unknown> | null;
+  bookingUrl?: string | null;
 };
 
 function normalizeAid(value: string) {
@@ -141,8 +142,15 @@ function supportsFondoPerduto(aidForm: string | null | undefined): boolean {
   return normalizeAid(aidForm ?? '').includes('fondo perduto');
 }
 
+function isVerifyLabel(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /da verificare/i.test(value);
+}
+
 function economicSummary(item: BandoResult): { amount: string; coverage: string } {
   const economic = item.economicOffer && typeof item.economicOffer === 'object' ? item.economicOffer : null;
+  const displayAmountLabel =
+    typeof economic?.displayAmountLabel === 'string' && economic.displayAmountLabel.trim() ? economic.displayAmountLabel.trim() : null;
   const displayProjectAmountLabel =
     typeof economic?.displayProjectAmountLabel === 'string' && economic.displayProjectAmountLabel.trim()
       ? economic.displayProjectAmountLabel.trim()
@@ -156,15 +164,28 @@ function economicSummary(item: BandoResult): { amount: string; coverage: string 
   const costMax = toNumeric(economic?.costMax);
   const budgetTotal =
     typeof item.budgetTotal === 'number' && Number.isFinite(item.budgetTotal) && item.budgetTotal > 0 ? item.budgetTotal : null;
-  const amount = displayProjectAmountLabel || formatRange(costMin, costMax) || formatRange(null, budgetTotal) || 'Da definire';
+  const amountFromRange = formatRange(costMin, costMax) || formatRange(null, budgetTotal);
+  const amountCandidate = displayProjectAmountLabel || displayAmountLabel || amountFromRange;
+  const amount = !amountCandidate || isVerifyLabel(amountCandidate) ? 'Importo da verificare' : amountCandidate;
   const rawCoverageLabel =
     displayCoverageLabel ||
     (typeof economic?.estimatedCoverageLabel === 'string' ? economic.estimatedCoverageLabel : item.aidIntensity || null);
   const coveragePercents = supportsFondoPerduto(item.aidForm) ? parseCoveragePercents(rawCoverageLabel, economic) : null;
+  const coverageByLabel =
+    typeof rawCoverageLabel === 'string' && rawCoverageLabel.trim() && !isVerifyLabel(rawCoverageLabel) ? rawCoverageLabel.trim() : null;
+  const coverage = supportsFondoPerduto(item.aidForm)
+    ? isVerifyLabel(rawCoverageLabel)
+      ? 'Da verificare'
+      : coveragePercents
+        ? formatPercentRange(coveragePercents)
+        : coverageByLabel && /%/.test(coverageByLabel)
+          ? coverageByLabel
+          : 'Da verificare'
+    : '0%';
 
   return {
     amount,
-    coverage: supportsFondoPerduto(item.aidForm) ? formatPercentRange(coveragePercents) : '0%',
+    coverage,
   };
 }
 
@@ -177,6 +198,16 @@ export function BandiResults({
   results: BandoResult[];
   nearMisses?: BandoResult[];
 }) {
+  const followupDetailsHref = (item: BandoResult) => `/grants/${encodeURIComponent(item.id)}`;
+  const followupBookingHref = (item: BandoResult) =>
+    item.bookingUrl && item.bookingUrl.trim() ? item.bookingUrl : `/prenota?bandoId=${encodeURIComponent(item.id)}`;
+
+  const compatibilitySummary = (item: BandoResult) => {
+    const reasons = (item.matchReasons ?? []).filter((reason) => typeof reason === 'string' && reason.trim()).slice(0, 2);
+    if (reasons.length) return reasons;
+    return ['Compatibile con il profilo inserito'];
+  };
+
   return (
     <div className="results-wrap">
       <div className="results-explanation">{explanation}</div>
@@ -184,73 +215,62 @@ export function BandiResults({
         {results.map((bando) => {
           const economic = economicSummary(bando);
           return (
-          <div key={bando.id} className="result-card">
-            <div className="result-head">
-              <div className="result-title">{bando.title}</div>
-              <div className="result-head-right">
-                {typeof bando.matchScore === 'number' ? (
-                  <div className="result-score" aria-label="Punteggio compatibilita">
-                    Match {Math.round(bando.matchScore * 100)}%
+            <div key={bando.id} className="result-card">
+              <div className="result-head">
+                <div className="result-title">{bando.title}</div>
+                <div className="result-head-right">
+                  {typeof bando.matchScore === 'number' ? (
+                    <div className="result-score" aria-label="Punteggio compatibilita">
+                      Match {Math.round(bando.matchScore * 100)}%
+                    </div>
+                  ) : null}
+                  <div className="result-deadline">
+                    <span className="result-deadline-label">Scadenza</span>
+                    <span className="result-deadline-value">{formatDateIT(bando.deadlineAt)}</span>
                   </div>
-                ) : null}
-                <div className="result-deadline">
-                  <span className="result-deadline-label">Scadenza</span>
-                  <span className="result-deadline-value">{formatDateIT(bando.deadlineAt)}</span>
                 </div>
               </div>
-            </div>
 
-            <div className="result-econ-grid">
-              <div className="result-econ-item">
-                <span className="result-econ-k">Importo</span>
-                <span className="result-econ-v">{economic.amount}</span>
+              <div className="result-authority-row">
+                <span className="result-authority-k">Ente</span>
+                <span className="result-authority-v">{bando.authorityName}</span>
               </div>
-              <div className="result-econ-item">
-                <span className="result-econ-k">% fondo perduto</span>
-                <span className="result-econ-v">{economic.coverage}</span>
-              </div>
-            </div>
 
-            <div className="result-meta">
-              <div className="result-meta-row">
-                <span className="result-meta-k">Ente</span>
-                <span className="result-meta-v">{bando.authorityName}</span>
+              <div className="result-econ-grid">
+                <div className="result-econ-item">
+                  <span className="result-econ-k">Importo</span>
+                  <span className="result-econ-v">{economic.amount}</span>
+                </div>
+                <div className="result-econ-item">
+                  <span className="result-econ-k">% fondo perduto</span>
+                  <span className="result-econ-v">{economic.coverage}</span>
+                </div>
               </div>
-              <div className="result-meta-row">
-                <span className="result-meta-k">Fonte</span>
-                <a className="result-link" href={bando.sourceUrl} target="_blank" rel="noreferrer">
-                  Apri link
-                </a>
-              </div>
-            </div>
 
-            {bando.matchReasons?.length ? (
               <div className="result-why">
-                {bando.matchReasons.slice(0, 3).map((reason, idx) => (
+                {compatibilitySummary(bando).map((reason, idx) => (
                   <div key={idx} className="result-why-pill">
                     {reason}
                   </div>
                 ))}
               </div>
-            ) : null}
 
-            {bando.requirements.length ? (
-              <div className="result-req">
-                {bando.requirements.slice(0, 5).map((req, idx) => (
-                  <div key={idx} className="req-pill">
-                    {req}
-                  </div>
-                ))}
+              <div className="chat-result-actions">
+                <a className="chat-result-btn chat-result-btn--details" href={followupDetailsHref(bando)}>
+                  Dettagli e requisiti
+                </a>
+                <a
+                  className="chat-result-btn chat-result-btn--consult"
+                  href={followupBookingHref(bando)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Prenota una consulenza per questo bando con BNDO
+                </a>
               </div>
-            ) : null}
-
-            {bando.mismatchFlags?.length ? (
-              <div className="result-mismatch">
-                {bando.mismatchFlags.slice(0, 2).join(' · ')}
-              </div>
-            ) : null}
-          </div>
-        )})}
+            </div>
+          );
+        })}
       </div>
       {nearMisses.length ? (
         <div className="near-miss-wrap">
@@ -263,8 +283,8 @@ export function BandiResults({
                   {typeof bando.matchScore === 'number' ? <div className="near-miss-score">{Math.round(bando.matchScore * 100)}%</div> : null}
                 </div>
                 {bando.mismatchFlags?.length ? <div className="near-miss-hint">{bando.mismatchFlags[0]}</div> : null}
-                <a className="near-miss-link" href={bando.sourceUrl} target="_blank" rel="noreferrer">
-                  Fonte ufficiale
+                <a className="near-miss-link" href={followupDetailsHref(bando)}>
+                  Dettagli e requisiti
                 </a>
               </div>
             ))}
