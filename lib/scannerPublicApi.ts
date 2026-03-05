@@ -112,6 +112,7 @@ type LocalExplainability = {
 
 const LOCAL_PROFILE_KEY = 'bndo_scanner_local_profile';
 const LOCAL_MATCHES_KEY = 'bndo_scanner_local_matches';
+const LOCAL_MATCHES_EVENT = 'bndo:scanner-matches-updated';
 
 export class ApiError extends Error {
   statusCode: number;
@@ -144,6 +145,11 @@ function readStorage<T>(key: string): T | null {
 function writeStorage(key: string, value: unknown) {
   if (!isBrowser()) return;
   window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function emitLocalMatchesUpdated(detail: { phase: 'fast' | 'full' }) {
+  if (!isBrowser()) return;
+  window.dispatchEvent(new CustomEvent(LOCAL_MATCHES_EVENT, { detail }));
 }
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -336,7 +342,7 @@ function toLegacyProfile(body: unknown): LocalScannerProfile {
   };
 }
 
-async function runLocalMatching(): Promise<LocalMatchLatestResponse> {
+async function runLocalMatching(mode: 'fast' | 'full' = 'full'): Promise<LocalMatchLatestResponse> {
   const profile = readStorage<LocalScannerProfile>(LOCAL_PROFILE_KEY);
   if (!profile) {
     throw new ApiError(400, 'Profilo scanner mancante. Compila il form prima di avviare la ricerca.');
@@ -346,9 +352,10 @@ async function runLocalMatching(): Promise<LocalMatchLatestResponse> {
   const scan = await fetchJson<{
     results?: ScanRouteItem[];
     nearMisses?: ScanRouteItem[];
+    phase?: 'fast' | 'full';
   }>(`${baseUrl}/api/scan-bandi`, {
     method: 'POST',
-    body: JSON.stringify(profile)
+    body: JSON.stringify({ userProfile: profile, mode })
   });
 
   const latest: LocalMatchLatestResponse = {
@@ -358,6 +365,7 @@ async function runLocalMatching(): Promise<LocalMatchLatestResponse> {
   };
 
   writeStorage(LOCAL_MATCHES_KEY, latest);
+  emitLocalMatchesUpdated({ phase: scan.phase === 'fast' ? 'fast' : 'full' });
   return latest;
 }
 
@@ -484,7 +492,9 @@ export async function apiRequest<T>(
   }
 
   if (path === '/api/v1/matching/run' && method === 'POST') {
-    const latest = await runLocalMatching();
+    const latest = await runLocalMatching('fast');
+    // Upgrade in background with full precision payload.
+    void runLocalMatching('full').catch(() => null);
     return ({ run: latest.run } as unknown) as T;
   }
 

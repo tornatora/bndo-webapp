@@ -8,12 +8,17 @@ export type ContributionPreference =
 
 export type UserProfile = {
   activityType: string | null;
+  businessExists: boolean | null;
   sector: string | null;
   ateco: string | null;
   atecoAnswered: boolean;
   location: { region: string | null; municipality: string | null };
+  age: number | null;
+  employmentStatus: string | null;
+  legalForm: string | null;
   employees: number | null;
   revenueOrBudgetEUR: number | null;
+  requestedContributionEUR: number | null;
   budgetAnswered: boolean;
   fundingGoal: string | null;
   contributionPreference: ContributionPreference | null;
@@ -57,4 +62,3 @@ export type Session = {
   humanHandoffRequested?: boolean;
   humanHandoffCompleted?: boolean;
 };
-

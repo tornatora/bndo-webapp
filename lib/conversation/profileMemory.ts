@@ -53,6 +53,7 @@ export function getChangedFields(prev: UserProfile, next: UserProfile): NextBest
   if ((prev.employees ?? null) !== (next.employees ?? null)) changed.push('employees');
   if (
     (prev.revenueOrBudgetEUR ?? null) !== (next.revenueOrBudgetEUR ?? null) ||
+    (prev.requestedContributionEUR ?? null) !== (next.requestedContributionEUR ?? null) ||
     prev.budgetAnswered !== next.budgetAnswered
   ) {
     changed.push('budget');
@@ -67,18 +68,23 @@ export function getChangedFields(prev: UserProfile, next: UserProfile): NextBest
 export function summarizeProfileForPrompt(profile: UserProfile) {
   const bits: string[] = [];
   if (profile.activityType) bits.push(`tipo=${profile.activityType}`);
+  if (profile.businessExists === true) bits.push('stato=attivita_esistente');
+  if (profile.businessExists === false) bits.push('stato=nuova_attivita');
   if (profile.location?.region) {
     const municipality = profile.location?.municipality ? `, comune=${profile.location.municipality}` : '';
     bits.push(`territorio=${profile.location.region}${municipality}`);
   }
+  if (profile.age !== null) bits.push(`eta=${profile.age}`);
+  if (profile.employmentStatus) bits.push(`occupazione=${profile.employmentStatus}`);
+  if (profile.legalForm) bits.push(`forma=${profile.legalForm}`);
   if (profile.sector) bits.push(`settore=${profile.sector}`);
   if (profile.ateco) bits.push(`ateco=${profile.ateco}`);
   if (profile.fundingGoal) bits.push(`obiettivo=${profile.fundingGoal}`);
   if (profile.revenueOrBudgetEUR !== null) bits.push(`budget=${profile.revenueOrBudgetEUR}EUR`);
+  if (profile.requestedContributionEUR !== null) bits.push(`contributo_richiesto=${profile.requestedContributionEUR}EUR`);
   if (profile.contributionPreference) bits.push(`preferenza=${profile.contributionPreference}`);
   if (profile.employees !== null) bits.push(`addetti=${profile.employees}`);
   if (profile.contactEmail) bits.push(`email=${profile.contactEmail}`);
   if (profile.contactPhone) bits.push(`phone=${profile.contactPhone}`);
   return bits.join(' | ');
 }
-

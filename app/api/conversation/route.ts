@@ -8,6 +8,7 @@ import { emptyProfileMemory, getChangedFields, markProfileFields, summarizeProfi
 import { findClosestSimilarReply } from '@/lib/conversation/repetitionGuard';
 import { composeAssistantReply } from '@/lib/conversation/responseComposer';
 import { applyTonePolicy } from '@/lib/conversation/tonePolicy';
+import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowledge/measureStatus';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import type { ContributionPreference, ConversationMode, NextBestField, Session, Step, UserProfile } from '@/lib/conversation/types';
@@ -261,7 +262,11 @@ async function generateAssistantTextWithOpenAI(args: {
     nextStep === 'location'
       ? 'Regione (Comune opzionale)'
       : nextStep === 'activityType'
-        ? 'tipo di realta (PMI/startup/professionista/ETS)'
+        ? needsFounderEligibilityData(profile)
+          ? 'eta e stato occupazionale del proponente'
+          : profile.businessExists === null
+            ? 'attivita gia attiva o da costituire'
+            : 'tipo di realta (PMI/startup/professionista/ETS)'
         : nextStep === 'fundingGoal'
           ? 'cosa vuoi finanziare (obiettivo concreto)'
           : nextStep === 'ateco'
@@ -381,12 +386,17 @@ const IT_REGIONS = [
 function emptyProfile(): UserProfile {
   return {
     activityType: null,
+    businessExists: null,
     sector: null,
     ateco: null,
     atecoAnswered: false,
     location: { region: null, municipality: null },
+    age: null,
+    employmentStatus: null,
+    legalForm: null,
     employees: null,
     revenueOrBudgetEUR: null,
+    requestedContributionEUR: null,
     budgetAnswered: false,
     fundingGoal: null,
     contributionPreference: null,
@@ -398,13 +408,18 @@ function emptyProfile(): UserProfile {
 function isProfileEmpty(p: UserProfile) {
   return (
     !p.activityType &&
+    p.businessExists === null &&
     !p.sector &&
     !p.ateco &&
     p.atecoAnswered === false &&
     !p.location?.region &&
     !p.location?.municipality &&
+    p.age === null &&
+    !p.employmentStatus &&
+    !p.legalForm &&
     p.employees === null &&
     p.revenueOrBudgetEUR === null &&
+    p.requestedContributionEUR === null &&
     p.budgetAnswered === false &&
     !p.fundingGoal &&
     !p.contributionPreference &&
@@ -479,15 +494,43 @@ function hasTopicSignal(profile: UserProfile) {
 }
 
 function hasPrecisionSignal(profile: UserProfile) {
-  return Boolean(profile.budgetAnswered || profile.contributionPreference || profile.atecoAnswered || profile.sector || profile.employees !== null);
+  return Boolean(
+    profile.budgetAnswered ||
+      profile.contributionPreference ||
+      profile.atecoAnswered ||
+      profile.sector ||
+      profile.employees !== null ||
+      profile.requestedContributionEUR !== null ||
+      (profile.age !== null && Boolean(profile.employmentStatus))
+  );
+}
+
+function needsFounderEligibilityData(profile: UserProfile) {
+  return profile.businessExists === false && (profile.age === null || !profile.employmentStatus);
+}
+
+function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
+  if (step === 'activityType' && profile.businessExists === null) {
+    return attempt >= 2
+      ? "Per continuare mi confermi solo questo: hai gia un'attivita attiva oppure devi costituirla?"
+      : "Per filtrare i bandi giusti devo capire se hai gia un'attivita attiva o se devi costituirla.";
+  }
+
+  if (step === 'activityType' && needsFounderEligibilityData(profile)) {
+    return attempt >= 2
+      ? "Per chiudere il check requisiti mi servono entrambi i dati: eta e stato occupazionale (occupato/disoccupato/inoccupato/neet)."
+      : "Per verificare misure come Resto al Sud 2.0 mi servono due dati: eta e stato occupazionale (occupato/disoccupato/inoccupato/neet).";
+  }
+
+  return questionFor(step, seed, attempt);
 }
 
 function getNextStep(profile: UserProfile): Step {
-  // Conversationally, start from project intent, then qualify the profile,
-  // then collect strict filters (region/ATECO/etc).
+  // Collect goal first, then business stage, then territory and strict constraints.
   if (!profile.fundingGoal) return 'fundingGoal';
-  if (!profile.activityType) return 'activityType';
+  if (!profile.activityType || profile.businessExists === null) return 'activityType';
   if (!profile.location.region) return 'location';
+  if (needsFounderEligibilityData(profile)) return 'activityType';
 
   const hasTopic = hasTopicSignal(profile);
   if (!hasTopic) return 'fundingGoal';
@@ -558,9 +601,70 @@ function messageMentionsEmployees(message: string) {
   );
 }
 
+function parseBusinessExistsFromMessage(message: string): boolean | null {
+  const n = normalizeForMatch(message);
+  if (!n) return null;
+
+  if (
+    /(da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
+      n
+    )
+  ) {
+    return false;
+  }
+
+  if (/(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|ho gia un attivita|ho partita iva)/.test(n)) {
+    return true;
+  }
+
+  return null;
+}
+
+function parseAge(message: string): number | null {
+  const lowered = message.toLowerCase();
+  const match =
+    lowered.match(/\bho\s+(\d{2})\s+anni\b/) ??
+    lowered.match(/\b(\d{2})\s+anni\b/) ??
+    lowered.match(/\beta(?:')?\s*(?:di)?\s*(\d{2})\b/);
+  if (!match?.[1]) return null;
+  const age = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(age) || age < 16 || age > 100) return null;
+  return age;
+}
+
+function parseEmploymentStatus(message: string): string | null {
+  const n = normalizeForMatch(message);
+  if (!n) return null;
+  if (/(disoccupat|senza lavoro|non occupat)/.test(n)) return 'disoccupato';
+  if (/inoccupat/.test(n)) return 'inoccupato';
+  if (/\bneet\b/.test(n)) return 'neet';
+  if (/student/.test(n)) return 'studente';
+  if (/(occupat|dipendent|lavoro dipendente|a tempo)/.test(n)) return 'occupato';
+  if (/(autonom|partita iva|libero professionista)/.test(n)) return 'autonomo';
+  return null;
+}
+
+function parseLegalForm(message: string): string | null {
+  const n = normalizeForMatch(message);
+  if (!n) return null;
+  if (/\bsrls\b/.test(n)) return 'SRLS';
+  if (/\bsrl\b/.test(n)) return 'SRL';
+  if (/\bspa\b/.test(n)) return 'SPA';
+  if (/\bsnc\b/.test(n)) return 'SNC';
+  if (/\bsas\b/.test(n)) return 'SAS';
+  if (/\bcooperativ/.test(n)) return 'Cooperativa';
+  if (/\bditta individuale\b/.test(n)) return 'Ditta individuale';
+  return null;
+}
+
 function parseBudgetEUR(message: string): number | null {
   const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
   if (!lowered) return null;
+
+  // Ignore ages and similar demographic values ("ho 29 anni").
+  if (/\b\d{1,3}\s+anni\b/.test(lowered) || /\beta(?:')?\s*(?:di)?\s*\d{1,3}\b/.test(lowered)) {
+    return null;
+  }
 
   // Capture a number with optional decimal and optional multiplier (k/m).
   const m = lowered.match(/(\d+(?:[.,]\d+)?)(?:\s*)(k|m|mila|milioni|milione)?/i);
@@ -570,10 +674,27 @@ function parseBudgetEUR(message: string): number | null {
   const base = Number.parseFloat(rawNum);
   if (!Number.isFinite(base) || base < 0) return null;
 
+  const hasBudgetSignal =
+    /\b(budget|investiment|spesa|fatturat|ricav|euro|eur|contribut|finanziament|importo|capitale)\b/.test(lowered) ||
+    /\b\d+\s*(k|m|mila|milioni|milione)\b/.test(lowered) ||
+    (/^\s*\d+(?:[.,]\d+)?\s*$/.test(lowered) && base >= 1000);
+  if (!hasBudgetSignal) return null;
+
   const mult = (m[2] ?? '').toLowerCase();
   if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
   if (mult === 'm' || mult === 'milione' || mult === 'milioni') return Math.round(base * 1_000_000);
   return Math.round(base);
+}
+
+function parseRequestedContributionEUR(message: string): number | null {
+  const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!lowered) return null;
+
+  const hasRequestSignal =
+    /\b(ho bisogno|mi serve|mi servono|vorrei ottenere|richiedo|richiesta|contributo|agevolazione|fondi)\b/.test(lowered);
+  if (!hasRequestSignal) return null;
+
+  return parseBudgetEUR(message);
 }
 
 function messageMentionsBudget(message: string) {
@@ -890,6 +1011,7 @@ function parsePhone(message: string): string | null {
 function shouldAttemptStepAnswer(step: Step, message: string) {
   const lowered = message.toLowerCase();
   if (!message.trim()) return false;
+  if (wantsToProceedToMatching(message)) return false;
 
   if (step === 'location') return Boolean(parseRegionAndMunicipality(message).region || detectRegionAnywhere(message));
   if (step === 'budget') return Boolean(parseBudgetEUR(message) !== null || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
@@ -945,6 +1067,8 @@ function profileRecap(profile: UserProfile) {
   else if (r) bits.push(r);
 
   if (profile.activityType) bits.push(profile.activityType);
+  if (profile.businessExists === true) bits.push('attivita gia avviata');
+  if (profile.businessExists === false) bits.push('nuova attivita da avviare');
 
   const goal = (profile.fundingGoal ?? '').trim();
   if (goal) bits.push(goal.length > 80 ? `${goal.slice(0, 80).trim()}…` : goal);
@@ -954,6 +1078,9 @@ function profileRecap(profile: UserProfile) {
 
   const ateco = (profile.ateco ?? '').trim();
   if (ateco && /\d{2}/.test(ateco)) bits.push(`ATECO ${ateco}`);
+  if (profile.age !== null) bits.push(`${profile.age} anni`);
+  if (profile.employmentStatus) bits.push(profile.employmentStatus);
+  if (profile.legalForm) bits.push(profile.legalForm);
 
   return bits.length ? `Ok, mi segno: ${bits.join(' · ')}.` : null;
 }
@@ -1111,12 +1238,17 @@ function computeScanHash(profile: UserProfile) {
   // Only include fields relevant for matching/scoring. Keep stable ordering.
   const obj = {
     activityType: profile.activityType ?? null,
+    businessExists: profile.businessExists ?? null,
     sector: profile.sector ?? null,
     ateco: profile.ateco ?? null,
     region: profile.location?.region ?? null,
     municipality: profile.location?.municipality ?? null,
+    age: profile.age ?? null,
+    employmentStatus: profile.employmentStatus ?? null,
+    legalForm: profile.legalForm ?? null,
     employees: profile.employees ?? null,
     revenueOrBudgetEUR: profile.revenueOrBudgetEUR ?? null,
+    requestedContributionEUR: profile.requestedContributionEUR ?? null,
     fundingGoal: profile.fundingGoal ?? null,
     contributionPreference: profile.contributionPreference ?? null
   };
@@ -1124,7 +1256,7 @@ function computeScanHash(profile: UserProfile) {
 }
 
 function isScanReady(profile: UserProfile) {
-  return Boolean(profile.location?.region) && Boolean(profile.activityType) && hasTopicSignal(profile) && hasPrecisionSignal(profile);
+  return getNextStep(profile) === 'ready';
 }
 
 function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
@@ -1133,7 +1265,16 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
 
   if (step === 'activityType') {
     if (trimmed.length < 2) return { profile, error: 'Mi serve una descrizione un po piu chiara del tipo di attivita.' };
-    return { profile: { ...profile, activityType: parseActivityType(trimmed) ?? trimmed }, error: null };
+    const normalizedActivity = parseActivityType(trimmed) ?? trimmed;
+    const inferredBusinessExists = parseBusinessExistsFromMessage(normalizedActivity);
+    return {
+      profile: {
+        ...profile,
+        activityType: normalizedActivity,
+        businessExists: inferredBusinessExists ?? profile.businessExists
+      },
+      error: null
+    };
   }
 
   if (step === 'sector') {
@@ -1179,7 +1320,15 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
       };
     }
 
-    return { profile: { ...profile, revenueOrBudgetEUR: n, budgetAnswered: true }, error: null };
+    return {
+      profile: {
+        ...profile,
+        revenueOrBudgetEUR: n,
+        requestedContributionEUR: profile.requestedContributionEUR ?? parseRequestedContributionEUR(trimmed),
+        budgetAnswered: true
+      },
+      error: null
+    };
   }
 
   if (step === 'fundingGoal') {
@@ -1200,7 +1349,14 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
         error: 'Ok. Per fare un match serio mi serve un dettaglio in piu: che cosa vuoi finanziare concretamente?'
       };
     }
-    return { profile: { ...profile, fundingGoal: trimmed }, error: null };
+    return {
+      profile: {
+        ...profile,
+        fundingGoal: trimmed,
+        businessExists: parseBusinessExistsFromMessage(trimmed) ?? profile.businessExists
+      },
+      error: null
+    };
   }
 
   if (step === 'contributionPreference') {
@@ -1284,6 +1440,18 @@ export async function POST(req: Request) {
     }
     const detectedActivity = parseActivityType(trimmed);
     if (detectedActivity && (session.step === 'activityType' || !session.userProfile.activityType)) extracted.activityType = detectedActivity;
+    const detectedBusinessExists = parseBusinessExistsFromMessage(trimmed);
+    if (detectedBusinessExists !== null) extracted.businessExists = detectedBusinessExists;
+    const detectedAge = parseAge(trimmed);
+    if (detectedAge !== null) extracted.age = detectedAge;
+    const detectedEmployment = parseEmploymentStatus(trimmed);
+    if (detectedEmployment && (session.step === 'activityType' || !session.userProfile.employmentStatus)) {
+      extracted.employmentStatus = detectedEmployment;
+    }
+    const detectedLegalForm = parseLegalForm(trimmed);
+    if (detectedLegalForm && (session.step === 'activityType' || !session.userProfile.legalForm)) {
+      extracted.legalForm = detectedLegalForm;
+    }
     const detectedEmployees = parseEmployees(trimmed);
     if (
       detectedEmployees !== null &&
@@ -1298,6 +1466,13 @@ export async function POST(req: Request) {
     ) {
       extracted.revenueOrBudgetEUR = detectedBudget;
       extracted.budgetAnswered = true;
+    }
+    const detectedRequestedContribution = parseRequestedContributionEUR(trimmed);
+    if (
+      detectedRequestedContribution !== null &&
+      (session.step === 'budget' || session.userProfile.requestedContributionEUR === null)
+    ) {
+      extracted.requestedContributionEUR = detectedRequestedContribution;
     }
     const detectedPref = parseContributionPreference(trimmed);
     if (detectedPref && (session.step === 'contributionPreference' || !session.userProfile.contributionPreference)) {
@@ -1322,17 +1497,21 @@ export async function POST(req: Request) {
     }
 
     // If the message looks like a question, answer it but don't force validation errors.
-    const qa = questionLike ? answerFinanceQuestion(trimmed) : null;
+    const measureUpdateReply =
+      questionLike && isMeasureUpdateQuestion(trimmed) ? await resolveMeasureUpdateReply(trimmed) : null;
+    const qa = questionLike && !measureUpdateReply ? answerFinanceQuestion(trimmed) : null;
     const metaQa = answerMetaQuestion(trimmed);
     const conversationalReply = answerConversationalIntent(trimmed);
     const handoffAlreadyOpen = Boolean(session.humanHandoffRequested && !session.humanHandoffCompleted);
     const handoffRequested = asksHumanConsultant || handoffAlreadyOpen;
     const handoffCompleted = Boolean(session.humanHandoffCompleted && !asksHumanConsultant);
-    const hasQaAnswer = Boolean(questionLike || questionsFirst || conversationalIntent || qa || metaQa || conversationalReply);
+    const hasQaAnswer = Boolean(
+      questionLike || questionsFirst || conversationalIntent || measureUpdateReply || qa || metaQa || conversationalReply
+    );
 
     // Special: greeting-only messages must ALWAYS start the BNDO triage.
     // This prevents stale cookies (previous profile) from producing unrelated "refine your search" replies.
-    if (greeting && smallTalk && !qa) {
+    if (greeting && smallTalk && !qa && !measureUpdateReply) {
       const assistantText =
         "Ciao, sono il tuo assistente BNDO. Per quale motivo vorresti partecipare ad un BNDO? Hai già un'attività o devi costituirla? A cosa ti servono i fondi?";
 
@@ -1370,7 +1549,7 @@ export async function POST(req: Request) {
     }
 
     // Special: first-touch greeting should feel human and set context.
-    if (greeting && isNewSession && !qa) {
+    if (greeting && isNewSession && !qa && !measureUpdateReply) {
       const assistantText =
         "Ciao, sono il tuo assistente BNDO. Per quale motivo vorresti partecipare ad un BNDO? Hai già un'attività o devi costituirla? A cosa ti servono i fondi?";
 
@@ -1525,7 +1704,7 @@ export async function POST(req: Request) {
     }
 
     // Apply the message as an answer to the expected step (when it makes sense).
-    const shouldTreatAsStepAnswer = !hasQaAnswer && !smallTalk; // if we are answering a question or user is just greeting, don't treat it as a strict step answer
+    const shouldTreatAsStepAnswer = !hasQaAnswer && !smallTalk && !proceedToMatching; // if we are answering a question or user is just greeting, don't treat it as a strict step answer
     if (shouldTreatAsStepAnswer) {
       // Only validate/consume the step if the relevant field is still missing.
       const shouldConsumeStep =
@@ -1586,7 +1765,7 @@ export async function POST(req: Request) {
     const askedCounts = session.askedCounts ?? {};
     const attempt = (askedCounts[nextStep] ?? 0) + 1;
     const recap = profileRecap(profile);
-    const questionHint = shouldScanNow ? null : questionFor(nextStep, seed, attempt);
+    const questionHint = shouldScanNow ? null : questionForStepWithProfile(nextStep, profile, seed, attempt);
     const assistantCore = (() => {
       if (shouldScanNow) {
         return [recap, 'Perfetto, ci siamo. Avvio ora lo scanner BNDO per trovare i bandi piu compatibili con il tuo profilo.']
@@ -1598,12 +1777,12 @@ export async function POST(req: Request) {
       }
       if (smallTalk && !scanReady) {
         const hello = greeting ? 'Ciao, piacere. ' : '';
-        return `${hello}${questionFor(nextStep, seed, attempt)}`;
+        return `${hello}${questionForStepWithProfile(nextStep, profile, seed, attempt)}`;
       }
       if (nextStep === 'ready') {
         return 'Se vuoi posso affinare ulteriormente la ricerca su ATECO, forma di contributo e importi. Dimmi pure da cosa vuoi partire.';
       }
-      const q = questionHint ?? questionFor(nextStep, seed, attempt);
+      const q = questionHint ?? questionForStepWithProfile(nextStep, profile, seed, attempt);
       // Consultant tone: a short reason only on first attempt.
       const reason =
         attempt > 1
@@ -1611,7 +1790,11 @@ export async function POST(req: Request) {
           : nextStep === 'location'
             ? 'Mi serve la regione per evitare di proporti bandi fuori territorio.'
             : nextStep === 'activityType'
-              ? "Serve per capire subito in quali platee di beneficiari puoi rientrare."
+              ? profile.businessExists === null
+                ? "Mi serve per capire subito se cercare misure per impresa gia attiva o per nuova apertura."
+                : needsFounderEligibilityData(profile)
+                  ? "Mi serve per verificare subito l'ammissibilita su bandi come Resto al Sud 2.0 e Autoimpiego."
+                  : "Serve per capire subito in quali platee di beneficiari puoi rientrare."
               : nextStep === 'fundingGoal'
                 ? "Piu sei specifico sull'obiettivo, piu il match diventa realmente utile."
                 : nextStep === 'budget'
@@ -1625,6 +1808,13 @@ export async function POST(req: Request) {
     const assistantText = (() => {
       if (llmQaMode && smallTalk) return 'Certo, dimmi pure la domanda che vuoi farmi.';
       const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(nextStep, attempt);
+      if (measureUpdateReply)
+        return composeAssistantReply({
+          directAnswer: measureUpdateReply,
+          recap: null,
+          bridgeQuestion: llmQaMode ? null : bridge,
+          mode: 'qa'
+        });
       if (metaQa)
         return composeAssistantReply({
           directAnswer: metaQa,
@@ -1664,7 +1854,7 @@ export async function POST(req: Request) {
       return assistantCore;
     })();
 
-    const shouldBypassOpenAI = Boolean(shouldScanNow || !AI_CHAT_V2_ENABLED);
+    const shouldBypassOpenAI = Boolean(shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply);
     const openAiResult = shouldBypassOpenAI
       ? { text: null, source: 'disabled' as const }
       : await generateAssistantTextWithOpenAI({
@@ -1732,9 +1922,9 @@ export async function POST(req: Request) {
 
     const candidateAssistantText = cleanupAssistantText(rawAssistantText);
     const dedupedAssistantText = repetition.tooSimilar
-      ? `${candidateAssistantText}\n\n${naturalBridgeQuestion(nextStep, attempt + 1) ?? questionFor(nextStep, seed, attempt + 1)}`
+      ? `${candidateAssistantText}\n\n${naturalBridgeQuestion(nextStep, attempt + 1) ?? questionForStepWithProfile(nextStep, profile, seed, attempt + 1)}`
       : candidateAssistantText;
-    const qaDirectFallback = (metaQa ?? qa)?.trim() ?? null;
+    const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
     let qaShapedAssistantText =
       llmQaMode && !proceedToMatching && !shouldScanNow ? enforceQaModeReply(dedupedAssistantText) : dedupedAssistantText;
     if (llmQaMode && metaQa) {

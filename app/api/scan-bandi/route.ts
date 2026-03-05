@@ -43,8 +43,14 @@ const userProfileSchema = z.object({}).passthrough();
 
 const payloadSchema = z.object({
   userProfile: userProfileSchema,
-  limit: z.coerce.number().int().min(1).max(50).optional()
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  mode: z.enum(['fast', 'full']).optional(),
+  channel: z.enum(['scanner', 'chat']).optional(),
+  strictness: z.enum(['standard', 'high']).optional(),
 });
+
+type ScanChannel = 'scanner' | 'chat';
+type ScanStrictness = 'standard' | 'high';
 
 function cleanString(value: unknown, max = 200): string | null {
   if (typeof value !== 'string') return null;
@@ -410,6 +416,89 @@ function sortCandidatesForDisplay(candidates: Candidate[], pinnedStrategicTitles
     const bt = b.result.deadlineAt ? new Date(b.result.deadlineAt).getTime() : Number.POSITIVE_INFINITY;
     return at - bt;
   });
+}
+
+type ChatStrictContext = {
+  region: string | null;
+  sector: string | null;
+  fundingGoal: string | null;
+  activityType: string | null;
+  businessExists: boolean | null;
+};
+
+const CHAT_STRICT_STRATEGIC_TITLES = [
+  'resto al sud',
+  'autoimpiego centro nord',
+  'smart start',
+  'nuova sabatini',
+  'pidnext',
+  'voucher digitali',
+  'nuova impresa',
+];
+
+function isContributionFocusedText(textNorm: string) {
+  return /(contribut|fondo perduto|agevolaz|finanziament|prestito|voucher|credito d imposta|credito)/.test(textNorm);
+}
+
+function isBusinessTargetText(textNorm: string) {
+  return /(impresa|imprese|azienda|aziende|pmi|startup|autoimpiego|lavoro autonomo|professionist|nuova attivita|da costituire)/.test(
+    textNorm,
+  );
+}
+
+function normalizeResultSearchText(result: ScanResult) {
+  return normalizeForMatch(
+    [
+      result.title,
+      result.authorityName,
+      result.aidForm,
+      result.aidIntensity,
+      ...(result.requirements ?? []),
+      ...(result.matchReasons ?? []),
+      ...(result.mismatchFlags ?? []),
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+function passesChatStrictCandidate(result: ScanResult, context: ChatStrictContext, enforceGoal = true): boolean {
+  const titleNorm = normalizeForMatch(result.title);
+  const authorityTrusted = classifyAuthorityPriority(result.authorityName).trusted;
+  const strategicTitle = CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
+  if (!authorityTrusted && !strategicTitle) return false;
+
+  const searchText = normalizeResultSearchText(result);
+  if (!isContributionFocusedText(searchText)) return false;
+  if (!isBusinessTargetText(searchText)) return false;
+
+  if (
+    context.businessExists === false &&
+    /(imprese gia attive|imprese attive|aziende gia attive|almeno due bilanci|impresa esistente)/.test(searchText) &&
+    !/(da costituire|nuova impresa|startup|autoimpiego|aspiranti imprenditori|persone fisiche)/.test(searchText)
+  ) {
+    return false;
+  }
+
+  if (enforceGoal) {
+    const goalTokens = tokenizeKeywords(
+      normalizeForMatch([context.fundingGoal, context.sector, context.activityType].filter(Boolean).join(' ')),
+    ).slice(0, 10);
+    if (goalTokens.length > 0) {
+      const goalHit = anyTextMatch(searchText, goalTokens) || strategicTitle;
+      if (!goalHit) return false;
+    }
+  }
+
+  return true;
+}
+
+function applyChatStrictCandidateFilter(candidates: Candidate[], context: ChatStrictContext): Candidate[] {
+  const hard = candidates.filter((entry) => passesChatStrictCandidate(entry.result, context, true));
+  if (hard.length > 0) return hard;
+  const medium = candidates.filter((entry) => passesChatStrictCandidate(entry.result, context, false));
+  if (medium.length > 0) return medium;
+  return [];
 }
 
 function extractGrantRangeFromSentence(sentence: string): { min: number | null; max: number | null } | null {
@@ -1080,8 +1169,11 @@ async function scanViaScannerApi(args: {
   limit: number;
   region: string | null;
   contributionPreference: string | null;
+  channel: ScanChannel;
+  strictness: ScanStrictness;
+  strictContext: ChatStrictContext;
 }): Promise<{ items: Candidate[]; nearMisses: Candidate[]; strictMatchesFound: boolean }> {
-  const { scannerProfile, limit, region, contributionPreference } = args;
+  const { scannerProfile, limit, region, contributionPreference, channel, strictness, strictContext } = args;
 
   if (!SCANNER_API_ENABLED) return { items: [], nearMisses: [], strictMatchesFound: false };
 
@@ -1192,15 +1284,20 @@ async function scanViaScannerApi(args: {
   const mappedAll: Candidate[] = (latest.items ?? [])
     .filter((item) => item.hardStatus !== 'not_eligible')
     .map((item) => toCandidate(item))
-    .filter((entry): entry is Candidate => Boolean(entry))
-    ;
-  const mapped = sortCandidatesForDisplay(mappedAll).slice(0, limit);
+    .filter((entry): entry is Candidate => Boolean(entry));
 
-  const nearMisses: Candidate[] = (latest.nearMisses ?? [])
+  const chatStrictEnabled = channel === 'chat' && strictness === 'high';
+  const strictFiltered = chatStrictEnabled ? applyChatStrictCandidateFilter(mappedAll, strictContext) : mappedAll;
+  const mapped = sortCandidatesForDisplay(strictFiltered).slice(0, limit);
+
+  const nearMissesRaw: Candidate[] = (latest.nearMisses ?? [])
     .filter((item) => item.hardStatus === 'not_eligible')
     .map((item) => toCandidate(item, true))
     .filter((entry): entry is Candidate => Boolean(entry))
     .slice(0, Math.min(limit, 6));
+  const nearMisses = chatStrictEnabled
+    ? nearMissesRaw.filter((entry) => passesChatStrictCandidate(entry.result, strictContext, false))
+    : nearMissesRaw;
 
   const strictMatchesFound = strictPreference.strict
     ? mapped.some((entry) => entry.contributionMatched)
@@ -3360,6 +3457,78 @@ function mergeIncentiviDocs(...lists: IncentiviDoc[][]) {
   return [...byKey.values(), ...extras];
 }
 
+function prefilterDocsForFastMode(args: {
+  docs: IncentiviDoc[];
+  region: string | null;
+  sector: string | null;
+  fundingGoal: string | null;
+  ateco: string | null;
+  activityType: string | null;
+  limit: number;
+}): IncentiviDoc[] {
+  const { docs, region, sector, fundingGoal, ateco, activityType, limit } = args;
+  if (docs.length <= 320) return docs;
+
+  const userRegionNorm = region ? normalizeForMatch(region) : null;
+  const keywordPool = tokenizeKeywords(normalizeForMatch([sector, fundingGoal, activityType, ateco].filter(Boolean).join(' '))).slice(0, 12);
+  const atecoDigits = extractAtecoDigitsFromText(ateco ?? '');
+  const strategicTitleHints = [
+    'resto al sud',
+    'autoimpiego centro nord',
+    'smart start',
+    'nuova sabatini',
+    'musei d impresa',
+    'voucher digitali',
+    'pidnext',
+  ];
+  const trustedAuthorities = ['invitalia', 'camera di commercio', 'cciaa', 'regione', 'ministero', 'unioncamere'];
+  const maxDocs = Math.min(Math.max(limit * 20, 200), 360);
+
+  const scored = docs.map((doc, idx) => {
+    const titleNorm = normalizeForMatch(doc.title ?? '');
+    const authorityNorm = normalizeForMatch(doc.authorityName ?? '');
+    const sectorsNorm = asStringArray(doc.sectors).map((entry) => normalizeForMatch(entry)).join(' ');
+    const purposesNorm = asStringArray(doc.purposes).map((entry) => normalizeForMatch(entry)).join(' ');
+    const beneficiariesNorm = asStringArray(doc.beneficiaries).map((entry) => normalizeForMatch(entry)).join(' ');
+    const descriptionNorm = normalizeForMatch((doc.description ?? '').slice(0, 900));
+    const combined = `${titleNorm} ${authorityNorm} ${sectorsNorm} ${purposesNorm} ${beneficiariesNorm} ${descriptionNorm}`.trim();
+
+    let score = 0;
+    if (userRegionNorm) {
+      const docRegions = asStringArray(doc.regions)
+        .map((entry) => canonicalizeRegion(entry))
+        .filter((entry): entry is string => Boolean(entry));
+      if (docRegions.length === 0) score += 0.4;
+      else if (docRegions.some((entry) => normalizeForMatch(entry) === userRegionNorm)) score += 1.8;
+      else score -= 0.8;
+    }
+
+    for (const token of keywordPool) {
+      if (!token) continue;
+      if (paddedIncludes(titleNorm, token)) score += 1.35;
+      else if (paddedIncludes(`${sectorsNorm} ${purposesNorm}`, token)) score += 0.95;
+      else if (paddedIncludes(combined, token)) score += 0.35;
+    }
+
+    for (const atecoToken of atecoDigits) {
+      if (combined.includes(atecoToken)) score += 1.05;
+    }
+
+    if (trustedAuthorities.some((entry) => authorityNorm.includes(entry))) score += 0.45;
+    if (strategicTitleHints.some((entry) => titleNorm.includes(entry))) score += 1.8;
+
+    return { doc, score, idx };
+  });
+
+  const picked = scored
+    .filter((entry) => entry.score > -0.25)
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.idx - b.idx))
+    .slice(0, maxDocs)
+    .map((entry) => entry.doc);
+
+  return picked.length > 0 ? picked : docs.slice(0, maxDocs);
+}
+
 export async function POST(req: Request) {
   const rate = checkRateLimit(req, { keyPrefix: 'scan-bandi', windowMs: 60_000, max: 25 });
   if (!rate.ok) {
@@ -3389,11 +3558,22 @@ export async function POST(req: Request) {
           return {
             userProfile: legacyProfile,
             limit:
-              typeof legacyBody?.limit === 'number' || typeof legacyBody?.limit === 'string' ? legacyBody.limit : undefined
+              typeof legacyBody?.limit === 'number' || typeof legacyBody?.limit === 'string' ? legacyBody.limit : undefined,
+            mode: legacyBody?.mode === 'fast' || legacyBody?.mode === 'full' ? legacyBody.mode : undefined,
+            channel: legacyBody?.channel === 'chat' ? 'chat' : legacyBody?.channel === 'scanner' ? 'scanner' : undefined,
+            strictness:
+              legacyBody?.strictness === 'high'
+                ? 'high'
+                : legacyBody?.strictness === 'standard'
+                  ? 'standard'
+                  : undefined,
           };
         })();
     const parsedLimit = typeof parsed.limit === 'string' ? Number(parsed.limit) : parsed.limit;
     const limit: number = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit ?? 10, 1), 50) : 10;
+    const mode = parsed.mode === 'fast' ? 'fast' : 'full';
+    const channel: ScanChannel = parsed.channel === 'chat' ? 'chat' : 'scanner';
+    const strictness: ScanStrictness = parsed.strictness === 'high' ? 'high' : 'standard';
 
     const rawProfile = parsed.userProfile as Record<string, unknown>;
     const rawLocation =
@@ -3445,14 +3625,24 @@ export async function POST(req: Request) {
       employmentStatus,
     });
     const businessExists = scannerProfile.businessExists;
+    const strictContext: ChatStrictContext = {
+      region: userRegionCanonical,
+      sector,
+      fundingGoal,
+      activityType,
+      businessExists,
+    };
 
-    if (SCANNER_API_ENABLED) {
+    if (SCANNER_API_ENABLED && mode !== 'fast') {
       try {
         const scanner = await scanViaScannerApi({
           scannerProfile,
           limit,
           region,
           contributionPreference,
+          channel,
+          strictness,
+          strictContext,
         });
         const scannerResults = scanner.items.map((entry) => entry.result);
         const scannerNearMisses = scanner.nearMisses.map((entry) => entry.result);
@@ -3491,6 +3681,7 @@ export async function POST(req: Request) {
             : scannerExplanationBase;
 
         return NextResponse.json({
+          phase: 'full',
           explanation: scannerExplanation,
           results: scannerResults,
           nearMisses: scannerNearMisses,
@@ -3515,41 +3706,56 @@ export async function POST(req: Request) {
       return bundled?.docs ?? [];
     };
 
-    try {
-      if (keyword && userRegionCanonical) {
-        const queryCandidates = Array.from(
-          new Set(
-            [
-              keyword,
-              [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null].filter(Boolean).join(' '),
-              fundingGoal,
-              [fundingGoal, userRegionCanonical].filter(Boolean).join(' '),
-              fundingGoalSignalQuery,
-              [fundingGoalSignalQuery, userRegionCanonical].filter(Boolean).join(' '),
-              atecoQuery,
-              [sector, fundingGoal].filter(Boolean).join(' '),
-            ]
-              .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-              .filter((entry) => entry.length >= 3),
-          ),
-        );
-        const results = await Promise.allSettled(queryCandidates.map((query) => fetchIncentiviDocs(query, 180, 6500)));
-        docs = mergeIncentiviDocs(
-          ...results
-            .filter((entry): entry is PromiseFulfilledResult<IncentiviDoc[]> => entry.status === 'fulfilled')
-            .map((entry) => entry.value),
-        );
-      } else {
-        docs = await fetchIncentiviDocs(keyword, 240, 8500);
-      }
-    } catch {
+    if (mode === 'fast') {
       docs = await loadFallbackDocs();
+    } else {
+      try {
+        if (keyword && userRegionCanonical) {
+          const queryCandidates = Array.from(
+            new Set(
+              [
+                keyword,
+                [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null].filter(Boolean).join(' '),
+                fundingGoal,
+                [fundingGoal, userRegionCanonical].filter(Boolean).join(' '),
+                fundingGoalSignalQuery,
+                [fundingGoalSignalQuery, userRegionCanonical].filter(Boolean).join(' '),
+                atecoQuery,
+                [sector, fundingGoal].filter(Boolean).join(' '),
+              ]
+                .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+                .filter((entry) => entry.length >= 3),
+            ),
+          );
+          const results = await Promise.allSettled(queryCandidates.map((query) => fetchIncentiviDocs(query, 180, 6500)));
+          docs = mergeIncentiviDocs(
+            ...results
+              .filter((entry): entry is PromiseFulfilledResult<IncentiviDoc[]> => entry.status === 'fulfilled')
+              .map((entry) => entry.value),
+          );
+        } else {
+          docs = await fetchIncentiviDocs(keyword, 240, 8500);
+        }
+      } catch {
+        docs = await loadFallbackDocs();
+      }
     }
 
     if (docs.length === 0) {
       docs = await loadFallbackDocs();
     }
     docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
+    if (mode === 'fast') {
+      docs = prefilterDocsForFastMode({
+        docs,
+        region: userRegionCanonical,
+        sector,
+        fundingGoal,
+        ateco,
+        activityType,
+        limit,
+      });
+    }
 
     const keywordSets = buildKeywordSets(sector, fundingGoalQuery);
     const sectorCoreKeywords = keywordSets.sectorCore;
@@ -3963,7 +4169,9 @@ export async function POST(req: Request) {
     }
 
     const candidates: Candidate[] = [...candidateMap.values()];
-    const sorted = sortCandidatesForDisplay(candidates, pinnedStrategicTitles);
+    const sortedBase = sortCandidatesForDisplay(candidates, pinnedStrategicTitles);
+    const chatStrictEnabled = channel === 'chat' && strictness === 'high';
+    const sorted = chatStrictEnabled ? applyChatStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
 
     const qualityThreshold = 0.56;
     const pickFrom = (pool: Candidate[]) => {
@@ -4021,6 +4229,7 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({
+      phase: mode,
       explanation: buildExplanation({
         region,
         sector,

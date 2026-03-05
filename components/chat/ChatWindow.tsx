@@ -7,19 +7,24 @@ import { BandiResults, type BandoResult } from '@/components/chat/BandiResults';
 import { TypewriterExamples } from '@/components/chat/TypewriterExamples';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { BndiHomeView } from '@/components/views/BndiHomeView';
-import { FullScreenScannerOverlayPro as FullScreenScannerOverlay } from '@/components/views/FullScreenScannerOverlayPro';
+import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
 import { PraticheView } from '@/components/views/PraticheView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
 
 type UserProfile = {
   activityType?: string | null;
+  businessExists?: boolean | null;
   sector?: string | null;
   ateco?: string | null;
   atecoAnswered?: boolean;
   location?: { region?: string | null; municipality?: string | null } | null;
+  age?: number | null;
+  employmentStatus?: string | null;
+  legalForm?: string | null;
   employees?: number | null;
   revenueOrBudgetEUR?: number | null;
+  requestedContributionEUR?: number | null;
   fundingGoal?: string | null;
   contributionPreference?: string | null;
   contactEmail?: string | null;
@@ -61,6 +66,7 @@ type ConversationResponse = {
 };
 
 type ScanResponse = {
+  phase?: 'fast' | 'full';
   explanation: string;
   results: Array<{
     id: string;
@@ -87,8 +93,8 @@ type ScanResponse = {
 
 type ChatMessage =
   | { id: string; role: 'assistant' | 'user'; kind: 'text'; body: string }
-  | { id: string; role: 'assistant'; kind: 'results'; explanation: string; results: BandoResult[]; nearMisses?: BandoResult[] }
-  | { id: string; role: 'assistant'; kind: 'cta'; bookingUrl: string };
+  | { id: string; role: 'assistant'; kind: 'results'; explanation: string; results: BandoResult[]; nearMisses?: BandoResult[]; scanToken?: string }
+  | { id: string; role: 'assistant'; kind: 'cta'; bookingUrl: string; scanToken?: string };
 
 const CTA_TEXT = 'Vuoi partecipare a questo BANDO con BNDO? Prenota una consulenza con un nostro consulente.';
 const LANDING_TITLE_PREFIX = 'Vorresti partecipare ad un BNDO?';
@@ -182,9 +188,12 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const [step, setStep] = useState<ConversationResponse['step']>('location');
   const [isTyping, setIsTyping] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanOverlayProgress, setScanOverlayProgress] = useState(0);
+  const [scanOverlayStepIndex, setScanOverlayStepIndex] = useState(0);
   const [rotateIdx, setRotateIdx] = useState(1);
   const [fitScale, setFitScale] = useState(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail'>(resolvedInitialView);
   const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail', boolean>>({
     home: resolvedInitialView === 'home',
@@ -196,6 +205,9 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fitWrapRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
+  const overlayProgressTimerRef = useRef<number | null>(null);
+  const lockAutoBottomScrollRef = useRef(false);
+  const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
@@ -228,6 +240,15 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     resetConversation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle('scanner-overlay-open', isScanning);
+    document.documentElement.classList.toggle('scanner-overlay-open', isScanning);
+    return () => {
+      document.body.classList.remove('scanner-overlay-open');
+      document.documentElement.classList.remove('scanner-overlay-open');
+    };
+  }, [isScanning]);
 
   useEffect(() => {
     if (view === 'chat') return;
@@ -272,6 +293,37 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     return 'Scrivi…';
   }, [step]);
 
+  function stopOverlayProgressLoop() {
+    if (overlayProgressTimerRef.current !== null) {
+      window.clearInterval(overlayProgressTimerRef.current);
+      overlayProgressTimerRef.current = null;
+    }
+  }
+
+  function startOverlayProgressLoop() {
+    stopOverlayProgressLoop();
+    overlayProgressTimerRef.current = window.setInterval(() => {
+      setScanOverlayProgress((prev) => {
+        if (prev >= 92) return prev;
+        const baseStep = prev < 26 ? 7.2 : prev < 58 ? 3.8 : prev < 80 ? 1.9 : 0.9;
+        const jitter = prev < 80 ? Math.random() : Math.random() * 0.3;
+        return Math.min(92, prev + baseStep + jitter);
+      });
+    }, 110);
+  }
+
+  useEffect(() => {
+    const clamped = Math.max(0, Math.min(100, scanOverlayProgress));
+    const next = Math.min(4, Math.floor((clamped / 100) * 5));
+    setScanOverlayStepIndex(next);
+  }, [scanOverlayProgress]);
+
+  useEffect(() => {
+    return () => {
+      stopOverlayProgressLoop();
+    };
+  }, []);
+
   function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
     // Works whether the scroll container is this div or the document.
     if (!bottomRef.current) return;
@@ -282,9 +334,39 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
 
   useEffect(() => {
     if (view !== 'chat') return;
+    if (lockAutoBottomScrollRef.current) return;
+    const lastMessage = messages[messages.length - 1];
+    const isResultCluster =
+      lastMessage?.role === 'assistant' && (lastMessage.kind === 'results' || lastMessage.kind === 'cta');
+    if (isResultCluster) return;
     const behavior: ScrollBehavior = messages.length <= 1 ? 'auto' : 'smooth';
     scrollToBottom(behavior);
-  }, [messages.length, isTyping, isScanning, view]);
+  }, [messages, isTyping, isScanning, view]);
+
+  useEffect(() => {
+    if (view !== 'chat') return;
+    if (!focusResultMessageId) return;
+    const node = messageNodeRefs.current[focusResultMessageId];
+    if (!node) {
+      lockAutoBottomScrollRef.current = false;
+      setFocusResultMessageId(null);
+      return;
+    }
+
+    lockAutoBottomScrollRef.current = true;
+    const raf = requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    const unlockTimer = window.setTimeout(() => {
+      lockAutoBottomScrollRef.current = false;
+      setFocusResultMessageId((current) => (current === focusResultMessageId ? null : current));
+    }, 700);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(unlockTimer);
+    };
+  }, [focusResultMessageId, messages.length, view]);
 
   useLayoutEffect(() => {
     if (view !== 'chat') return;
@@ -372,54 +454,95 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   }
 
   async function runScan(nextProfile: UserProfile, refineStep?: ConversationResponse['step']) {
-    setIsScanning(true);
+    const scanToken = uid();
+    const resultMessageId = `${scanToken}-results`;
+    const ctaMessageId = `${scanToken}-cta`;
 
-    try {
-      const startedAt = Date.now();
-      const res = await fetch('/api/scan-bandi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userProfile: nextProfile, limit: 10 })
-      });
-      const json = (await res.json()) as ScanResponse & { error?: string };
-      if (!res.ok) throw new Error(json.error ?? 'Scan non riuscito.');
-
-      // Keep the scanner visible long enough to feel intentional.
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 2400) {
-        await new Promise((r) => setTimeout(r, 2400 - elapsed));
-      }
-
+    const upsertScanMessages = (payload: ScanResponse) => {
+      lockAutoBottomScrollRef.current = true;
       setMessages((prev) => {
+        const withoutCurrentScan = prev.filter((entry) => !(('scanToken' in entry ? entry.scanToken : null) === scanToken));
         const next: ChatMessage[] = [
-          ...prev,
+          ...withoutCurrentScan,
           {
-            id: uid(),
+            id: resultMessageId,
             role: 'assistant',
             kind: 'results',
-            explanation: json.explanation,
-            results: json.results,
-            nearMisses: json.nearMisses ?? [],
+            explanation: payload.explanation,
+            results: payload.results,
+            nearMisses: payload.nearMisses ?? [],
+            scanToken
           }
         ];
-        if (json.topPickBandoId && json.bookingUrl) {
-          next.push({ id: uid(), role: 'assistant', kind: 'cta', bookingUrl: json.bookingUrl });
+
+        if (payload.topPickBandoId && payload.bookingUrl) {
+          next.push({
+            id: ctaMessageId,
+            role: 'assistant',
+            kind: 'cta',
+            bookingUrl: payload.bookingUrl,
+            scanToken
+          });
         }
         return next;
       });
+      setFocusResultMessageId(resultMessageId);
+    };
 
-      // If results are empty or low-confidence, ask a refinement question immediately (consultant-style).
-      const topScore = ((json.results?.[0] as any)?.matchScore ?? (json.results?.[0] as any)?.score) as number | undefined;
+    const maybeAskRefinement = (payload: ScanResponse) => {
+      const topScore = ((payload.results?.[0] as any)?.matchScore ?? (payload.results?.[0] as any)?.score) as number | undefined;
       const shouldRefine =
-        Boolean(json.refineQuestion) || json.results.length === 0 || (typeof topScore === 'number' && topScore < 0.66);
+        Boolean(payload.refineQuestion) || payload.results.length === 0 || (typeof topScore === 'number' && topScore < 0.66);
       const prompt = refineStep ? refinePromptFor(refineStep) : null;
-      if (shouldRefine && prompt && !json.refineQuestion) {
+      if (shouldRefine && prompt && !payload.refineQuestion) {
         setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: prompt }]);
       }
-      if (json.refineQuestion) {
-        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: json.refineQuestion! }]);
+      if (payload.refineQuestion) {
+        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: payload.refineQuestion! }]);
       }
+    };
+
+    setIsScanning(true);
+    setScanOverlayProgress(8);
+    setScanOverlayStepIndex(0);
+    startOverlayProgressLoop();
+
+    try {
+      const fastRes = await fetch('/api/scan-bandi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userProfile: nextProfile, limit: 10, mode: 'fast', channel: 'chat', strictness: 'high' })
+      });
+      const fastJson = (await fastRes.json()) as ScanResponse & { error?: string };
+      if (!fastRes.ok) throw new Error(fastJson.error ?? 'Scan non riuscito.');
+
+      stopOverlayProgressLoop();
+      setScanOverlayProgress(100);
+      setScanOverlayStepIndex(4);
+      upsertScanMessages(fastJson);
+      await new Promise((resolve) => setTimeout(resolve, 90));
+
+      // Upgrade in background with full precision ordering/data.
+      void (async () => {
+        try {
+          const fullRes = await fetch('/api/scan-bandi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userProfile: nextProfile, limit: 10, mode: 'full', channel: 'chat', strictness: 'high' })
+          });
+          const fullJson = (await fullRes.json()) as ScanResponse & { error?: string };
+          if (!fullRes.ok) return;
+          upsertScanMessages(fullJson);
+          maybeAskRefinement(fullJson);
+        } catch {
+          // Ignore background refresh failures, keep fast snapshot.
+        }
+      })();
     } catch (e) {
+      stopOverlayProgressLoop();
+      setScanOverlayProgress(100);
+      setScanOverlayStepIndex(4);
+      await new Promise((resolve) => setTimeout(resolve, 80));
       setMessages((prev) => {
         return [
           ...prev,
@@ -485,6 +608,12 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     } catch {
       // ignore
     }
+    stopOverlayProgressLoop();
+    setIsScanning(false);
+    setScanOverlayProgress(0);
+    setScanOverlayStepIndex(0);
+    lockAutoBottomScrollRef.current = false;
+    setFocusResultMessageId(null);
     setMessages([]);
     setProfile({});
     setStep('location');
@@ -616,23 +745,47 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
               {messages.length > 0 ? (
                 <div ref={scrollRef} className="chatgpt-messages">
                   {messages.map((m) => {
-                    if (m.kind === 'text') return <MessageBubble key={m.id} role={m.role} body={m.body} />;
+                    if (m.kind === 'text')
+                      return (
+                        <div
+                          key={m.id}
+                          ref={(node) => {
+                            messageNodeRefs.current[m.id] = node;
+                          }}
+                        >
+                          <MessageBubble role={m.role} body={m.body} />
+                        </div>
+                      );
                     if (m.kind === 'results')
                       return (
-                        <MessageBubble key={m.id} role="assistant">
-                          <BandiResults explanation={m.explanation} results={m.results} nearMisses={m.nearMisses} />
-                        </MessageBubble>
+                        <div
+                          key={m.id}
+                          ref={(node) => {
+                            messageNodeRefs.current[m.id] = node;
+                          }}
+                        >
+                          <MessageBubble role="assistant">
+                            <BandiResults explanation={m.explanation} results={m.results} nearMisses={m.nearMisses} />
+                          </MessageBubble>
+                        </div>
                       );
                     if (m.kind === 'cta')
                       return (
-                        <MessageBubble key={m.id} role="assistant">
-                          <div className="cta-wrap">
-                            <div className="cta-note">{CTA_TEXT}</div>
-                            <a className="cta-button" href={m.bookingUrl} target="_blank" rel="noreferrer">
-                              Prenota consulenza
-                            </a>
-                          </div>
-                        </MessageBubble>
+                        <div
+                          key={m.id}
+                          ref={(node) => {
+                            messageNodeRefs.current[m.id] = node;
+                          }}
+                        >
+                          <MessageBubble role="assistant">
+                            <div className="cta-wrap">
+                              <div className="cta-note">{CTA_TEXT}</div>
+                              <a className="cta-button" href={m.bookingUrl} target="_blank" rel="noreferrer">
+                                Prenota consulenza
+                              </a>
+                            </div>
+                          </MessageBubble>
+                        </div>
                       );
                     return null;
                   })}
@@ -650,7 +803,12 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
               ) : null}
             </div>
 
-            <FullScreenScannerOverlay open={isScanning} />
+            <FullScreenScannerOverlay
+              open={isScanning}
+              progress={scanOverlayProgress}
+              activeStepIndex={scanOverlayStepIndex}
+              currentStepLabel={SCAN_OVERLAY_STEPS[scanOverlayStepIndex] ?? SCAN_OVERLAY_STEPS[0]}
+            />
 
             <div ref={composerDockRef} className="composer-dock">
               <div className="composer-inner">
