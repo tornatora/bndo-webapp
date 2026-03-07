@@ -1164,24 +1164,34 @@ function extractFundingGoalFromMessage(message: string): string | null {
   const raw = message.trim();
   if (raw.length < 8) return null;
   const n = normalizeForMatch(raw);
+  
+  // Concrete signals that this is a real goal
+  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
+
   const humanConsultantOnly =
     /\b(consulen|persona|umano|ricontatt|richiam|farmi chiam|telefon|parlare con)\b/.test(n) &&
-    !/\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi)\b/.test(
-      n
-    );
-  if (humanConsultantOnly) return null;
-  const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare'];
-  const hit = triggers.find((t) => n.includes(t));
-  if (!hit) return null;
+    !hasConcreteSignal;
 
-  // Take the substring after the first trigger in the raw message (best-effort).
-  const idx = n.indexOf(hit);
-  if (idx < 0) return null;
-  // Approximate mapping from normalized index to raw index: just fallback to raw.
-  const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
-  const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
-  if (!cleaned) return null;
-  return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+  if (humanConsultantOnly) return null;
+
+  const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
+  const hit = triggers.find((t) => n.includes(t));
+  
+  if (hit) {
+    const idx = n.indexOf(hit);
+    if (idx >= 0) {
+        const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
+        const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
+        if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+    }
+  }
+
+  // Fallback: if it has a concrete signal, take the whole message
+  if (hasConcreteSignal && raw.split(' ').length >= 3) {
+      return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
+  }
+
+  return null;
 }
 
 function hasConcreteObjectiveSignal(message: string): boolean {
