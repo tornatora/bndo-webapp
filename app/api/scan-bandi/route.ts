@@ -13,6 +13,8 @@ import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
 import { buildRefineQuestionV3 } from '@/lib/matching/refineQuestion';
 import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
 import { evaluateHardEligibility } from '@/lib/matching/hardEligibility';
+import { runUnifiedPipeline } from '@/lib/matching/unifiedPipeline';
+import type { GrantEvaluation } from '@/lib/matching/unifiedPipeline';
 
 export const runtime = 'nodejs';
 
@@ -4513,6 +4515,27 @@ export async function POST(req: Request) {
       });
     }
 
+    // --- Unified Pipeline scoring overlay ---
+    const unifiedResult = runUnifiedPipeline({
+      profile: normalizedProfile,
+      grants: docs,
+      options: {
+        channel: channel === 'chat' ? 'chat' : 'scanner',
+        strictness: strictness === 'high' ? 'high' : 'standard',
+        maxResults: limit * 5,
+      },
+    });
+    const unifiedScoreMap = new Map<string, GrantEvaluation>();
+    for (const ev of unifiedResult.evaluations) {
+      unifiedScoreMap.set(ev.grantId, ev);
+      // Also index by numeric id for incentivi docs
+      const numericId = ev.grantId.replace(/^incentivi-/, '');
+      if (numericId !== ev.grantId) {
+        unifiedScoreMap.set(numericId, ev);
+      }
+    }
+    // --- End unified pipeline ---
+
     const keywordSets = buildKeywordSets(sector, fundingGoalQuery);
     const sectorCoreKeywords = keywordSets.sectorCore;
     const goalCoreKeywords = keywordSets.goalCore;
@@ -4730,6 +4753,24 @@ export async function POST(req: Request) {
           economicOffer: economic.economicOffer,
           localDoc: doc,
         });
+
+        // --- Unified pipeline score overlay ---
+        const unifiedEval = unifiedScoreMap.get(String(doc.id ?? '')) ?? unifiedScoreMap.get(resultId);
+        const useUnified = unifiedEval && !unifiedEval.hardExcluded;
+        const finalScore = useUnified ? unifiedEval.totalScore / 100 : localScore;
+        const finalMatchReasons = useUnified && unifiedEval.whyFit.length > 0
+          ? unifiedEval.whyFit.slice(0, 3)
+          : matchReasons.slice(0, 3);
+        const finalMismatchFlags = unifiedEval?.hardExcluded
+          ? ['hard_excluded', ...(unifiedEval.hardExclusionReason ? [unifiedEval.hardExclusionReason] : []), ...mismatchFlags].slice(0, 3)
+          : mismatchFlags.slice(0, 3);
+        const finalHardStatus = unifiedEval?.hardExcluded
+          ? ('not_eligible' as const)
+          : finalMismatchFlags.length === 0
+            ? ('eligible' as const)
+            : ('unknown' as const);
+        // --- End unified overlay ---
+
         const result: ScanResult = {
           id: resultId,
           title: doc.title ?? 'Incentivo (Incentivi.gov)',
@@ -4737,10 +4778,10 @@ export async function POST(req: Request) {
           deadlineAt: deadline,
           sourceUrl: buildSourceUrl(doc),
           requirements: buildRequirements(doc, { userRegion: userRegionCanonical, territory }),
-          matchScore: localScore,
-          matchReasons: matchReasons.slice(0, 3),
-          mismatchFlags: mismatchFlags.slice(0, 3),
-          score: localScore,
+          matchScore: finalScore,
+          matchReasons: finalMatchReasons,
+          mismatchFlags: finalMismatchFlags,
+          score: finalScore,
           grantId: resultId,
           grantTitle: doc.title ?? 'Incentivo (Incentivi.gov)',
           authority: doc.authorityName ?? 'Incentivi.gov',
@@ -4756,10 +4797,10 @@ export async function POST(req: Request) {
               : economic.aidIntensity,
           budgetTotal: parseMoneyValue(sanitizedEconomicOffer?.costMax) ?? parseMoneyValue(sanitizedEconomicOffer?.grantMax) ?? economic.budgetTotal,
           economicOffer: sanitizedEconomicOffer,
-          probabilityScore: Math.round(localScore * 100),
-          hardStatus: mismatchFlags.length === 0 ? 'eligible' : 'unknown',
-          whyFit: matchReasons.slice(0, 3),
-          missingRequirements: mismatchFlags.slice(0, 3),
+          probabilityScore: useUnified ? unifiedEval.totalScore : Math.round(localScore * 100),
+          hardStatus: finalHardStatus,
+          whyFit: finalMatchReasons,
+          missingRequirements: finalMismatchFlags,
         };
         const hardEligibility = evaluateHardEligibility({
           result,

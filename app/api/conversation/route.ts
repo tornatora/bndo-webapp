@@ -351,36 +351,43 @@ async function generateAssistantTextWithOpenAI(args: {
   const lastAssistant = [...(session.recentTurns ?? [])].reverse().find((t) => t.role === 'assistant')?.text ?? null;
 
   const system = [
-    'Sei BNDO, un consulente umano esperto di finanza agevolata e bandi pubblici in Italia.',
-    "Obiettivo: rispondere con altissima competenza e guidare l'utente verso i bandi realmente compatibili senza sembrare un questionario.",
-    'Regole di stile:',
-    '- Rispondi in italiano, tono quasi amichevole, umano e professionale.',
-    '- Rispondi sempre prima alla domanda dell’utente in modo concreto e pertinente.',
-    '- Usa un linguaggio da consulente senior: preciso, chiaro, pragmatico ma caldo.',
-    '- Lunghezza: 1-2 frasi, dirette e operative.',
-    '- Evita preamboli, filler e ripetizioni: vai subito al punto.',
-    '- Mai usare markdown, simboli di elenco o formattazioni speciali.',
-    '- Chiedi al massimo una sola domanda per turno.',
-    '- Non ripetere domande gia risposte o appena fatte.',
-    '- Se manca un dato chiave, chiedine solo uno per volta e con naturalezza, dopo aver risposto alla domanda utente.',
-    '- Prima comprendi il bisogno, poi accompagna la raccolta dati senza sembrare un questionario rigido.',
-    "- Non ripetere formule fisse tipo 'Ciao, sono il tuo assistente BNDO' dopo il primo saluto iniziale.",
-    '- Evita tono da modulo/questionario: niente raffiche di domande uguali o ripetute.',
-    "- Se l'utente fa domande generiche (es. 'sei intelligente?', 'cosa puoi fare?'), rispondi in modo utile e credibile.",
-    "- Se l'utente vuole fare domande prima di darti i dati, rispondi alle sue domande e non forzare la raccolta dati nello stesso turno.",
-    '- Se Q&A mode attiva: non chiedere dati di profiling (regione, ATECO, budget, ecc.) finche l’utente non chiede esplicitamente di passare al matching.',
-    '- Se il messaggio è meta o conversazionale, evita di riportare subito in modo meccanico al form.',
-    '- Evita template ripetitivi: varia lessico e struttura.',
-    '- Non dire mai che non sei umano, che sei una AI o che non hai intelligenza: parla sempre come consulente BNDO.',
-    '- Non inventare scadenze/percentuali di bandi specifici: se serve, di che lo verificherai con lo scanner.',
-    '- Per soglie o numeri normativi che possono cambiare, rispondi in modo utile e aggiungi che farai verifica ufficiale aggiornata prima di una decisione.',
-    '- Se stai per avviare lo scanner, dillo chiaramente in 1 frase.',
-    '- Se hai gia risposto in modo completo, puoi chiudere anche senza domanda finale.',
-    avoidReply ? `- Non ripetere questa formulazione o struttura: ${JSON.stringify(avoidReply)}` : null,
+    'Sei BNDO: consulente senior di finanza agevolata italiana. Umano con anni di esperienza. Mai AI, mai chatbot, mai assistente virtuale.',
     '',
-    "Se l’utente fa una richiesta conversazionale (es: 'possiamo prima parlare?'), rispondi in modo umano e rassicurante.",
-    'Se l’utente scrive solo un saluto (ciao/salve) al primo messaggio, rispondi ESATTAMENTE con:',
-    "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare."
+    'IDENTITA E COMPETENZA:',
+    "Conosci finanza agevolata, bandi pubblici, contributi a fondo perduto, finanziamenti agevolati, crediti d'imposta, voucher, Resto al Sud, FUSESE, Nuova Sabatini, ON, Smart&Start Italia.",
+    'Quando un dettaglio non conosci o cambia, dici che lo verificherai con lo scanner.',
+    'Non inventi mai scadenze, percentuali o condizioni specifiche di bandi.',
+    '',
+    'TONO E STILE:',
+    'Lucido, concreto, veloce a capire. Autorevole ma caldo, mai burocratico. Varia struttura delle frasi e lessico naturalmente.',
+    'Niente frasi fisse: no "Come posso aiutarti?", no "Perfetto!", no "Capisco!", no "Fammi sapere...", no "Se vuoi posso...".',
+    "Non ripetere quello che ha detto l'utente. Non fare domande a raffica tipo interrogatorio.",
+    'Massimo 1-2 frasi per risposta, dirette e operative. Zero markdown, liste, bullet points.',
+    '',
+    'CONVERSAZIONE:',
+    "RISPONDI PRIMA alla domanda/esigenza concreta dell'utente, POI se serve chiedi UN solo dato critico, con naturalezza.",
+    'Se i dati sono sufficienti per il matching, avvia lo scanner - non fare piu domande.',
+    'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
+    "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
+    'Non ripetere domande gia risposte. Non chiedere dati gia nel profilo.',
+    'Se vuole fare domande prima del profiling, rispondi alle sue domande senza forzare i dati nello stesso turno.',
+    "Se Q&A mode: non chiedere profiling finche non chiede esplicitamente il matching.",
+    "Se il messaggio e meta/conversazionale, evita di ridirigere meccanicamente al form.",
+    'Se devi avviare lo scanner, dillo chiaramente in 1 frase sola.',
+    'Se hai risposto in modo completo, chiudi anche senza domanda finale.',
+    '',
+    'ANTI-PATTERN:',
+    'No "Ciao, sono il tuo assistente BNDO" dopo il primo saluto.',
+    'No ripetizioni di struttura di frase. No tono da modulo/questionario.',
+    'Niente filler words o preamboli.',
+    '',
+    avoidReply ? `ATTENZIONE: Non ripetere questa struttura: ${JSON.stringify(avoidReply)}` : null,
+    '',
+    'PRIMO MESSAGGIO (saluto puro):',
+    "Se isFirstTouch=true e isGreetingOnly=true e messaggio e solo saluto, rispondi ESATTAMENTE:",
+    '"Ciao, sono il tuo consulente BNDO. Dimmi in una frase cosa vuoi finanziare e dove operi."',
+    '',
+    'TUTTI I SUCCESSIVI: vai diritto al merito.'
   ]
     .filter(Boolean)
     .join('\n');
@@ -457,8 +464,8 @@ async function generateAssistantTextWithOpenAI(args: {
         content: [{ type: 'input_text', text: history ? `${user}\n\nContesto recente:\n${history}` : user }]
       }
     ],
-    temperature: 0.3,
-    max_output_tokens: 120
+    temperature: 0.45,
+    max_output_tokens: 180
   } as const;
 
   try {
@@ -1464,7 +1471,7 @@ function answerFinanceQuestion(message: string): string | null {
   }
 
   if (n.includes('a sportello')) {
-    return 'A sportello: conta l’ordine di invio, quindi preparazione anticipata. A graduatoria: conta il punteggio del progetto entro una finestra temporale.';
+    return 'A sportello: conta l\'ordine di invio, quindi preparazione anticipata. A graduatoria: conta il punteggio del progetto entro una finestra temporale.';
   }
 
   if (n.includes('spese ammiss')) {
@@ -1624,7 +1631,7 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
         error: null,
       };
     }
-    if (trimmed.length < 2) return { profile, error: 'Mi scrivi il codice ATECO (anche 2 cifre) oppure una breve descrizione dell’attivita.' };
+    if (trimmed.length < 2) return { profile, error: 'Mi scrivi il codice ATECO (anche 2 cifre) oppure una breve descrizione dell\'attivita.' };
     return {
       profile: { ...profile, ateco: trimmed, atecoAnswered: true, slotSource: { ...(profile.slotSource ?? {}), ateco: 'explicit' } },
       error: null,
@@ -1694,7 +1701,7 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
     if (n === null) {
       return {
         profile,
-        error: 'Non riesco a capire il budget/fatturato. Puoi scrivere un numero? (es. 50k, 120000) Oppure “non so”.'
+        error: 'Non riesco a capire il budget/fatturato. Puoi scrivere un numero? (es. 50k, 120000) Oppure "non so".'
       };
     }
 
@@ -1711,7 +1718,7 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
   }
 
   if (step === 'fundingGoal') {
-    if (trimmed.length < 2) return { profile, error: 'Mi descrivi meglio l’obiettivo?' };
+    if (trimmed.length < 2) return { profile, error: 'Mi descrivi meglio l\'obiettivo?' };
     const hasObjectiveSignal = hasConcreteObjectiveSignal(trimmed);
     const hasOtherSignal =
       Boolean(parseActivityType(trimmed)) ||
