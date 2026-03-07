@@ -112,6 +112,45 @@ function calculateProfileCompleteness(profile: NormalizedMatchingProfile): numbe
 }
 
 /**
+ * Detect regions from text (simple implementation for unified pipeline)
+ */
+function detectRegionsFromText(text: string | undefined): string[] {
+  if (!text) return [];
+  const textNorm = normalizeForMatch(text);
+  const regions: string[] = [];
+  
+  const regionalKeywords: Record<string, string[]> = {
+    'Abruzzo': ['abruzzo'],
+    'Basilicata': ['basilicata'],
+    'Calabria': ['calabria'],
+    'Campania': ['campania'],
+    'Emilia-Romagna': ['emilia romagna'],
+    'Friuli-Venezia Giulia': ['friuli venezia giulia'],
+    'Lazio': ['lazio'],
+    'Liguria': ['liguria'],
+    'Lombardia': ['lombardia'],
+    'Marche': ['marche'],
+    'Molise': ['molise'],
+    'Piemonte': ['piemonte'],
+    'Puglia': ['puglia'],
+    'Sardegna': ['sardegna'],
+    'Sicilia': ['sicilia'],
+    'Toscana': ['toscana'],
+    'Trentino-Alto Adige': ['trentino alto adige', 'sudtirol'],
+    'Umbria': ['umbria'],
+    "Valle d'Aosta": ['valle d aosta', 'vallee d aoste'],
+    'Veneto': ['veneto'],
+  };
+
+  for (const [region, aliases] of Object.entries(regionalKeywords)) {
+    if (aliases.some(alias => textNorm.includes(alias))) {
+      regions.push(region);
+    }
+  }
+  return regions;
+}
+
+/**
  * Check if grant regions are compatible with user region
  */
 function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviDoc): DimensionEval {
@@ -127,53 +166,92 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
     };
   }
 
+  const userRegionNormalized = normalizeForMatch(userRegion);
   const grantRegions = toStringArray(grant.regions);
 
-  // Se il bando non specifica regioni, è nazionale
-  if (grantRegions.length === 0) {
+  // Se il bando specifica regioni, usale come fonte primaria
+  if (grantRegions.length > 0) {
+    // Controlla se il bando copre tutte le regioni
+    const normalizedGrants = grantRegions.map((r) => normalizeForMatch(r));
+    if (normalizedGrants.some((r) => NATIONAL_REGION_KEYWORDS.some((kw) => r.includes(kw)))) {
+      return {
+        dimension: 'territory',
+        compatible: true,
+        score: 100,
+        confidence: 'high',
+        note: 'Bando a copertura nazionale',
+      };
+    }
+
+    // Controlla se la regione dell'utente è nella lista
+    const foundRegion = grantRegions.find(
+      (r) => normalizeForMatch(r) === userRegionNormalized || canonicalizeRegion(r) === userRegion,
+    );
+
+    if (foundRegion) {
+      return {
+        dimension: 'territory',
+        compatible: true,
+        score: 100,
+        confidence: 'high',
+        note: `Bando disponibile in ${userRegion}`,
+      };
+    }
+
     return {
       dimension: 'territory',
-      compatible: true,
-      score: 100,
+      compatible: false,
+      score: 0,
       confidence: 'high',
-      note: 'Bando nazionale',
+      note: `Bando non disponibile in ${userRegion}`,
     };
   }
 
-  // Controlla se il bando copre tutte le regioni
-  const normalizedGrants = grantRegions.map((r) => normalizeForMatch(r));
-  if (normalizedGrants.some((r) => NATIONAL_REGION_KEYWORDS.some((kw) => r.includes(kw)))) {
-    return {
+  // Se mancano le regioni, prova a dedurre da titolo ed ente
+  const authorityNorm = normalizeForMatch(grant.authorityName || '');
+  const titleNorm = normalizeForMatch(grant.title || '');
+  const combinedNorm = `${titleNorm} ${authorityNorm}`;
+  
+  const inferredRegions = detectRegionsFromText(combinedNorm);
+  
+  // Se l'autorità specifica una regione diversa dall'utente, rifiuta categoricamente
+  if (authorityNorm.includes('regione') && !authorityNorm.includes(userRegionNormalized)) {
+     return {
       dimension: 'territory',
-      compatible: true,
-      score: 100,
+      compatible: false,
+      score: 0,
       confidence: 'high',
-      note: 'Bando a copertura nazionale',
+      note: `Bando emesso da autorità regionale non compatibile (${grant.authorityName})`,
     };
   }
 
-  // Controlla se la regione dell'utente è nella lista
-  const userRegionNormalized = normalizeForMatch(userRegion);
-  const foundRegion = grantRegions.find(
-    (r) => normalizeForMatch(r) === userRegionNormalized || canonicalizeRegion(r) === userRegion,
-  );
-
-  if (foundRegion) {
+  if (inferredRegions.length > 0) {
+    if (inferredRegions.includes(userRegion)) {
+       return {
+        dimension: 'territory',
+        compatible: true,
+        score: 100,
+        confidence: 'medium',
+        note: `Bando inferito come disponibile in ${userRegion}`,
+      };
+    }
     return {
       dimension: 'territory',
-      compatible: true,
-      score: 100,
-      confidence: 'high',
-      note: `Bando disponibile in ${userRegion}`,
+      compatible: false,
+      score: 0,
+      confidence: 'medium',
+      note: `Bando inferito come non disponibile in ${userRegion} (rilevate: ${inferredRegions.join(', ')})`,
     };
   }
 
+  // Se non si può dedurre nulla, assumi nazionale ma con score più basso/confidence bassa
+  // Invece di compatible: true a 100, usiamo un approccio più cauto
   return {
     dimension: 'territory',
-    compatible: false,
-    score: 0,
-    confidence: 'high',
-    note: `Bando non disponibile in ${userRegion}`,
+    compatible: true,
+    score: 80,
+    confidence: 'low',
+    note: 'Territorio bando non specificato, assunto nazionale con riserva',
   };
 }
 

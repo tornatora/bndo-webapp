@@ -120,12 +120,39 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
   if (!regionNorm) return true;
 
   const mismatchNorm = normalizeForMatch((result.mismatchFlags ?? []).join(' '));
-  if (mismatchNorm.includes('regione') || mismatchNorm.includes('territorio')) return false;
+  // Check for both Italian and English mismatch tokens
+  if (
+    mismatchNorm.includes('regione') ||
+    mismatchNorm.includes('territorio') ||
+    mismatchNorm.includes('territory') ||
+    mismatchNorm.includes('hard excluded')
+  ) {
+    return false;
+  }
 
   const titleNorm = normalizeForMatch(result.title);
+  const authorityNorm = normalizeForMatch(result.authorityName ?? '');
   const reasonsNorm = normalizeForMatch((result.matchReasons ?? []).join(' '));
-  const combined = `${titleNorm} ${reasonsNorm}`;
-  return combined.includes(regionNorm) || !combined.includes('solo') || !combined.includes('regione');
+  const combined = `${titleNorm} ${authorityNorm} ${reasonsNorm}`;
+
+  // If we have explicit mismatch flag or hard excluded status, it's NOT compatible
+  if (result.hardStatus === 'not_eligible') return false;
+
+  // Be stricter: it must explicitly include the region or be national.
+  const isNational =
+    combined.includes('nazionale') ||
+    combined.includes('italia') ||
+    combined.includes('tutto il territorio') ||
+    combined.includes('tutte le regioni');
+
+  if (isNational) return true;
+
+  // If authority is a specific region (e.g. "Regione Piemonte") and user is in another region, reject.
+  if (authorityNorm.includes('regione') && !authorityNorm.includes(regionNorm)) {
+    return false;
+  }
+
+  return combined.includes(regionNorm);
 }
 
 export function evaluateHardEligibility(args: EvaluateArgs): HardEligibilityEvaluation {

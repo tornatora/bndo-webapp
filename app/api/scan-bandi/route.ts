@@ -3764,9 +3764,20 @@ function normalizeDocTerritory(
 
   if (set.size > 0) return { kind: 'regions', regions: [...set], source: 'field' };
 
-  // Infer from title/authority/description when region field is missing or not canonicalized.
-  const inferred = detectRegions(`${titleNorm} ${authorityNorm} ${descriptionNorm}`.trim());
-  if (inferred.length > 0) return { kind: 'regions', regions: inferred, source: 'inferred' };
+  // Infer from authority and title first (high signal)
+  const highSignalText = `${authorityNorm} ${titleNorm}`.trim();
+  const inferredHighSignal = detectRegions(highSignalText);
+  
+  if (inferredHighSignal.length > 0) {
+    return { kind: 'regions', regions: inferredHighSignal, source: 'inferred' };
+  }
+
+  // Fallback to description but be more conservative: 
+  // if authority mentions a specific region, we don't want to pick other regions from description.
+  const inferredDescription = detectRegions(descriptionNorm);
+  if (inferredDescription.length > 0) {
+    return { kind: 'regions', regions: inferredDescription, source: 'inferred' };
+  }
 
   return { kind: 'unknown', source: 'missing' };
 }
@@ -4262,7 +4273,9 @@ export async function POST(req: Request) {
           const legacyProfile =
             legacyBody?.userProfile && typeof legacyBody.userProfile === 'object' && !Array.isArray(legacyBody.userProfile)
               ? legacyBody.userProfile
-              : legacyBody;
+              : legacyBody?.answers && typeof legacyBody.answers === 'object' && !Array.isArray(legacyBody.answers)
+                ? legacyBody.answers
+                : legacyBody;
 
           if (!legacyProfile || typeof legacyProfile !== 'object' || Array.isArray(legacyProfile)) {
             throw new z.ZodError([]);
@@ -4761,10 +4774,22 @@ export async function POST(req: Request) {
         const finalMatchReasons = useUnified && unifiedEval.whyFit.length > 0
           ? unifiedEval.whyFit.slice(0, 3)
           : matchReasons.slice(0, 3);
-        const finalMismatchFlags = unifiedEval?.hardExcluded
-          ? ['hard_excluded', ...(unifiedEval.hardExclusionReason ? [unifiedEval.hardExclusionReason] : []), ...mismatchFlags].slice(0, 3)
-          : mismatchFlags.slice(0, 3);
-        const finalHardStatus = unifiedEval?.hardExcluded
+        const unifiedBlockingMismatchFlags = unifiedEval?.dimensions
+          ? unifiedEval.dimensions
+              .filter((dim) =>
+                dim.compatible === false &&
+                (dim.dimension === 'territory' || dim.dimension === 'subject' || dim.dimension === 'status')
+              )
+              .map((dim) => `${dim.dimension}_mismatch`)
+          : [];
+        const unifiedHardExcluded =
+          Boolean(unifiedEval?.hardExcluded) ||
+          unifiedEval?.band === 'excluded' ||
+          unifiedBlockingMismatchFlags.length > 0;
+        const finalMismatchFlags = unifiedHardExcluded
+          ? ['hard_excluded', ...(unifiedEval?.hardExclusionReason ? [unifiedEval.hardExclusionReason] : []), ...unifiedBlockingMismatchFlags, ...mismatchFlags].slice(0, 3)
+          : [...new Set(mismatchFlags)].slice(0, 3);
+        const finalHardStatus = unifiedHardExcluded
           ? ('not_eligible' as const)
           : finalMismatchFlags.length === 0
             ? ('eligible' as const)
@@ -4984,6 +5009,7 @@ export async function POST(req: Request) {
     const pinnedStrategicTitlesUnique = Array.from(new Set(pinnedStrategicTitles));
     const candidateMap = new Map<string, Candidate>();
     for (const entry of chosenTextPool) {
+      if (entry.result.hardStatus === 'not_eligible') continue;
       candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
     }
     for (const entry of mapped) {
@@ -4994,7 +5020,9 @@ export async function POST(req: Request) {
         !entry.beneficiariesOk ||
         !entry.businessStageOk ||
         !entry.demographicsOk ||
-        !entry.strategicOk
+        !entry.strategicOk ||
+        !entry.hardEligibilityPassed ||
+        entry.result.hardStatus === 'not_eligible'
       ) {
         continue;
       }
@@ -5035,6 +5063,7 @@ export async function POST(req: Request) {
               entry.businessStageOk &&
               entry.demographicsOk &&
               entry.strategicOk &&
+              entry.hardEligibilityPassed &&
               entry.result.hardStatus !== 'not_eligible' &&
               (isRestoResult(entry.result) || isFuseseResult(entry.result) || isOnResult(entry.result)),
           )
@@ -5051,14 +5080,14 @@ export async function POST(req: Request) {
 
     const qualityThreshold = southYouthStartupProfile ? 0.35 : 0.56;
     const pickFrom = (pool: Candidate[]) => {
-      return pool.filter((x) => x.result.score >= qualityThreshold).slice(0, limit);
+      return pool.filter((x) => x.result.score >= qualityThreshold && x.result.hardStatus !== 'not_eligible').slice(0, limit);
     };
 
     let strictMatchesFound = false;
     let pickedCandidates: Candidate[] = [];
 
     if (contributionPrefInfo.strict) {
-      const strictPool = sorted.filter((c) => c.contributionMatched);
+      const strictPool = sorted.filter((c) => c.contributionMatched && c.result.hardStatus !== 'not_eligible');
       strictMatchesFound = strictPool.length > 0;
 
       const strictPicked = pickFrom(strictPool);
@@ -5086,6 +5115,11 @@ export async function POST(req: Request) {
     if (southYouthStartupProfile) {
       const strategicFront = sorted.filter((candidate) => {
         if (candidate.result.hardStatus === 'not_eligible') return false;
+        // Re-verify territory even in front list just to be sure
+        const territoryOk = candidate.result.matchReasons?.some(r => r.includes('disponibile in') || r.includes('nazionale')) || 
+                           !candidate.result.mismatchFlags?.some(m => m.includes('regione') || m.includes('territorio'));
+        if (!territoryOk) return false;
+
         return isRestoResult(candidate.result) || isFuseseResult(candidate.result) || isOnResult(candidate.result);
       });
       if (strategicFront.length > 0) {
