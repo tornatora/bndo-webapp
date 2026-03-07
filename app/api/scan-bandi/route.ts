@@ -4519,17 +4519,6 @@ export async function POST(req: Request) {
       docs = await loadFallbackDocs();
     }
     docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
-    if (mode === 'fast') {
-      docs = prefilterDocsForFastMode({
-        docs,
-        region: userRegionCanonical,
-        sector,
-        fundingGoal,
-        ateco,
-        activityType,
-        limit,
-      });
-    }
 
     // --- Unified Pipeline scoring overlay ---
     const unifiedResult = runUnifiedPipeline({
