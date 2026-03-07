@@ -259,7 +259,7 @@ function enforceConsultantDirectness(
     .filter(Boolean);
 
   if (shouldScanNow) {
-    return 'Perfetto, avvio ora lo scanner BNDO per trovare i bandi più compatibili.';
+    return 'Ho un quadro chiaro. Avvio subito una ricerca approfondita per individuare le opportunità più concrete per il tuo profilo.';
   }
 
   const fluffPattern =
@@ -292,7 +292,7 @@ function enforceConsultantDirectness(
 
   const joined = finalSentences.join(' ').trim();
   if (!joined && questionHint) return questionHint;
-  if (!joined) return 'Dammi un dettaglio in più e faccio un match preciso.';
+  if (!joined) return 'Dammi un dettaglio in più per restringere il campo e individuare i match migliori.';
   if (joined.length > 170) {
     const short = joined.slice(0, 170);
     const end = Math.max(short.lastIndexOf('.'), short.lastIndexOf('?'), short.lastIndexOf('!'));
@@ -2234,7 +2234,7 @@ export async function POST(req: Request) {
     const questionHint = shouldScanNow ? null : questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
     const assistantCore = (() => {
       if (shouldScanNow) {
-        return 'Perfetto, avvio ora lo scanner BNDO per trovare i bandi piu compatibili.';
+        return 'Ho un quadro chiaro. Avvio subito una ricerca approfondita per individuare le opportunità più concrete per il tuo profilo.';
       }
       if (smallTalk && scanReady) {
         return 'Per affinare il match, dimmi solo un dato tra ATECO, importo o contributo preferito.';

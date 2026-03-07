@@ -70,7 +70,25 @@ const DIMENSION_WEIGHTS: Record<MatchDimension, number> = {
 /**
  * Canoniche regioni italiane per il matching
  */
-const NATIONAL_REGION_KEYWORDS = ['tutte', 'nazionale', 'nazionale', 'italia', 'italian'];
+const NATIONAL_REGION_KEYWORDS = ['tutte', 'nazionale', 'italia', 'italian', 'interreg', 'coesione'];
+
+const NATIONAL_AUTHORITIES = [
+  'invitalia',
+  'ministero',
+  'mimit',
+  'mur',
+  'masaf',
+  'mite',
+  'maeci',
+  'agenzia delle entrate',
+  'unioncamere',
+  'itp',
+  'ice',
+  'sace',
+  'simest',
+  'dipartimento per la trasformazione digitale',
+  'presidenza del consiglio',
+];
 
 /**
  * Parse date string to ISO format check
@@ -168,18 +186,27 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
 
   const userRegionNormalized = normalizeForMatch(userRegion);
   const grantRegions = toStringArray(grant.regions);
+  const authorityName = grant.authorityName || '';
+  const authorityNorm = normalizeForMatch(authorityName);
+  const titleNorm = normalizeForMatch(grant.title || '');
+  const combinedNorm = `${titleNorm} ${authorityNorm}`;
 
-  // Se il bando specifica regioni, usale come fonte primaria
+  // 1. Check if it's explicitly national via authority or keywords
+  const isNationalAuthority = NATIONAL_AUTHORITIES.some(auth => authorityNorm.includes(auth));
+  const isNationalTitle = NATIONAL_REGION_KEYWORDS.some(kw => titleNorm.includes(kw) && !titleNorm.includes('regione'));
+
+  // 2. Se il bando specifica regioni, usale come fonte primaria
   if (grantRegions.length > 0) {
-    // Controlla se il bando copre tutte le regioni
     const normalizedGrants = grantRegions.map((r) => normalizeForMatch(r));
+    
+    // Controlla se il bando copre tutte le regioni o è nazionale
     if (normalizedGrants.some((r) => NATIONAL_REGION_KEYWORDS.some((kw) => r.includes(kw)))) {
       return {
         dimension: 'territory',
         compatible: true,
         score: 100,
         confidence: 'high',
-        note: 'Bando a copertura nazionale',
+        note: 'Bando a copertura nazionale (esplicito)',
       };
     }
 
@@ -198,33 +225,53 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
       };
     }
 
+    // Se non trovata ma è un'autorità nazionale, potremmo essere in un caso di dati incompleti
+    if (isNationalAuthority && grantRegions.length > 5) {
+       return {
+        dimension: 'territory',
+        compatible: true,
+        score: 90,
+        confidence: 'medium',
+        note: 'Bando nazionale con lista regioni parziale',
+      };
+    }
+
     return {
       dimension: 'territory',
       compatible: false,
       score: 0,
       confidence: 'high',
-      note: `Bando non disponibile in ${userRegion}`,
+      note: `Bando non disponibile in ${userRegion} (escluso da lista regioni)`,
     };
   }
 
-  // Se mancano le regioni, prova a dedurre da titolo ed ente
-  const authorityNorm = normalizeForMatch(grant.authorityName || '');
-  const titleNorm = normalizeForMatch(grant.title || '');
-  const combinedNorm = `${titleNorm} ${authorityNorm}`;
-  
+  // 3. Analisi dell'autorità regionale
+  if (authorityNorm.includes('regione')) {
+    if (authorityNorm.includes(userRegionNormalized)) {
+      return {
+        dimension: 'territory',
+        compatible: true,
+        score: 100,
+        confidence: 'high',
+        note: `Bando emesso dalla Regione ${userRegion}`,
+      };
+    }
+    
+    // Rileva se l'autorità appartiene a un'altra regione specifica
+    const otherRegions = detectRegionsFromText(authorityNorm);
+    if (otherRegions.length > 0 && !otherRegions.includes(userRegion)) {
+      return {
+        dimension: 'territory',
+        compatible: false,
+        score: 0,
+        confidence: 'high',
+        note: `Bando emesso da altra autorità regionale (${authorityName})`,
+      };
+    }
+  }
+
+  // 4. Analisi inferita dal testo
   const inferredRegions = detectRegionsFromText(combinedNorm);
-  
-  // Se l'autorità specifica una regione diversa dall'utente, rifiuta categoricamente
-  if (authorityNorm.includes('regione') && !authorityNorm.includes(userRegionNormalized)) {
-     return {
-      dimension: 'territory',
-      compatible: false,
-      score: 0,
-      confidence: 'high',
-      note: `Bando emesso da autorità regionale non compatibile (${grant.authorityName})`,
-    };
-  }
-
   if (inferredRegions.length > 0) {
     if (inferredRegions.includes(userRegion)) {
        return {
@@ -235,23 +282,35 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
         note: `Bando inferito come disponibile in ${userRegion}`,
       };
     }
+    
+    // Se ha inferito altre regioni ma non quella dell'utente
     return {
       dimension: 'territory',
       compatible: false,
       score: 0,
       confidence: 'medium',
-      note: `Bando inferito come non disponibile in ${userRegion} (rilevate: ${inferredRegions.join(', ')})`,
+      note: `Bando specifico per altri territori: ${inferredRegions.join(', ')}`,
     };
   }
 
-  // Se non si può dedurre nulla, assumi nazionale ma con score più basso/confidence bassa
-  // Invece di compatible: true a 100, usiamo un approccio più cauto
+  // 5. Fallback nazionale basato su autorità fidata
+  if (isNationalAuthority || isNationalTitle) {
+    return {
+      dimension: 'territory',
+      compatible: true,
+      score: 95,
+      confidence: 'medium',
+      note: 'Bando di rilevanza nazionale (autorità/titolo)',
+    };
+  }
+
+  // 6. Se non si può dedurre nulla, NON assumere nazionale se vogliamo essere "rigorosi"
   return {
     dimension: 'territory',
-    compatible: true,
-    score: 80,
+    compatible: false,
+    score: 0,
     confidence: 'low',
-    note: 'Territorio bando non specificato, assunto nazionale con riserva',
+    note: 'Territorio non determinabile con certezza, escluso per rigore',
   };
 }
 
@@ -260,13 +319,16 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
  */
 function evaluateSubject(profile: NormalizedMatchingProfile, grant: IncentiviDoc): DimensionEval {
   const beneficiaries = toStringArray(grant.beneficiaries).map((b) => normalizeForMatch(b));
+  const authorityNorm = normalizeForMatch(grant.authorityName || '');
+  const titleNorm = normalizeForMatch(grant.title || '');
+  const combinedText = `${titleNorm} ${authorityNorm} ${beneficiaries.join(' ')}`;
 
-  if (beneficiaries.length === 0) {
+  if (beneficiaries.length === 0 && !titleNorm.includes('startup') && !titleNorm.includes('pmi')) {
     return {
       dimension: 'subject',
       compatible: true,
       score: 50,
-      confidence: 'medium',
+      confidence: 'low',
       note: 'Beneficiari non specificati nel bando',
     };
   }
@@ -282,40 +344,35 @@ function evaluateSubject(profile: NormalizedMatchingProfile, grant: IncentiviDoc
     };
   }
 
-  const combinedBeneficiaries = beneficiaries.join(' ');
+  // Keywords rigorose
+  const startupKeywords = ['startup', 'nuova impresa', 'nuove imprese', 'da costituire', 'autoimpiego', 'auto imprenditorialita', 'nuova attivita', 'aspiranti imprenditori'];
+  const existingKeywords = ['imprese gia attive', 'aziende attive', 'gia costituite', 'consolidamento', 'pmi esistenti', 'imprese esistenti', 'ampliamento'];
 
-  // Check for startup/new business
+  const hasStartupHint = startupKeywords.some(kw => combinedText.includes(kw));
+  const hasExistingHint = existingKeywords.some(kw => combinedText.includes(kw)) || combinedText.includes('pmi') && !hasStartupHint;
+
+  // Caso Startup / Nuova Impresa
   if (!profile.businessExists) {
-    const isStartupFocused =
-      combinedBeneficiaries.includes('startup') ||
-      combinedBeneficiaries.includes('nuova impresa') ||
-      combinedBeneficiaries.includes('nuova') ||
-      combinedBeneficiaries.includes('autoimpiego');
-
-    if (isStartupFocused) {
+    if (hasStartupHint) {
       return {
         dimension: 'subject',
         compatible: true,
-        score: 90,
+        score: 100,
         confidence: 'high',
-        note: 'Bando rivolto a startup e nuove imprese',
+        note: 'Bando specificamente rivolto a nuove imprese o startup',
       };
     }
 
-    // Check for explicit exclusion of new businesses
-    const excludesNew =
-      combinedBeneficiaries.includes('gia attiva') ||
-      combinedBeneficiaries.includes('imprese esistenti') ||
-      combinedBeneficiaries.includes('pmi consolidate');
-
-    if (excludesNew) {
-      return {
-        dimension: 'subject',
-        compatible: false,
-        score: 0,
-        confidence: 'high',
-        note: 'Bando riservato a imprese già costituite',
-      };
+    if (hasExistingHint && !hasStartupHint) {
+       if (combinedText.includes('gia attive') || combinedText.includes('esistenti')) {
+          return {
+            dimension: 'subject',
+            compatible: false,
+            score: 0,
+            confidence: 'high',
+            note: 'Bando riservato a imprese già costituite',
+          };
+       }
     }
 
     return {
@@ -323,37 +380,33 @@ function evaluateSubject(profile: NormalizedMatchingProfile, grant: IncentiviDoc
       compatible: true,
       score: 60,
       confidence: 'medium',
-      note: 'Bando potenzialmente adatto a startup',
+      note: 'Bando potenzialmente aperto a nuove iniziative',
     };
   }
 
-  // Check for existing business
+  // Caso Impresa Esistente
   if (profile.businessExists) {
-    const isExistingFocused =
-      combinedBeneficiaries.includes('imprese esistenti') ||
-      combinedBeneficiaries.includes('gia attiva') ||
-      combinedBeneficiaries.includes('pmi');
+    // Se il bando è SOLO per nuove imprese
+    const onlyStartup = (combinedText.includes('solo startup') || combinedText.includes('solo nuove')) || 
+                        (hasStartupHint && !hasExistingHint && !combinedText.includes('pmi') && !combinedText.includes('professionisti'));
 
-    if (isExistingFocused) {
-      return {
-        dimension: 'subject',
-        compatible: true,
-        score: 90,
-        confidence: 'high',
-        note: 'Bando rivolto a imprese già costituite',
-      };
-    }
-
-    // Check for explicit exclusion of existing businesses
-    const excludesExisting = combinedBeneficiaries.includes('solo startup') || combinedBeneficiaries.includes('solo nuove');
-
-    if (excludesExisting) {
+    if (onlyStartup) {
       return {
         dimension: 'subject',
         compatible: false,
         score: 0,
         confidence: 'high',
-        note: 'Bando riservato a startup e nuove imprese',
+        note: 'Bando riservato esclusivamente a startup o nuove imprese',
+      };
+    }
+
+    if (hasExistingHint || combinedText.includes('pmi') || combinedText.includes('professionisti') || combinedText.includes('imprese')) {
+      return {
+        dimension: 'subject',
+        compatible: true,
+        score: 100,
+        confidence: 'high',
+        note: 'Bando compatibile con imprese già operative',
       };
     }
 
@@ -392,31 +445,24 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
   }
 
   const purposes = toStringArray(grant.purposes).map((p) => normalizeForMatch(p));
+  const titleNorm = normalizeForMatch(grant.title || '');
+  const descriptionNorm = normalizeForMatch(grant.description || '');
+  const combinedGrantText = `${titleNorm} ${purposes.join(' ')} ${descriptionNorm}`;
 
-  if (purposes.length === 0) {
+  if (purposes.length === 0 && !titleNorm.includes(fundingGoal)) {
     return {
       dimension: 'purpose',
       compatible: true,
-      score: 50,
-      confidence: 'medium',
-      note: 'Finalità del bando non specificate',
+      score: 40,
+      confidence: 'low',
+      note: 'Finalità del bando non specificate chiaramente',
     };
   }
 
-  const combinedPurposes = purposes.join(' ');
-
-  // Keywords from user goal
+  // Keywords del profilo utente
   const userKeywords = fundingGoal
     .split(/\s+/)
-    .filter((w) => w.length >= 4)
-    .slice(0, 5);
-
-  let matchedKeywords = 0;
-  for (const keyword of userKeywords) {
-    if (combinedPurposes.includes(keyword)) {
-      matchedKeywords++;
-    }
-  }
+    .filter((w) => w.length >= 4);
 
   if (userKeywords.length === 0) {
     return {
@@ -424,38 +470,57 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
       compatible: true,
       score: 50,
       confidence: 'low',
-      note: 'Finalità troppo generica',
+      note: 'Finalità utente troppo generica',
     };
+  }
+
+  let matchedKeywords = 0;
+  for (const keyword of userKeywords) {
+    if (combinedGrantText.includes(keyword)) {
+      matchedKeywords++;
+    }
   }
 
   const matchRatio = matchedKeywords / userKeywords.length;
 
-  if (matchRatio >= 0.66) {
+  // Rigore nel matching semantico
+  if (matchRatio >= 0.8) {
     return {
       dimension: 'purpose',
       compatible: true,
-      score: Math.round(85 + matchRatio * 15),
+      score: 100,
       confidence: 'high',
-      note: `Finalità coerente: ${matchedKeywords}/${userKeywords.length} parametri corrispondono`,
+      note: `Finalità altamente coerente (${matchedKeywords}/${userKeywords.length} match)`,
     };
   }
 
-  if (matchRatio >= 0.33) {
+  if (matchRatio >= 0.5) {
     return {
       dimension: 'purpose',
       compatible: true,
-      score: 60,
-      confidence: 'medium',
-      note: `Finalità parzialmente coerente: ${matchedKeywords}/${userKeywords.length} parametri corrispondono`,
+      score: 85,
+      confidence: 'high',
+      note: `Finalità coerente (${matchedKeywords}/${userKeywords.length} match)`,
     };
   }
 
+  if (matchRatio >= 0.25) {
+    return {
+      dimension: 'purpose',
+      compatible: true,
+      score: 65,
+      confidence: 'medium',
+      note: `Finalità parzialmente coerente (${matchedKeywords}/${userKeywords.length} match)`,
+    };
+  }
+
+  // Se il match è scarso
   return {
     dimension: 'purpose',
-    compatible: false,
-    score: 20,
-    confidence: 'high',
-    note: `Finalità non coerente: solo ${matchedKeywords}/${userKeywords.length} parametri corrispondono`,
+    compatible: true, // Non escludiamo a meno che non sia esplicitamente vietato
+    score: 30,
+    confidence: 'medium',
+    note: `Finalità con scarsa corrispondenza (${matchedKeywords}/${userKeywords.length} match)`,
   };
 }
 
@@ -871,36 +936,41 @@ function generateWhyFit(evals: Map<MatchDimension, DimensionEval>): string[] {
   const reasons: string[] = [];
 
   const subjectEval = evals.get('subject');
-  if (subjectEval && subjectEval.score >= 70) {
+  if (subjectEval && subjectEval.score >= 85) {
     reasons.push(subjectEval.note || 'Categoria beneficiario compatibile');
   }
 
   const territoryEval = evals.get('territory');
-  if (territoryEval && territoryEval.score >= 70) {
+  if (territoryEval && territoryEval.score >= 90) {
     reasons.push(territoryEval.note || 'Territorio compatibile');
   }
 
   const purposeEval = evals.get('purpose');
-  if (purposeEval && purposeEval.score >= 70) {
+  if (purposeEval && purposeEval.score >= 80) {
     reasons.push(purposeEval.note || 'Finalità coerente con il progetto');
   }
 
   const sectorEval = evals.get('sector');
-  if (sectorEval && sectorEval.score >= 70) {
+  if (sectorEval && sectorEval.score >= 80) {
     reasons.push(sectorEval.note || 'Settore attività compatibile');
   }
 
   const stageEval = evals.get('stage');
-  if (stageEval && stageEval.score >= 70) {
+  if (stageEval && stageEval.score >= 85) {
     reasons.push(stageEval.note || 'Stadio aziendale adatto');
   }
 
   const statusEval = evals.get('status');
-  if (statusEval && statusEval.score >= 70) {
+  if (statusEval && statusEval.score >= 90) {
     reasons.push(statusEval.note || 'Bando disponibile');
   }
 
-  return reasons.length > 0 ? reasons : ['Bando potenzialmente interessante'];
+  const expensesEval = evals.get('expenses');
+  if (expensesEval && expensesEval.score >= 85) {
+    reasons.push(expensesEval.note || 'Budget ammissibile');
+  }
+
+  return reasons.length > 0 ? reasons : ['Bando con requisiti generali compatibili'];
 }
 
 /**
