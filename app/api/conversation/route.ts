@@ -1109,7 +1109,7 @@ function parseActivityType(message: string): string | null {
   }
   if (v.includes('startup')) return 'Startup';
   if (
-    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|impresa agricola|azienda agricola)/.test(
+    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|attivita attiva|attivita avviata|gia attiva|già attiva|gia esistente|già esistente|impresa agricola|azienda agricola)/.test(
       v,
     )
   ) {
