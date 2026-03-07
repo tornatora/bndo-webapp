@@ -647,10 +647,6 @@ function needsFounderEligibilityData(profile: UserProfile) {
   return profile.businessExists === false && (!hasAgeSignal(profile) || !profile.employmentStatus);
 }
 
-function hasBusinessContext(profile: UserProfile) {
-  return Boolean(profile.activityType?.trim()) || profile.businessExists !== null;
-}
-
 const SOUTH_PRIORITY_REGIONS = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
 
 type ScanMissingSignal = 'fundingGoal' | 'location' | 'businessContext' | 'founderEligibility' | 'topicPrecision';
@@ -672,6 +668,10 @@ function isSouthYouthStartupPriorityProfile(profile: UserProfile) {
   if (!youthByAge && !youthByBand) return false;
   const employmentNorm = normalizeForMatch(profile.employmentStatus ?? '');
   return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
+}
+
+function hasBusinessContext(profile: UserProfile) {
+  return profile.businessExists !== null || Boolean(profile.activityType?.trim());
 }
 
 function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
