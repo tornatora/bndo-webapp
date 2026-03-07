@@ -741,7 +741,7 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
   }
 
   return {
-    ready: missingSignals.length === 0 || corePilarsOk,
+    ready: missingSignals.length === 0 || Boolean(corePilarsOk),
     missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
