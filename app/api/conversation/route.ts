@@ -3,11 +3,14 @@ import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { addAIFallbackUsage, addPaidAIUsage, canUsePaidAI } from '@/lib/aiBudget';
 import { detectTurnIntent, normalizeForMatch } from '@/lib/conversation/intentRouter';
+import { extractProfileFromMessage } from '@/lib/engines/profileExtractor';
+import { computeConfidenceMetadata } from '@/lib/engines/confidenceMetadata';
 import { nextBestFieldFromStep, naturalBridgeQuestion, questionFor } from '@/lib/conversation/questionPlanner';
 import { emptyProfileMemory, getChangedFields, markProfileFields, summarizeProfileForPrompt } from '@/lib/conversation/profileMemory';
 import { findClosestSimilarReply } from '@/lib/conversation/repetitionGuard';
 import { composeAssistantReply } from '@/lib/conversation/responseComposer';
 import { applyTonePolicy } from '@/lib/conversation/tonePolicy';
+import { answerGroundedMeasureQuestion } from '@/lib/knowledge/groundedMeasureAnswerer';
 import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowledge/measureStatus';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
 import { normalizeProfileInput } from '@/lib/matching/profileNormalizer';
@@ -39,19 +42,6 @@ function inferMode(args: {
   return 'profiling';
 }
 
-function inferConfidence(args: {
-  aiSource: 'openai' | 'disabled' | 'budget' | 'error' | null;
-  hasErrorPrompt?: boolean;
-  needsClarification?: boolean;
-}) {
-  const { aiSource, hasErrorPrompt, needsClarification } = args;
-  if (hasErrorPrompt) return 0.62;
-  if (aiSource === 'openai') return needsClarification ? 0.83 : 0.9;
-  if (aiSource === 'budget') return needsClarification ? 0.72 : 0.79;
-  if (aiSource === 'error') return needsClarification ? 0.68 : 0.75;
-  return needsClarification ? 0.7 : 0.78;
-}
-
 function withConversationMeta(args: {
   userProfile: UserProfile;
   step: Step;
@@ -77,11 +67,11 @@ function withConversationMeta(args: {
     nextBestField,
     nextQuestionField: nextBestField,
     aiSource: args.aiSource,
-    assistantConfidence: inferConfidence({
+    assistantConfidence: computeConfidenceMetadata({
       aiSource: args.aiSource,
       hasErrorPrompt: args.hasErrorPrompt,
       needsClarification: args.needsClarification
-    }),
+    }).assistantConfidence,
     needsClarification: args.needsClarification,
     profileCompletenessScore: args.profileCompletenessScore,
     scanReadinessReason: args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
@@ -383,7 +373,7 @@ async function generateAssistantTextWithOpenAI(args: {
     '',
     'CONVERSAZIONE:',
     'RISPONDI PRIMA alla domanda/esigenza concreta dell\'utente, POI se serve chiedi UN solo dato critico, con naturalezza.',
-    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo grounded basandoti solo sul contesto specialistico fornito. Se i dati non bastano, dillo chiaramente senza inventare.',
+    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo GROUNDED basandoti SOLO sul contesto fornito. Distingui chiaramente tra: "sì", "no", "sì, ma in certe condizioni", oppure "non confermabile con certezza". Mai inventare. Mai rispondere con falsa sicurezza. Mai forzare l\'onboarding se la richiesta è una domanda puntuale.',
     'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
@@ -1150,9 +1140,6 @@ function extractSectorFromMessage(message: string): string | null {
   const raw = message.trim();
   if (raw.length < 3) return null;
 
-  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
-  if (m?.[1]) return m[1].trim();
-
   const n = normalizeForMatch(raw);
   const known = [
     { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
@@ -1177,6 +1164,10 @@ function extractSectorFromMessage(message: string): string | null {
   for (const entry of known) {
     if (entry.hints.some((hint) => ` ${n} `.includes(` ${normalizeForMatch(hint)} `))) return entry.sector;
   }
+
+  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
+  if (m?.[1]) return m[1].trim();
+
   return null;
 }
 
@@ -1190,8 +1181,7 @@ function extractFundingGoalFromMessage(message: string): string | null {
   const raw = message.trim();
   if (raw.length < 8) return null;
   const n = normalizeForMatch(raw);
-  
-  // Concrete signals that this is a real goal
+
   const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
 
   const humanConsultantOnly =
@@ -1202,7 +1192,7 @@ function extractFundingGoalFromMessage(message: string): string | null {
 
   const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
   const hit = triggers.find((t) => n.includes(t));
-  
+
   if (hit) {
     const idx = n.indexOf(hit);
     if (idx >= 0) {
@@ -1210,6 +1200,14 @@ function extractFundingGoalFromMessage(message: string): string | null {
         const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
         if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
     }
+  }
+  
+  // if no trigger but starts with "bando per " or "contributi per "
+  const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
+  if (prefixMatch) {
+    const startIdx = n.indexOf(prefixMatch[0]) + prefixMatch[0].length;
+    const cleaned = raw.slice(startIdx).trim();
+    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
 
   // Fallback: if it has a concrete signal, take the whole message
@@ -1361,7 +1359,7 @@ function parsePhone(message: string): string | null {
   return normalizePhone(m[1]);
 }
 
-function shouldAttemptStepAnswer(step: Step, message: string) {
+function shouldAttemptStepAnswer(step: Step, message: string, isNewSession = false) {
   const lowered = message.toLowerCase();
   if (!message.trim()) return false;
   if (wantsToProceedToMatching(message)) return false;
@@ -1371,7 +1369,11 @@ function shouldAttemptStepAnswer(step: Step, message: string) {
   if (step === 'contactEmail') return Boolean(parseEmail(message));
   if (step === 'contactPhone') return Boolean(parsePhone(message));
   if (step === 'activityType') return Boolean(parseActivityType(message));
-  if (step === 'fundingGoal') return true;
+  
+  if (step === 'fundingGoal') {
+    if (isNewSession) return Boolean(extractFundingGoalFromMessage(message));
+    return true; // if we explicitly asked for the goal, we are more permissive
+  }
   if (step === 'sector') return Boolean(extractSectorFromMessage(message));
   if (step === 'ateco') return Boolean(extractAtecoFromMessage(message) || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
   if (step === 'employees') return Boolean(parseEmployees(message) !== null);
@@ -1567,105 +1569,43 @@ export async function POST(request: Request) {
       directQuestionOnMeasure,
       eligibilityCheck,
       discovery,
-      qaModeActive
+      qaModeActive,
+      measureQuestion,
+      modeHint: intentModeHint
     } = intent;
 
     const handoffRequested = session.humanHandoffRequested || asksHumanConsultant;
     const handoffCompleted = session.humanHandoffCompleted || false;
 
-    // Extraction pass
-    const detectedRegionSignal = detectRegionSignal(trimmed);
-    const detectedRegion = detectedRegionSignal?.region ?? null;
-    const isStatingLocation = userIsStatingOwnLocation(trimmed);
-    const explicitBudget = parseBudgetEUR(trimmed);
-    const explicitContribution = parseRequestedContributionEUR(trimmed);
-    const explicitEmployees = parseEmployees(trimmed);
-    const explicitBusinessExists = parseBusinessExistsFromMessage(trimmed);
-    const explicitAge = parseAge(trimmed);
-    const explicitAgeBand = parseAgeBand(trimmed);
-    const explicitEmploymentStatus = parseEmploymentStatus(trimmed);
-    const explicitLegalForm = parseLegalForm(trimmed);
-    const explicitEmail = parseEmail(trimmed);
-    const explicitPhone = parsePhone(trimmed);
-    const explicitActivityType = parseActivityType(trimmed);
-    const explicitSector = extractSectorFromMessage(trimmed);
-    const explicitFundingGoal = extractFundingGoalFromMessage(trimmed);
-    const explicitContributionPref = parseContributionPreference(trimmed);
-    const explicitAteco = extractAtecoFromMessage(trimmed);
-
-    // Update profile
+    // Extraction pass (via profileExtractor)
+    const extracted = extractProfileFromMessage(trimmed);
     const nextProfile = { ...profile };
     const extractionSources: Record<string, 'explicit' | 'demonym' | 'inferred'> = { ...profile.slotSource };
 
-    if (detectedRegion) {
-      nextProfile.location = { ...nextProfile.location, region: detectedRegion };
-      nextProfile.locationNeedsConfirmation = !isStatingLocation && detectedRegionSignal?.source !== 'explicit';
-      extractionSources.location = detectedRegionSignal?.source ?? 'explicit';
+    if (extracted.updates.location) {
+      nextProfile.location = { ...nextProfile.location, ...extracted.updates.location };
     }
-    if (explicitBudget !== null) {
-      nextProfile.revenueOrBudgetEUR = explicitBudget;
-      nextProfile.budgetAnswered = true;
-      extractionSources.budget = 'explicit';
-    }
-    if (explicitContribution !== null) {
-      nextProfile.requestedContributionEUR = explicitContribution;
-      extractionSources.requestedContributionEUR = 'explicit';
-    }
-    if (explicitEmployees !== null) {
-      nextProfile.employees = explicitEmployees;
-      extractionSources.employees = 'explicit';
-    }
-    if (explicitBusinessExists !== null) {
-      nextProfile.businessExists = explicitBusinessExists;
-      extractionSources.businessExists = 'explicit';
-    }
-    if (explicitAge !== null) {
-      nextProfile.age = explicitAge;
-      extractionSources.age = 'explicit';
-    }
-    if (explicitAgeBand !== null) {
-      nextProfile.ageBand = explicitAgeBand;
-      extractionSources.ageBand = 'explicit';
-    }
-    if (explicitEmploymentStatus !== null) {
-      nextProfile.employmentStatus = explicitEmploymentStatus;
-      extractionSources.employmentStatus = 'explicit';
-    }
-    if (explicitLegalForm !== null) {
-      nextProfile.legalForm = explicitLegalForm;
-      extractionSources.legalForm = 'explicit';
-    }
-    if (explicitEmail) {
-      nextProfile.contactEmail = explicitEmail;
-      extractionSources.contactEmail = 'explicit';
-    }
-    if (explicitPhone) {
-      nextProfile.contactPhone = explicitPhone;
-      extractionSources.contactPhone = 'explicit';
-    }
-    if (explicitActivityType) {
-      nextProfile.activityType = explicitActivityType;
-      extractionSources.activityType = 'explicit';
-    }
-    if (explicitSector) {
-      nextProfile.sector = explicitSector;
-      extractionSources.sector = 'explicit';
-    }
-    if (explicitFundingGoal) {
-      nextProfile.fundingGoal = explicitFundingGoal;
-      extractionSources.fundingGoal = 'explicit';
-    }
-    if (explicitContributionPref) {
-      nextProfile.contributionPreference = explicitContributionPref;
-      extractionSources.contributionPreference = 'explicit';
-    }
-    if (explicitAteco) {
-      nextProfile.ateco = explicitAteco;
-      nextProfile.atecoAnswered = true;
-      extractionSources.ateco = 'explicit';
-    }
+    if (extracted.updates.locationNeedsConfirmation !== undefined) nextProfile.locationNeedsConfirmation = extracted.updates.locationNeedsConfirmation;
+    if (extracted.updates.revenueOrBudgetEUR !== undefined) { nextProfile.revenueOrBudgetEUR = extracted.updates.revenueOrBudgetEUR; nextProfile.budgetAnswered = extracted.updates.budgetAnswered ?? true; }
+    if (extracted.updates.requestedContributionEUR !== undefined) nextProfile.requestedContributionEUR = extracted.updates.requestedContributionEUR;
+    if (extracted.updates.employees !== undefined) nextProfile.employees = extracted.updates.employees;
+    if (extracted.updates.businessExists !== undefined) nextProfile.businessExists = extracted.updates.businessExists;
+    if (extracted.updates.age !== undefined) nextProfile.age = extracted.updates.age;
+    if (extracted.updates.ageBand !== undefined) nextProfile.ageBand = extracted.updates.ageBand;
+    if (extracted.updates.employmentStatus !== undefined) nextProfile.employmentStatus = extracted.updates.employmentStatus;
+    if (extracted.updates.legalForm !== undefined) nextProfile.legalForm = extracted.updates.legalForm;
+    if (extracted.updates.contactEmail !== undefined) nextProfile.contactEmail = extracted.updates.contactEmail;
+    if (extracted.updates.contactPhone !== undefined) nextProfile.contactPhone = extracted.updates.contactPhone;
+    if (extracted.updates.activityType !== undefined) nextProfile.activityType = extracted.updates.activityType;
+    if (extracted.updates.sector !== undefined) nextProfile.sector = extracted.updates.sector;
+    if (extracted.updates.fundingGoal !== undefined) nextProfile.fundingGoal = extracted.updates.fundingGoal;
+    if (extracted.updates.contributionPreference !== undefined) nextProfile.contributionPreference = extracted.updates.contributionPreference;
+    if (extracted.updates.ateco !== undefined) { nextProfile.ateco = extracted.updates.ateco; nextProfile.atecoAnswered = extracted.updates.atecoAnswered ?? true; }
+    Object.assign(extractionSources, extracted.slotSource);
+    nextProfile.slotSource = extractionSources;
 
     const changed = getChangedFields(profile, nextProfile);
+    const hasExtractedRegion = Boolean(extracted.updates.location?.region);
     if (changed.length > 0) {
       profile = { ...nextProfile, slotSource: extractionSources };
       profileMemory = markProfileFields(profileMemory, changed, 'extractor');
@@ -1674,6 +1614,31 @@ export async function POST(request: Request) {
 
     const isNewSession = isProfileEmpty(profile);
     const prefersChatBeforeProfiling = questionsFirst || qaModeActive;
+
+    // Direct measure question: grounded answer, no onboarding
+    if (intentModeHint === 'measure_question') {
+      const grounded = answerGroundedMeasureQuestion(trimmed);
+      if (grounded) {
+        const nextSession: Session = {
+          ...session,
+          userProfile: profile,
+          profileMemory,
+          recentTurns: [...(session.recentTurns ?? []).slice(-6), { role: 'user', text: trimmed }, { role: 'assistant', text: grounded.text }]
+        };
+        writeSessionCookie(nextSession);
+        return NextResponse.json(
+          withConversationMeta({
+            userProfile: nextSession.userProfile,
+            step: nextSession.step,
+            assistantText: grounded.text,
+            readyToScan: false,
+            mode: 'qa',
+            aiSource: null,
+            needsClarification: false
+          })
+        );
+      }
+    }
 
     // Knowledge/Status Check
     const measureUpdateQuestion = isMeasureUpdateQuestion(trimmed);
@@ -1721,6 +1686,47 @@ export async function POST(request: Request) {
       );
     }
 
+    // Contextual region confirmation when region was inferred from demonym and next step is funding goal.
+    if (
+      !handoffRequested &&
+      profileProgressedThisTurn &&
+      profile.location?.region &&
+      extractionSources.location === 'demonym' &&
+      getNextStep(profile) === 'fundingGoal' &&
+      !hasQaAnswer &&
+      !smallTalk &&
+      !proceedToMatching
+    ) {
+      const regionName = profile.location.region;
+      const assistantText = `Sei in ${regionName}. Cosa vuoi avviare?`;
+      const askedCounts = session.askedCounts ?? {};
+      const attempt = (askedCounts.fundingGoal ?? 0) + 1;
+      const nextSession: Session = {
+        step: 'fundingGoal',
+        userProfile: profile,
+        profileMemory,
+        lastScanHash: session.lastScanHash ?? null,
+        askedCounts: { ...askedCounts, fundingGoal: attempt },
+        lastAskedStep: 'fundingGoal',
+        qaMode: false,
+        humanHandoffRequested: false,
+        humanHandoffCompleted: false,
+        recentTurns: [...(session.recentTurns ?? []).slice(-6), { role: 'user', text: trimmed }, { role: 'assistant', text: assistantText }]
+      };
+      writeSessionCookie(nextSession);
+      return NextResponse.json(
+        withConversationMeta({
+          userProfile: nextSession.userProfile,
+          step: nextSession.step,
+          assistantText,
+          readyToScan: false,
+          mode: 'profiling',
+          aiSource: null,
+          needsClarification: true
+        })
+      );
+    }
+
     if (handoffRequested && !handoffCompleted) {
       let handoffStep = getNextHandoffStep(profile);
       const handoffQuestionAnswer = metaQa ?? qa ?? conversationalReply ?? genericQuestionReply(trimmed);
@@ -1732,7 +1738,7 @@ export async function POST(request: Request) {
         handoffStep !== 'ready' &&
         !smallTalk &&
         (!questionLike || explicitAnswerForStep) &&
-        shouldAttemptStepAnswer(handoffStep, trimmed)
+        shouldAttemptStepAnswer(handoffStep, trimmed, isNewSession)
       ) {
         const applied = applyAnswer(profile, handoffStep, trimmed);
         const prevProfile = profile;
@@ -1856,7 +1862,7 @@ export async function POST(request: Request) {
         (session.step === 'ateco' && !profile.atecoAnswered) ||
         (session.step === 'location' &&
           (!profile.location.region || profile.locationNeedsConfirmation) &&
-          (Boolean(detectedRegion) || locationConfirmationReply)) ||
+          (Boolean(hasExtractedRegion) || locationConfirmationReply)) ||
         (session.step === 'employees' && profile.employees === null) ||
         (session.step === 'fundingGoal' && !profile.fundingGoal) ||
         (session.step === 'budget' && !profile.budgetAnswered) ||
@@ -1954,6 +1960,8 @@ export async function POST(request: Request) {
 
     const llmQaMode = qaModeActive || prefersChatBeforeProfiling;
     const repeatedStepNoProgress = session.lastAskedStep === nextStep && !profileProgressedThisTurn;
+    const effectiveQuestionHint = (directQuestionOnMeasure || hasQaAnswer || questionLike) ? null : questionHint;
+
     const assistantText = (() => {
       if (llmQaMode && smallTalk) return 'Certo, dimmi pure la domanda che vuoi farmi.';
       const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(effectiveNextStep, attempt);
@@ -1999,11 +2007,12 @@ export async function POST(request: Request) {
           bridgeQuestion: bridge,
           mode: 'qa'
         });
+
       if (greeting && !smallTalk) return `Ciao! ${assistantCore}`;
       return assistantCore;
     })();
 
-    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike));
+    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike) || directQuestionOnMeasure);
     const shouldBypassOpenAI = Boolean(
       shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply || (CHAT_DETERMINISTIC_V3 && !faqLikeTurn),
     );
@@ -2016,7 +2025,7 @@ export async function POST(request: Request) {
           nextStep,
           recap,
           attempt,
-          questionHint,
+          questionHint: effectiveQuestionHint,
           shouldScanNow,
           scanReady,
           isGreetingOnly: greeting && smallTalk,
@@ -2199,9 +2208,22 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
     if (e === null) return { profile, error: "Quanti dipendenti o addetti ha l'azienda? Indica un numero indicativo." };
     next.employees = e;
   } else if (step === 'fundingGoal') {
-    const goal = extractFundingGoalFromMessage(message) ?? message;
-    if (goal.length < 5) return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, sede)" };
-    next.fundingGoal = goal;
+    const goal = extractFundingGoalFromMessage(message);
+    if (!goal) {
+      const n = normalizeForMatch(message);
+      const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
+      
+      if (!hasActionVerbs) {
+        return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
+      }
+
+      const isTooShort = message.split(' ').length < 3 && message.length < 15;
+      if (isTooShort) return { profile, error: "Puoi dirmi in modo un po' più specifico cosa vorresti finanziare?" };
+      
+      next.fundingGoal = message.trim();
+    } else {
+      next.fundingGoal = goal;
+    }
   } else if (step === 'budget') {
     if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
         next.budgetAnswered = true;

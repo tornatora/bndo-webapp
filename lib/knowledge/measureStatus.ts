@@ -1,4 +1,4 @@
-import { normalizeForMatch } from '@/lib/conversation/intentRouter';
+import { normalizeForMatch } from '@/lib/text/normalize';
 
 const INCENTIVI_SOLR_ENDPOINT = 'https://www.incentivi.gov.it/solr/coredrupal/select';
 const INCENTIVI_BASE_URL = 'https://www.incentivi.gov.it';

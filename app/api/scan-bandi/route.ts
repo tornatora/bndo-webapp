@@ -15,6 +15,7 @@ import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
 import { evaluateHardEligibility } from '@/lib/matching/hardEligibility';
 import { runUnifiedPipeline } from '@/lib/matching/unifiedPipeline';
 import type { GrantEvaluation } from '@/lib/matching/unifiedPipeline';
+import { filterClosedCalls } from '@/lib/matching/scannerFilters';
 
 export const runtime = 'nodejs';
 
@@ -2310,6 +2311,25 @@ function applyStrategicDocOverrides(
     };
   }
 
+  if (hints.includes('fusese') || hints.includes('fund for self employment')) {
+    return {
+      ...doc,
+      authorityName: doc.authorityName ?? 'Regione Calabria',
+      description:
+        typeof doc.description === 'string' && doc.description.trim()
+          ? doc.description
+          : "Programma europeo per l'autoimpiego e l'avvio di nuove attivita imprenditoriali nel Mezzogiorno.",
+      regions: mergeList(doc.regions, ['Calabria', 'Campania', 'Puglia', 'Sicilia', 'Basilicata', 'Sardegna', 'Molise', 'Abruzzo']),
+      sectors: mergeList(doc.sectors, ['Turismo', 'Commercio', 'Servizi', 'ICT', 'Digitale', 'Artigianato', 'Cultura', 'Ristorazione', 'Manifattura']),
+      beneficiaries: mergeList(doc.beneficiaries, ['Startup', 'Aspiranti imprenditori', 'Disoccupati', 'Inoccupati', 'Under 35', 'Lavoro autonomo']),
+      purposes: mergeList(doc.purposes, ['Start up/Sviluppo d impresa', 'Autoimpiego', 'Imprenditoria giovanile']),
+      dimensions: mergeList(doc.dimensions, ['Micro Impresa', 'Piccola Impresa']),
+      supportForm: mergeList(doc.supportForm, ['Contributo/Fondo perduto']),
+      ateco: mergeList(doc.ateco, ['Tutti i settori economici ammissibili']),
+      url: doc.url || '/fusese',
+    };
+  }
+
   if (hints.includes('smart start italia') || hints.includes('smartstart italia') || hints.includes('smart start')) {
     const isSouth = userRegionCanonical ? SOUTH_REGION_SET.has(userRegionCanonical) : false;
     return {
@@ -2891,6 +2911,41 @@ function computeStrategicSignal(args: {
     }
     if (sectorNorm && !/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
       boost += 0.05;
+    }
+
+    return { ok: true, boost, reasons: reasons.slice(0, 2) };
+  }
+
+  if (hints.includes('fusese') || hints.includes('fund for self employment')) {
+    if (/(agricolt|pesca|acquacolt)/.test(sectorNorm)) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+    if (businessExists === true) {
+      return { ok: false, boost: 0, reasons: [] };
+    }
+
+    let boost = 0.08;
+    const reasons: string[] = [];
+
+    if (region && SOUTH_REGION_SET.has(region)) {
+      boost += 0.2;
+      reasons.push('Programma dedicato al Mezzogiorno');
+    }
+    if (businessExists === false) {
+      boost += 0.18;
+      reasons.push('Adatto a nuova impresa o autoimpiego');
+    }
+    if (/(disoccupat|inoccupat|neet|senza lavoro|non occupat)/.test(employmentNorm)) {
+      boost += 0.14;
+    }
+    if (age !== null && age >= 18 && age <= 35) {
+      boost += 0.12;
+    }
+    if (/(avvio|nuova impresa|startup|autoimpiego|lavoro autonomo|libero professionista)/.test(profileGoalNorm)) {
+      boost += 0.12;
+    }
+    if (requestedAid === 'fondo_perduto' || requestedAid === 'misto') {
+      boost += 0.08;
     }
 
     return { ok: true, boost, reasons: reasons.slice(0, 2) };
@@ -4521,6 +4576,7 @@ export async function POST(req: Request) {
       docs = await loadFallbackDocs();
     }
     docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
+    docs = filterClosedCalls(docs);
 
     // --- Unified Pipeline scoring overlay ---
     const unifiedResult = runUnifiedPipeline({
@@ -4765,22 +4821,32 @@ export async function POST(req: Request) {
         const unifiedId = String(doc.id ?? '');
         const unifiedEval = unifiedScoreMap.get(unifiedId);
         const useUnified = !!unifiedEval;
-        
-        if (useUnified && doc.title?.toLowerCase().includes('india')) {
-            console.log(`DEBUG: Bando India found. Unified Score: ${unifiedEval?.totalScore}, HardExcluded: ${unifiedEval?.hardExcluded}, Reason: ${unifiedEval?.hardExclusionReason}`);
-        }
 
-        // Override legacy flags with unified results if available
-        const overrideRegionOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
-        const overrideBusinessStageOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'stage')?.compatible ?? businessStage.ok : businessStage.ok;
-        const overrideGoalIntentOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.compatible ?? goalIntentMatch.ok : goalIntentMatch.ok;
-        const overrideStrictTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 80 : strictTextOk;
-        const overrideRelaxedTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 60 : relaxedTextOk;
+        // Detect south youth pinned strategic docs early so bypass applies to all derived flags
+        const isSouthPinnedStrategic = (() => {
+          if (businessExists !== false) return false;
+          if (!userRegionCanonical || !SOUTH_REGION_SET.has(userRegionCanonical)) return false;
+          const youthOk = (age !== null && age >= 18 && age <= 35) || ageBand === 'under35';
+          if (!youthOk) return false;
+          const empNorm = normalizeForMatch(employmentStatus ?? '');
+          if (!/(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(empNorm)) return false;
+          return titleNorm.includes('resto al sud') || titleNorm.includes('fusese') || titleNorm.includes('fund for self employment') ||
+                 titleNorm.includes('oltre nuove imprese') || titleNorm.includes('nuove imprese a tasso zero');
+        })();
+        const bypassUnified = isSouthPinnedStrategic;
 
-        const finalScore = useUnified ? unifiedEval.totalScore / 100 : localScore;
-        const finalMatchReasons = useUnified && unifiedEval.whyFit.length > 0
+        // Override legacy flags with unified results if available (bypassed for south pinned strategic)
+        const overrideRegionOk = (useUnified && !bypassUnified) ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
+        const overrideBusinessStageOk = (useUnified && !bypassUnified) ? unifiedEval.dimensions.find(d => d.dimension === 'stage')?.compatible ?? businessStage.ok : businessStage.ok;
+        const overrideGoalIntentOk = (useUnified && !bypassUnified) ? unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.compatible ?? goalIntentMatch.ok : goalIntentMatch.ok;
+        const overrideStrictTextOk = (useUnified && !bypassUnified) ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 80 : strictTextOk;
+        const overrideRelaxedTextOk = (useUnified && !bypassUnified) ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 60 : relaxedTextOk;
+
+        const finalScore = (useUnified && !bypassUnified) ? unifiedEval.totalScore / 100 : localScore;
+        const finalMatchReasons = (useUnified && !bypassUnified && unifiedEval.whyFit.length > 0)
           ? unifiedEval.whyFit.slice(0, 3)
           : matchReasons.slice(0, 3);
+
         const unifiedBlockingMismatchFlags = unifiedEval?.dimensions
           ? unifiedEval.dimensions
               .filter((dim) =>
@@ -4789,10 +4855,11 @@ export async function POST(req: Request) {
               )
               .map((dim) => `${dim.dimension}_mismatch`)
           : [];
-        const unifiedHardExcluded =
-          Boolean(unifiedEval?.hardExcluded) ||
-          (useUnified && unifiedEval.totalScore < 60) || // Se lo score unificato è troppo basso, escludi
-          unifiedBlockingMismatchFlags.length > 0;
+        const unifiedHardExcluded = bypassUnified
+          ? false
+          : Boolean(unifiedEval?.hardExcluded) ||
+            (useUnified && unifiedEval.totalScore < 60) ||
+            unifiedBlockingMismatchFlags.length > 0;
         const finalMismatchFlags = unifiedHardExcluded
           ? ['hard_excluded', ...(unifiedEval?.hardExclusionReason ? [unifiedEval.hardExclusionReason] : []), ...unifiedBlockingMismatchFlags, ...mismatchFlags].slice(0, 3)
           : [...new Set(mismatchFlags)].slice(0, 3);
@@ -4828,7 +4895,7 @@ export async function POST(req: Request) {
               : economic.aidIntensity,
           budgetTotal: parseMoneyValue(sanitizedEconomicOffer?.costMax) ?? parseMoneyValue(sanitizedEconomicOffer?.grantMax) ?? economic.budgetTotal,
           economicOffer: sanitizedEconomicOffer,
-          probabilityScore: useUnified ? unifiedEval.totalScore : Math.round(localScore * 100),
+          probabilityScore: (useUnified && !bypassUnified) ? unifiedEval.totalScore : Math.round(localScore * 100),
           hardStatus: finalHardStatus,
           whyFit: finalMatchReasons,
           missingRequirements: finalMismatchFlags,
@@ -4839,11 +4906,10 @@ export async function POST(req: Request) {
           strategicTitleTokens: [...CHAT_STRICT_STRATEGIC_TITLES, ...caseProfileResolution.pinnedStrategicTitles],
         });
 
-        // Unified Rigor: If pipeline says not eligible, it's NOT eligible.
-        const finalRegionOk = useUnified ? overrideRegionOk : regionOk;
-        const finalBusinessStageOk = useUnified ? overrideBusinessStageOk : businessStage.ok;
-        const finalGoalIntentOk = useUnified ? overrideGoalIntentOk : goalIntentMatch.ok;
-        const finalHardEligibilityPassed = useUnified ? !unifiedHardExcluded : hardEligibility.passed;
+        const finalRegionOk = (useUnified && !bypassUnified) ? overrideRegionOk : regionOk;
+        const finalBusinessStageOk = (useUnified && !bypassUnified) ? overrideBusinessStageOk : businessStage.ok;
+        const finalGoalIntentOk = (useUnified && !bypassUnified) ? overrideGoalIntentOk : goalIntentMatch.ok;
+        const finalHardEligibilityPassed = (useUnified && !bypassUnified) ? !unifiedHardExcluded : hardEligibility.passed;
 
         return {
           isOpen,

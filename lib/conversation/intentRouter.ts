@@ -1,11 +1,7 @@
-export function normalizeForMatch(value: string) {
-  return value
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+import { normalizeForMatch } from '@/lib/text/normalize';
+import { isDirectMeasureQuestion } from '@/lib/knowledge/groundedMeasureAnswerer';
+
+export { normalizeForMatch };
 
 export function isQuestionLike(message: string) {
   const t = message.trim();
@@ -169,6 +165,7 @@ export type TurnIntent = {
   directQuestionOnMeasure: boolean;
   eligibilityCheck: boolean;
   discovery: boolean;
+  measureQuestion: boolean;
 };
 
 export function detectTurnIntent(args: {
@@ -189,20 +186,24 @@ export function detectTurnIntent(args: {
   
   const qaModeActive = Boolean((sessionQaMode || questionsFirst || directQuestionOnMeasure || eligibilityCheck) && !proceedToMatching);
   
-  const modeHint: 'qa' | 'handoff_human' | 'profiling' | 'small_talk' | 'scan_refine' | 'discovery' =
+  const measureQuestion = isDirectMeasureQuestion(message);
+
+  const modeHint: 'qa' | 'handoff_human' | 'profiling' | 'small_talk' | 'scan_refine' | 'discovery' | 'measure_question' =
     asksHumanConsultant
       ? 'handoff_human'
-      : directQuestionOnMeasure || eligibilityCheck
-        ? 'qa'
-        : discovery
-          ? 'discovery'
-          : qaModeActive || questionLike || conversationalIntent
-            ? 'qa'
-            : smallTalk
-              ? 'small_talk'
-              : proceedToMatching
-                ? 'scan_refine'
-                : 'profiling';
+      : measureQuestion
+        ? 'measure_question'
+        : directQuestionOnMeasure || eligibilityCheck
+          ? 'qa'
+          : discovery
+            ? 'discovery'
+            : qaModeActive || questionLike || conversationalIntent
+              ? 'qa'
+              : smallTalk
+                ? 'small_talk'
+                : proceedToMatching
+                  ? 'scan_refine'
+                  : 'profiling';
 
   return {
     questionLike,
@@ -216,6 +217,7 @@ export function detectTurnIntent(args: {
     directQuestionOnMeasure,
     eligibilityCheck,
     discovery,
+    measureQuestion,
     modeHint
   };
 }

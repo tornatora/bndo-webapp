@@ -1,6 +1,6 @@
 import type { UserProfile } from '@/lib/conversation/types';
 import { FINANCE_FAQ } from '@/lib/knowledge/financeFaq';
-import { normalizeForMatch } from '@/lib/conversation/intentRouter';
+import { normalizeForMatch } from '@/lib/text/normalize';
 
 const UNCERTAIN_KEYWORDS = ['de minimis', 'massimale', 'aliquota', 'percentuale', 'scadenza', 'apertura'];
 
