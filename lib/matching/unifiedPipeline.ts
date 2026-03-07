@@ -57,11 +57,11 @@ export type PipelineResult = {
  * Pesi per il calcolo del punteggio (devono sommare a 100)
  */
 const DIMENSION_WEIGHTS: Record<MatchDimension, number> = {
-  subject: 10,
-  territory: 15,
-  purpose: 40,
+  subject: 15,
+  territory: 20,
+  purpose: 35,
   expenses: 5,
-  sector: 20,
+  sector: 15,
   stage: 5,
   status: 3,
   special: 2,
@@ -70,7 +70,7 @@ const DIMENSION_WEIGHTS: Record<MatchDimension, number> = {
 /**
  * Canoniche regioni italiane per il matching
  */
-const NATIONAL_REGION_KEYWORDS = ['tutte', 'nazionale', 'italia', 'italian', 'interreg', 'coesione'];
+const NATIONAL_REGION_KEYWORDS = ['tutte', 'nazionale', 'italia', 'italian', 'interreg', 'coesione', 'italy'];
 
 const NATIONAL_AUTHORITIES = [
   'invitalia',
@@ -88,6 +88,7 @@ const NATIONAL_AUTHORITIES = [
   'simest',
   'dipartimento per la trasformazione digitale',
   'presidenza del consiglio',
+  'incentivi.gov',
 ];
 
 /**
@@ -360,12 +361,22 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
   }
 
   // 6. Se non si può dedurre nulla, NON assumere nazionale se vogliamo essere "rigorosi"
+  if (userRegion) {
+    return {
+      dimension: 'territory',
+      compatible: false,
+      score: 0,
+      confidence: 'low',
+      note: `Territorio non specificato, escluso per rigore (richiesta ${userRegion})`,
+    };
+  }
+
   return {
     dimension: 'territory',
-    compatible: false,
-    score: 0,
+    compatible: true,
+    score: 50,
     confidence: 'low',
-    note: 'Territorio non determinabile con certezza, escluso per rigore',
+    note: 'Territorio non determinabile con certezza, ammesso con riserva',
   };
 }
 

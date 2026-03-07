@@ -162,11 +162,19 @@ function isEchoSentence(sentence: string, userMessage: string) {
     'perfetto hai scritto',
     'stai cercando',
     'quindi cerchi',
-    'ho capito che'
+    'ho capito che',
+    'mi confermi che',
+    'perfetto ho capito',
+    'ho segnato che',
+    'mi dici che'
   ];
-  if (echoPrefixes.some((prefix) => sNorm.startsWith(prefix))) return true;
+  const sClean = sNorm
+    .replace(/^(perfetto|ottimo|ok|bene|ho capito|ho segnato)\s+/, '')
+    .trim();
 
-  if (uNorm.length >= 18 && sNorm.includes(uNorm)) return true;
+  if (echoPrefixes.some((prefix) => sNorm.startsWith(prefix) || sClean.startsWith(prefix))) return true;
+
+  if (uNorm.length >= 14 && sNorm.includes(uNorm)) return true;
 
   const userTokens = new Set(tokenizeForSimilarity(userMessage));
   const sentenceTokens = tokenizeForSimilarity(sentence);
@@ -174,8 +182,8 @@ function isEchoSentence(sentence: string, userMessage: string) {
 
   const overlapCount = sentenceTokens.filter((token) => userTokens.has(token)).length;
   const overlapRatio = overlapCount / sentenceTokens.length;
-  if (overlapRatio >= 0.78 && sentenceTokens.length <= Math.max(8, userTokens.size + 2)) return true;
-  if (overlapCount >= 3 && overlapRatio >= 0.3 && sentenceTokens.length <= 14) return true;
+  if (overlapRatio >= 0.70 && sentenceTokens.length <= Math.max(8, userTokens.size + 2)) return true;
+  if (overlapCount >= 3 && overlapRatio >= 0.25 && sentenceTokens.length <= 14) return true;
 
   return false;
 }
@@ -192,7 +200,7 @@ function stripUserEchoFromReply(reply: string, userMessage: string) {
     const echo = isEchoSentence(sentence, userMessage);
     if (!echo) return true;
     // Remove echo sentences, especially at the beginning where they feel robotic.
-    return index > 0 && sentence.length > 90;
+    return index === 0 || sentence.length < 100;
   });
   if (!filtered.length) return reply;
   return filtered.join(' ').trim();
@@ -229,6 +237,7 @@ function enforceQaModeReply(text: string) {
       n.includes('in che regione') ||
       n.includes('per capire meglio') ||
       n.includes('hai gia un attivita') ||
+      n.includes('hai già un attivita') ||
       n.includes('devi costituirla') ||
       n.includes('ateco') ||
       n.includes('budget') ||
@@ -272,22 +281,30 @@ function enforceConsultantDirectness(
   });
 
   const finalSentences: string[] = [];
-  let hasQuestion = false;
+  let hasQuestionInText = false;
   for (const sentence of compact) {
     const normalized = normalizeForMatch(sentence);
     if (!normalized) continue;
     const isQuestion = sentence.includes('?');
-    if (isQuestion && hasQuestion) continue;
-    if (isQuestion) hasQuestion = true;
+    if (isQuestion && hasQuestionInText) continue;
+    if (isQuestion) hasQuestionInText = true;
     finalSentences.push(sentence);
     if (finalSentences.length >= 2) break;
   }
 
   const joinedBeforeHint = finalSentences.join(' ').trim();
-  const hasDataRequestPattern = /(dimmi|indicami|mi dai|mi dici|confermi|serve|per filtrare|per capire)/i.test(joinedBeforeHint);
-  if (!hasQuestion && questionHint && finalSentences.length < 2 && !hasDataRequestPattern) {
-    finalSentences.push(questionHint);
-    hasQuestion = questionHint.includes('?');
+  const hasDataRequestPattern = /(dimmi|indicami|mi dai|mi dici|confermi|serve|per filtrare|per capire|sapresti dirmi|puoi dirmi)/i.test(joinedBeforeHint);
+  
+  if (!hasQuestionInText && questionHint && finalSentences.length < 2 && !hasDataRequestPattern) {
+    // Check if the generated text already contains the concept of the questionHint
+    const qhNorm = normalizeForMatch(questionHint);
+    const textNorm = normalizeForMatch(joinedBeforeHint);
+    const keywords = qhNorm.split(' ').filter(w => w.length > 4);
+    const alreadyAsked = keywords.length > 0 && keywords.every(kw => textNorm.includes(kw));
+
+    if (!alreadyAsked) {
+      finalSentences.push(questionHint);
+    }
   }
 
   const joined = finalSentences.join(' ').trim();
@@ -863,7 +880,7 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   if (!n) return null;
 
   if (
-    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego)/.test(
+    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla)/.test(
       n
     )
   ) {
@@ -871,7 +888,7 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   }
 
   if (
-    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola)/.test(
+    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva)/.test(
       n,
     )
   ) {
@@ -1088,9 +1105,12 @@ function parseActivityType(message: string): string | null {
   const v = normalizeForMatch(message);
   if (!v) return null;
 
+  if (v.includes('startup')) return 'Startup';
+
   if (
     v.includes('costituir') ||
     v.includes('da costituire') ||
+    v.includes('da aprire') ||
     v.includes('non ho attivita') ||
     v.includes('devo aprire') ||
     v.includes('devo avviare') ||
@@ -1103,13 +1123,16 @@ function parseActivityType(message: string): string | null {
     v.includes('avviare') ||
     v.includes('aprire attivita') ||
     v.includes('avvio attivita') ||
-    v.includes('nuova attivita')
+    v.includes('nuova attivita') ||
+    v.includes('non e ancora attiva') ||
+    v.includes('ancora non esiste') ||
+    v.includes('non l ho ancora aperta') ||
+    v.includes('devo aprirla')
   ) {
     return 'Da costituire';
   }
-  if (v.includes('startup')) return 'Startup';
   if (
-    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|attivita attiva|attivita avviata|gia attiva|già attiva|gia esistente|già esistente|impresa agricola|azienda agricola)/.test(
+    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|attivita attiva|attivita avviata|gia attiva|già attiva|gia esistente|già esistente|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva)/.test(
       v,
     )
   ) {

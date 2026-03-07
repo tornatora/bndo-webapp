@@ -4088,11 +4088,13 @@ async function fetchIncentiviDocs(keyword: string | null, rows: number, timeoutM
     if (keyword && keyword.trim()) {
       params.set('defType', 'edismax');
       params.set('q', keyword.trim());
+      params.set('mm', '2<-25% 3<75%'); // Flexible minimum match: 1-2 words must match, 3+ words 75% match
+      params.set('tie', '0.1'); // Tie breaker for multi-field search
       params.set(
         'qf',
         [
-          'tum_X3b_it_title_ft^3',
-          'twm_X3b_it_field_search_meta^2.5',
+          'tum_X3b_it_title_ft^4',
+          'twm_X3b_it_field_search_meta^3',
           'tum_X3b_it_field_subtitle_ft^2',
           'tum_X3b_it_body_ft^1',
           'tum_X3b_it_output^0.5'
@@ -4799,7 +4801,6 @@ export async function POST(req: Request) {
           : finalMismatchFlags.length === 0
             ? ('eligible' as const)
             : ('unknown' as const);
-        // --- End unified overlay ---
 
         const result: ScanResult = {
           id: resultId,
@@ -4838,21 +4839,27 @@ export async function POST(req: Request) {
           strategicTitleTokens: [...CHAT_STRICT_STRATEGIC_TITLES, ...caseProfileResolution.pinnedStrategicTitles],
         });
 
+        // Unified Rigor: If pipeline says not eligible, it's NOT eligible.
+        const finalRegionOk = useUnified ? overrideRegionOk : regionOk;
+        const finalBusinessStageOk = useUnified ? overrideBusinessStageOk : businessStage.ok;
+        const finalGoalIntentOk = useUnified ? overrideGoalIntentOk : goalIntentMatch.ok;
+        const finalHardEligibilityPassed = useUnified ? !unifiedHardExcluded : hardEligibility.passed;
+
         return {
           isOpen,
-          regionOk: overrideRegionOk,
+          regionOk: finalRegionOk,
           atecoOk: atecoMatch.ok,
           beneficiariesOk: beneficiariesMatch.ok,
-          businessStageOk: overrideBusinessStageOk,
+          businessStageOk: finalBusinessStageOk,
           demographicsOk: demographicMatch.ok,
-          goalIntentOk: overrideGoalIntentOk,
+          goalIntentOk: finalGoalIntentOk,
           strategicOk: strategic.ok,
           economicReliable: hasReliableEconomicDataDoc(doc),
           strictTextOk: overrideStrictTextOk,
           relaxedTextOk: overrideRelaxedTextOk,
           contributionMatched: contribution.matched,
-          hardEligibilityPassed: hardEligibility.passed,
-          hardEligibilityDiagnostics: hardEligibility.diagnostics,
+          hardEligibilityPassed: finalHardEligibilityPassed,
+          hardEligibilityDiagnostics: useUnified ? (unifiedHardExcluded ? ['unified_pipeline_exclusion'] : []) : hardEligibility.diagnostics,
           result
         };
       });

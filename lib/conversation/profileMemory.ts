@@ -41,7 +41,9 @@ function sameNorm(a: string | null | undefined, b: string | null | undefined) {
 
 export function getChangedFields(prev: UserProfile, next: UserProfile): NextBestField[] {
   const changed: NextBestField[] = [];
-  if (!sameNorm(prev.activityType, next.activityType)) changed.push('activityType');
+  if (!sameNorm(prev.activityType, next.activityType) || prev.businessExists !== next.businessExists) {
+    changed.push('activityType');
+  }
   if (!sameNorm(prev.sector, next.sector)) changed.push('sector');
   if (!sameNorm(prev.ateco, next.ateco) || prev.atecoAnswered !== next.atecoAnswered) changed.push('ateco');
   if (

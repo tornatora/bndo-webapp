@@ -14,56 +14,64 @@ export function questionFor(step: Step, seed: string, attempt: number) {
   if (step === 'activityType') {
     return pickOne(turnSeed, [
       "L'attività è già operativa o devi ancora costituirla?",
-      "Hai già un'impresa attiva o si tratta di una nuova iniziativa?"
+      "Hai già un'impresa attiva o si tratta di una nuova iniziativa?",
+      "L'azienda è già registrata o sei in fase di apertura?"
     ]);
   }
 
   if (step === 'sector') {
     return pickOne(turnSeed, [
       "In quale settore operi principalmente?",
-      "Qual è l'ambito di attività della tua impresa?"
+      "Qual è l'ambito di attività dell'impresa?",
+      "Di cosa si occupa nello specifico la tua attività?"
     ]);
   }
 
   if (step === 'ateco') {
     return pickOne(turnSeed, [
       "Hai il codice ATECO o puoi descrivermi l'attività nel dettaglio?",
-      "Qual è il codice ATECO dell'azienda? (Bastano anche le prime 2 cifre)"
+      "Qual è il codice ATECO dell'azienda? (Bastano anche le prime 2 cifre)",
+      "Se conosci il codice ATECO indicamelo, altrimenti descrivimi bene cosa fai."
     ]);
   }
 
   if (step === 'location') {
     return pickOne(turnSeed, [
       "In che regione ha sede il progetto?",
-      "Dove si trova l'unità locale da finanziare?"
+      "Dove si trova l'unità locale da finanziare?",
+      "In quale regione svilupperai l'investimento?"
     ]);
   }
 
   if (step === 'employees') {
     return pickOne(turnSeed, [
       "Quanti dipendenti o addetti ha l'azienda?",
-      "Qual è la dimensione del team in termini di addetti?"
+      "Qual è la dimensione attuale del team?",
+      "Quante persone lavorano in azienda (inclusi i soci)?"
     ]);
   }
 
   if (step === 'fundingGoal') {
     return pickOne(turnSeed, [
       "Cosa devi acquistare o realizzare in concreto?",
-      "Qual è l'obiettivo principale dell'investimento?"
+      "Qual è l'obiettivo principale dell'investimento?",
+      "In cosa consiste il progetto che vuoi finanziare?"
     ]);
   }
 
   if (step === 'budget') {
     return pickOne(turnSeed, [
       "A quanto ammonta indicativamente l'investimento previsto?",
-      "Che budget hai ipotizzato per questo progetto?"
+      "Che budget hai ipotizzato per questo progetto?",
+      "Qual è la spesa complessiva che hai in mente?"
     ]);
   }
 
   if (step === 'contributionPreference') {
     return pickOne(turnSeed, [
       "Preferisci fondo perduto, finanziamento agevolato o ti interessano entrambi?",
-      "Cerchi una forma di agevolazione specifica (es. fondo perduto)?"
+      "Cerchi una forma di agevolazione specifica o valuti ogni opportunità?",
+      "Punti al fondo perduto o valuti anche finanziamenti a tasso agevolato?"
     ]);
   }
 
