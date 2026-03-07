@@ -57,11 +57,11 @@ export type PipelineResult = {
  * Pesi per il calcolo del punteggio (devono sommare a 100)
  */
 const DIMENSION_WEIGHTS: Record<MatchDimension, number> = {
-  subject: 15,
+  subject: 10,
   territory: 15,
-  purpose: 35,
-  expenses: 10,
-  sector: 15,
+  purpose: 40,
+  expenses: 5,
+  sector: 20,
   stage: 5,
   status: 3,
   special: 2,
@@ -446,7 +446,7 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 
   const purposes = toStringArray(grant.purposes).map((p) => normalizeForMatch(p));
   const titleNorm = normalizeForMatch(grant.title || '');
-  const descriptionNorm = normalizeForMatch(grant.description || '');
+  const descriptionNorm = normalizeForMatch(grant.description || '').slice(0, 1000);
   const combinedGrantText = `${titleNorm} ${purposes.join(' ')} ${descriptionNorm}`;
 
   // Keywords del profilo utente
@@ -466,6 +466,23 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
     };
   }
 
+  // Check for negative matches (India, Foreign countries, failed payments)
+  const negativeKeywords = ['india', 'estero', 'internazionalizzazione', 'export', 'insoluti', 'mancati pagamenti', 'crisi d impresa'];
+  const hasNegativeKeyword = negativeKeywords.some(kw => titleNorm.includes(kw));
+  
+  // If user goal doesn't contain these words, but the bando does, penalize heavily
+  const userMentionsNegative = negativeKeywords.some(kw => fundingGoal.includes(kw));
+  
+  if (hasNegativeKeyword && !userMentionsNegative) {
+      return {
+        dimension: 'purpose',
+        compatible: false,
+        score: 0,
+        confidence: 'high',
+        note: `Bando specifico per finalità non richieste (es. estero/crisi)`,
+      };
+  }
+
   let matchedKeywords = 0;
   for (const keyword of userKeywords) {
     if (combinedGrantText.includes(keyword)) {
@@ -475,14 +492,14 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 
   const matchRatio = matchedKeywords / userKeywords.length;
 
-  // Se l'obiettivo è specifico e non c'è NESSUN match, escludi categoricamente
-  if (!goalIsGeneric && matchedKeywords === 0) {
+  // Se l'obiettivo è specifico e non c'è una corrispondenza forte, escludi categoricamente
+  if (!goalIsGeneric && matchRatio < 0.6) {
     return {
       dimension: 'purpose',
       compatible: false,
-      score: 0,
+      score: Math.round(matchRatio * 50),
       confidence: 'high',
-      note: `Nessuna corrispondenza con l'obiettivo specifico: ${fundingGoal}`,
+      note: `Corrispondenza insufficiente con l'obiettivo specifico (${Math.round(matchRatio * 100)}%)`,
     };
   }
 
@@ -507,31 +524,10 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
     };
   }
 
-  if (matchRatio >= 0.2) {
-    return {
-      dimension: 'purpose',
-      compatible: true,
-      score: 50,
-      confidence: 'medium',
-      note: `Finalità solo parzialmente coerente`,
-    };
-  }
-
-  // Se il match è molto scarso ed è un obiettivo specifico, marca come incompatibile
-  if (!goalIsGeneric) {
-    return {
-      dimension: 'purpose',
-      compatible: false,
-      score: 10,
-      confidence: 'medium',
-      note: `Corrispondenza insufficiente con l'obiettivo: ${fundingGoal}`,
-    };
-  }
-
   return {
     dimension: 'purpose',
-    compatible: true,
-    score: 20,
+    compatible: goalIsGeneric, // Solo se generico lasciamo passare con score basso
+    score: Math.round(matchRatio * 100),
     confidence: 'medium',
     note: `Bassa corrispondenza con la finalità`,
   };
