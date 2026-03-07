@@ -683,11 +683,13 @@ function hasStrategicTitleHint(result: ScanResult) {
 }
 
 function normalizeTitleDedupeKey(title: string): string {
-  return normalizeForMatch(title)
+  let key = normalizeForMatch(title)
     .replace(/\b(anno|edizione|misura|bando|avviso|contributi)\b/g, ' ')
     .replace(/\b\d{4}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  if (key.includes('fusese') || key.includes('fund for self employment')) key = 'fusese';
+  return key;
 }
 
 function mergeEconomicOffer(
