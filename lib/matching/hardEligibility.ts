@@ -88,6 +88,14 @@ function inferDemographicCompatible(result: ScanResultLike, profile: NormalizedM
 }
 
 function inferGoalSectorCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile) {
+  // Se la pipeline unificata ha già calcolato il punteggio,
+  // fidiamoci del suo lavoro invece di fare text-matching rudimentale sui reasons.
+  // In `app/api/scan-bandi/route.ts` il result.hardStatus viene impostato a 'not_eligible'
+  // se la pipeline lo esclude duramente.
+  if (result.hardStatus && result.hardStatus !== 'not_eligible' && result.score && result.score > 0.6) {
+    return true;
+  }
+
   const goalNorm = normalizeForMatch(profile.fundingGoal ?? '');
   const sectorNorm = normalizeForMatch(profile.sector ?? '');
   if (!goalNorm && !sectorNorm) return true;
@@ -100,19 +108,7 @@ function inferGoalSectorCompatible(result: ScanResultLike, profile: NormalizedMa
   if (mismatchesNorm.includes('settore') || mismatchesNorm.includes('goal')) return false;
   if (!goalNorm && !sectorNorm) return true;
 
-  const tokens = new Set(
-    `${goalNorm} ${sectorNorm}`
-      .split(' ')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length >= 4),
-  );
-  if (tokens.size === 0) return true;
-
-  let hits = 0;
-  for (const token of tokens) {
-    if (combined.includes(token)) hits += 1;
-  }
-  return hits > 0;
+  return true; // Rimosso il filtro sui token rigido che svuotava i risultati validi
 }
 
 function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile) {

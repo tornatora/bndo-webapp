@@ -41,7 +41,8 @@ async function runTests(previewUrl) {
       employees: 3,
       ateco: '62.01.00'
     },
-    strictness: 'high'
+    strictness: 'high',
+    mode: 'fast'
   });
   console.log(`Results: ${resLombardia.results?.length}`);
   resLombardia.results?.slice(0, 3).forEach(r => console.log(`- [${r.score}] ${r.title} (${r.authorityName})`));
@@ -59,7 +60,8 @@ async function runTests(previewUrl) {
       revenueOrBudgetEUR: 100000,
       employees: 5
     },
-    strictness: 'high'
+    strictness: 'high',
+    mode: 'fast'
   });
   console.log(`Results: ${resCampania.results?.length}`);
   resCampania.results?.slice(0, 3).forEach(r => console.log(`- [${r.score}] ${r.title} (${r.authorityName})`));
@@ -72,7 +74,8 @@ async function runTests(previewUrl) {
       region: 'Campania',
       sector: 'turismo',
     },
-    strictness: 'high'
+    strictness: 'high',
+    mode: 'fast'
   });
   console.log(`Results with 'answers' root: ${resAnswers.results?.length}`);
 

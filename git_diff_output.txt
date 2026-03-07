@@ -160,7 +160,7 @@ index c11a171..bc58147 100644
      const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
      let qaShapedAssistantText =
 diff --git a/app/api/scan-bandi/route.ts b/app/api/scan-bandi/route.ts
-index a5a856a..8087500 100644
+index a5a856a..f02fba8 100644
 --- a/app/api/scan-bandi/route.ts
 +++ b/app/api/scan-bandi/route.ts
 @@ -13,6 +13,8 @@ import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
@@ -245,7 +245,7 @@ index a5a856a..8087500 100644
      const keywordSets = buildKeywordSets(sector, fundingGoalQuery);
      const sectorCoreKeywords = keywordSets.sectorCore;
      const goalCoreKeywords = keywordSets.goalCore;
-@@ -4730,6 +4769,36 @@ export async function POST(req: Request) {
+@@ -4730,6 +4769,44 @@ export async function POST(req: Request) {
            economicOffer: economic.economicOffer,
            localDoc: doc,
          });
@@ -253,6 +253,14 @@ index a5a856a..8087500 100644
 +        // --- Unified pipeline score overlay ---
 +        const unifiedEval = unifiedScoreMap.get(String(doc.id ?? '')) ?? unifiedScoreMap.get(resultId);
 +        const useUnified = unifiedEval && !unifiedEval.hardExcluded;
++
++        // Override legacy flags with unified results if available
++        const overrideRegionOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
++        const overrideBusinessStageOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'stage')?.compatible ?? businessStage.ok : businessStage.ok;
++        const overrideGoalIntentOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.compatible ?? goalIntentMatch.ok : goalIntentMatch.ok;
++        const overrideStrictTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 80 : strictTextOk;
++        const overrideRelaxedTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 60 : relaxedTextOk;
++
 +        const finalScore = useUnified ? unifiedEval.totalScore / 100 : localScore;
 +        const finalMatchReasons = useUnified && unifiedEval.whyFit.length > 0
 +          ? unifiedEval.whyFit.slice(0, 3)
@@ -282,7 +290,7 @@ index a5a856a..8087500 100644
          const result: ScanResult = {
            id: resultId,
            title: doc.title ?? 'Incentivo (Incentivi.gov)',
-@@ -4737,10 +4806,10 @@ export async function POST(req: Request) {
+@@ -4737,10 +4814,10 @@ export async function POST(req: Request) {
            deadlineAt: deadline,
            sourceUrl: buildSourceUrl(doc),
            requirements: buildRequirements(doc, { userRegion: userRegionCanonical, territory }),
@@ -297,7 +305,7 @@ index a5a856a..8087500 100644
            grantId: resultId,
            grantTitle: doc.title ?? 'Incentivo (Incentivi.gov)',
            authority: doc.authorityName ?? 'Incentivi.gov',
-@@ -4756,10 +4825,10 @@ export async function POST(req: Request) {
+@@ -4756,10 +4833,10 @@ export async function POST(req: Request) {
                : economic.aidIntensity,
            budgetTotal: parseMoneyValue(sanitizedEconomicOffer?.costMax) ?? parseMoneyValue(sanitizedEconomicOffer?.grantMax) ?? economic.budgetTotal,
            economicOffer: sanitizedEconomicOffer,
@@ -312,7 +320,29 @@ index a5a856a..8087500 100644
          };
          const hardEligibility = evaluateHardEligibility({
            result,
-@@ -4943,6 +5012,7 @@ export async function POST(req: Request) {
+@@ -4769,16 +4846,16 @@ export async function POST(req: Request) {
+ 
+         return {
+           isOpen,
+-          regionOk,
++          regionOk: overrideRegionOk,
+           atecoOk: atecoMatch.ok,
+           beneficiariesOk: beneficiariesMatch.ok,
+-          businessStageOk: businessStage.ok,
++          businessStageOk: overrideBusinessStageOk,
+           demographicsOk: demographicMatch.ok,
+-          goalIntentOk: goalIntentMatch.ok,
++          goalIntentOk: overrideGoalIntentOk,
+           strategicOk: strategic.ok,
+           economicReliable: hasReliableEconomicDataDoc(doc),
+-          strictTextOk,
+-          relaxedTextOk,
++          strictTextOk: overrideStrictTextOk,
++          relaxedTextOk: overrideRelaxedTextOk,
+           contributionMatched: contribution.matched,
+           hardEligibilityPassed: hardEligibility.passed,
+           hardEligibilityDiagnostics: hardEligibility.diagnostics,
+@@ -4943,6 +5020,7 @@ export async function POST(req: Request) {
      const pinnedStrategicTitlesUnique = Array.from(new Set(pinnedStrategicTitles));
      const candidateMap = new Map<string, Candidate>();
      for (const entry of chosenTextPool) {
@@ -320,7 +350,7 @@ index a5a856a..8087500 100644
        candidateMap.set(entry.result.id, { result: entry.result, contributionMatched: entry.contributionMatched });
      }
      for (const entry of mapped) {
-@@ -4953,7 +5023,9 @@ export async function POST(req: Request) {
+@@ -4953,7 +5031,9 @@ export async function POST(req: Request) {
          !entry.beneficiariesOk ||
          !entry.businessStageOk ||
          !entry.demographicsOk ||
@@ -331,7 +361,7 @@ index a5a856a..8087500 100644
        ) {
          continue;
        }
-@@ -4994,6 +5066,7 @@ export async function POST(req: Request) {
+@@ -4994,6 +5074,7 @@ export async function POST(req: Request) {
                entry.businessStageOk &&
                entry.demographicsOk &&
                entry.strategicOk &&
@@ -339,7 +369,7 @@ index a5a856a..8087500 100644
                entry.result.hardStatus !== 'not_eligible' &&
                (isRestoResult(entry.result) || isFuseseResult(entry.result) || isOnResult(entry.result)),
            )
-@@ -5010,14 +5083,14 @@ export async function POST(req: Request) {
+@@ -5010,14 +5091,14 @@ export async function POST(req: Request) {
  
      const qualityThreshold = southYouthStartupProfile ? 0.35 : 0.56;
      const pickFrom = (pool: Candidate[]) => {
@@ -356,7 +386,7 @@ index a5a856a..8087500 100644
        strictMatchesFound = strictPool.length > 0;
  
        const strictPicked = pickFrom(strictPool);
-@@ -5045,6 +5118,11 @@ export async function POST(req: Request) {
+@@ -5045,6 +5126,11 @@ export async function POST(req: Request) {
      if (southYouthStartupProfile) {
        const strategicFront = sorted.filter((candidate) => {
          if (candidate.result.hardStatus === 'not_eligible') return false;
