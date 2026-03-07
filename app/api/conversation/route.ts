@@ -355,7 +355,7 @@ async function generateAssistantTextWithOpenAI(args: {
     '',
     'IDENTITA E COMPETENZA:',
     "Conosci finanza agevolata, bandi pubblici, contributi a fondo perduto, finanziamenti agevolati, crediti d'imposta, voucher, Resto al Sud, FUSESE, Nuova Sabatini, ON, Smart&Start Italia.",
-    'Quando un dettaglio non conosci o cambia, dici che lo verificherai con lo scanner.',
+    'Quando un dettaglio non conosci o cambia, dici che lo verificherai con i dati sui bandi.',
     'Non inventi mai scadenze, percentuali o condizioni specifiche di bandi.',
     '',
     'TONO E STILE:',
@@ -366,14 +366,13 @@ async function generateAssistantTextWithOpenAI(args: {
     '',
     'CONVERSAZIONE:',
     "RISPONDI PRIMA alla domanda/esigenza concreta dell'utente, POI se serve chiedi UN solo dato critico, con naturalezza.",
-    'Se i dati sono sufficienti per il matching, avvia lo scanner - non fare piu domande.',
+    'Se i dati sono sufficienti per il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
     'Non ripetere domande gia risposte. Non chiedere dati gia nel profilo.',
     'Se vuole fare domande prima del profiling, rispondi alle sue domande senza forzare i dati nello stesso turno.',
     "Se Q&A mode: non chiedere profiling finche non chiede esplicitamente il matching.",
     "Se il messaggio e meta/conversazionale, evita di ridirigere meccanicamente al form.",
-    'Se devi avviare lo scanner, dillo chiaramente in 1 frase sola.',
     'Se hai risposto in modo completo, chiudi anche senza domanda finale.',
     '',
     'ANTI-PATTERN:',
@@ -2387,9 +2386,7 @@ export async function POST(req: Request) {
     const candidateAssistantText = cleanupAssistantText(rawAssistantText);
     const antiEchoAssistantText = stripUserEchoFromReply(candidateAssistantText, trimmed);
     const dedupedAssistantText = repetition.tooSimilar
-      ? `${antiEchoAssistantText}\n\n${
-          naturalBridgeQuestion(effectiveNextStep, attempt + 1) ?? questionForStepWithProfile(effectiveNextStep, profile, seed, attempt + 1)
-        }`
+      ? antiEchoAssistantText || 'Capisco.'
       : antiEchoAssistantText;
     const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
     let qaShapedAssistantText =

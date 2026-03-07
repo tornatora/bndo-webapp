@@ -635,6 +635,9 @@ function normalizeResultSearchText(result: ScanResult) {
 }
 
 function passesChatStrictCandidate(result: ScanResult, context: ChatStrictContext, enforceGoal = true): boolean {
+  // Se la unifiedPipeline ha dato uno score molto alto, ci fidiamo
+  if ((result.score ?? 0) >= 0.70) return true;
+
   const titleNorm = normalizeForMatch(result.title);
   const authorityTrusted = classifyAuthorityPriority(result.authorityName).trusted;
   const strategicTitle = CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));

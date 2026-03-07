@@ -103,7 +103,7 @@ export function questionFor(step: Step, seed: string, attempt: number) {
       : pickOne(turnSeed, ['Ultimo passaggio: mi indichi il numero di telefono su cui vuoi essere ricontattato?']);
   }
 
-  return 'Ok, avvio lo scanner dei bandi compatibili…';
+  return 'Ho gli elementi necessari. Procedo subito a individuare le opportunità migliori per te.';
 }
 
 export function naturalBridgeQuestion(step: Step, attempt: number) {
