@@ -693,10 +693,10 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
 
   // LOGICA PROATTIVA: 
   // Se non è generico e abbiamo i 3 pilastri (Cosa, Dove, Chi), siamo pronti.
-  const corePilarsOk = goalText && !goalIsGeneric && hasRegion && hasContext;
+  const corePilarsOk = Boolean(goalText && !goalIsGeneric && hasRegion && hasContext);
   
   // Se è generico, serve almeno un segnale di precisione (budget o settore o ateco)
-  const genericWithPrecisionOk = goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority);
+  const genericWithPrecisionOk = Boolean(goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority));
 
   if (!corePilarsOk && !genericWithPrecisionOk) {
       if (!missingSignals.includes('topicPrecision')) {
@@ -704,12 +704,14 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
       }
   }
 
+  const isReady = corePilarsOk || missingSignals.length === 0;
+
   return {
-    ready: missingSignals.length === 0 || !!corePilarsOk,
+    ready: isReady,
     missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
-  }
+}
 
 
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
