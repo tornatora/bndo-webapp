@@ -4771,8 +4771,13 @@ export async function POST(req: Request) {
         });
 
         // --- Unified pipeline score overlay ---
-        const unifiedEval = unifiedScoreMap.get(String(doc.id ?? '')) ?? unifiedScoreMap.get(resultId);
-        const useUnified = unifiedEval && !unifiedEval.hardExcluded;
+        const unifiedId = String(doc.id ?? '');
+        const unifiedEval = unifiedScoreMap.get(unifiedId);
+        const useUnified = !!unifiedEval;
+        
+        if (useUnified && doc.title?.toLowerCase().includes('india')) {
+            console.log(`DEBUG: Bando India found. Unified Score: ${unifiedEval?.totalScore}, HardExcluded: ${unifiedEval?.hardExcluded}, Reason: ${unifiedEval?.hardExclusionReason}`);
+        }
 
         // Override legacy flags with unified results if available
         const overrideRegionOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
@@ -4789,13 +4794,13 @@ export async function POST(req: Request) {
           ? unifiedEval.dimensions
               .filter((dim) =>
                 dim.compatible === false &&
-                (dim.dimension === 'territory' || dim.dimension === 'subject' || dim.dimension === 'status')
+                (dim.dimension === 'territory' || dim.dimension === 'subject' || dim.dimension === 'status' || dim.dimension === 'purpose')
               )
               .map((dim) => `${dim.dimension}_mismatch`)
           : [];
         const unifiedHardExcluded =
           Boolean(unifiedEval?.hardExcluded) ||
-          unifiedEval?.band === 'excluded' ||
+          (useUnified && unifiedEval.totalScore < 60) || // Se lo score unificato è troppo basso, escludi
           unifiedBlockingMismatchFlags.length > 0;
         const finalMismatchFlags = unifiedHardExcluded
           ? ['hard_excluded', ...(unifiedEval?.hardExclusionReason ? [unifiedEval.hardExclusionReason] : []), ...unifiedBlockingMismatchFlags, ...mismatchFlags].slice(0, 3)
