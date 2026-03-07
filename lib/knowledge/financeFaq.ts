@@ -52,17 +52,17 @@ export const FINANCE_FAQ: FinanceFaq[] = [
   },
   {
     id: 'resto-sud',
-    topic: 'Resto al Sud',
-    keywords: ['resto al sud', 'sud', 'invitalia'],
+    topic: 'Resto al Sud 2.0',
+    keywords: ['resto al sud', 'sud', 'invitalia', 'resto al sud 2.0', 'formazione'],
     answer:
-      "Resto al Sud è una misura per avvio/sviluppo d'impresa nelle aree ammesse. La candidabilità dipende da territorio, profilo beneficiario e coerenza delle spese."
+      "Resto al Sud 2.0 (DL Coesione) sostiene l'avvio di attività nelle regioni del Mezzogiorno (Sicilia, Sardegna, Calabria, Puglia, Basilicata, Campania, Molise, Abruzzo) e aree del sisma. Finanzia investimenti e spese di avvio. Sull'ammissibilità della formazione specifica, la norma privilegia beni strumentali e consulenze; per confermare se un particolare corso è coperto, devo verificare il testo attuativo aggiornato o se rientra nei voucher per servizi specialistici."
   },
   {
     id: 'autoimpiego',
     topic: 'Autoimpiego Centro Nord',
-    keywords: ['autoimpiego', 'centro nord', 'avvio', 'nuova impresa'],
+    keywords: ['autoimpiego', 'centro nord', 'avvio', 'nuova impresa', 'autoimpiego centro nord'],
     answer:
-      "Autoimpiego Centro Nord supporta l'avvio nelle regioni ammesse con requisiti specifici sul beneficiario e sul progetto; la verifica puntuale dei criteri è decisiva."
+      "Autoimpiego Centro-Nord è la misura per l'avvio di attività nelle regioni del Centro e Nord Italia (non coperte da Resto al Sud). Supporta giovani e soggetti svantaggiati con contributi e finanziamenti. Anche qui, la coerenza delle spese (investimenti vs gestione) è fondamentale per l'ammissibilità."
   }
 ];
 

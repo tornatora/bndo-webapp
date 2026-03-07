@@ -133,7 +133,16 @@ export function normalizeProfileInput(rawProfile: Record<string, unknown>): Norm
   const budget = cleanNumber(rawProfile.revenueOrBudgetEUR);
   const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR);
   const atecoDigits = typeof ateco === 'string' ? extractAtecoDigitsFromText(ateco) : [];
-  const businessExists = typeof rawProfile.businessExists === 'boolean' ? rawProfile.businessExists : null;
+  
+  let businessExists = typeof rawProfile.businessExists === 'boolean' ? rawProfile.businessExists : null;
+  if (businessExists === null && typeof rawProfile.businessExists === 'string') {
+    const n = normalizeForMatch(rawProfile.businessExists);
+    if (/(operativa|gia operativa|attiva|gia attiva|ho gia l azienda|azienda attiva|impresa attiva|siamo gia operativi|societa attiva)/.test(n)) {
+      businessExists = true;
+    } else if (/(da aprire|da costituire|nuova attivita|non e ancora attiva|non l ho ancora aperta)/.test(n)) {
+      businessExists = false;
+    }
+  }
 
   return {
     businessExists,

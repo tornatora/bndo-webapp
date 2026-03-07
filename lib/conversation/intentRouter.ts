@@ -101,6 +101,49 @@ export function wantsToProceedToMatching(message: string) {
   );
 }
 
+export function isDirectQuestionOnMeasure(message: string) {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  const measures = [
+    'resto al sud',
+    'nuova sabatini',
+    'smart&start',
+    'oltre nuove imprese',
+    'on tasso zero',
+    'credito d imposta',
+    'transizione 5.0',
+    'transizione 4.0',
+    'voucher internazionalizzazione',
+    'voucher digitalizzazione',
+    'autoimpiego centro nord',
+    'fusese'
+  ];
+  const questionKeywords = ['come funziona', 'posso finanziare', 'copre', 'vale per', 'requisiti', 'spese ammissibili', 'quando scade'];
+  
+  const mentionsMeasure = measures.some(m => n.includes(m));
+  const isQuestion = isQuestionLike(message) || questionKeywords.some(k => n.includes(k));
+  
+  return mentionsMeasure && isQuestion;
+}
+
+export function isEligibilityCheck(message: string) {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  return (
+    (n.includes('posso accedere') || n.includes('ho i requisiti') || n.includes('va bene per me') || n.includes('posso partecipare')) &&
+    (n.includes('sono') || n.includes('abbiamo') || n.includes('ho'))
+  );
+}
+
+export function isDiscoveryIntent(message: string) {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  return (
+    (n.includes('cerco') || n.includes('voglio') || n.includes('vorrei') || n.includes('mi serve') || n.includes('bando per')) &&
+    !isDirectQuestionOnMeasure(message)
+  );
+}
+
 export function wantsHumanConsultant(message: string) {
   const n = normalizeForMatch(message);
   if (!n) return false;
@@ -123,6 +166,9 @@ export type TurnIntent = {
   proceedToMatching: boolean;
   asksHumanConsultant: boolean;
   qaModeActive: boolean;
+  directQuestionOnMeasure: boolean;
+  eligibilityCheck: boolean;
+  discovery: boolean;
 };
 
 export function detectTurnIntent(args: {
@@ -137,17 +183,26 @@ export function detectTurnIntent(args: {
   const questionsFirst = wantsQuestionsFirst(message);
   const proceedToMatching = wantsToProceedToMatching(message);
   const asksHumanConsultant = wantsHumanConsultant(message);
-  const qaModeActive = Boolean((sessionQaMode || questionsFirst) && !proceedToMatching);
-  const modeHint: 'qa' | 'handoff_human' | 'profiling' | 'small_talk' | 'scan_refine' =
+  const directQuestionOnMeasure = isDirectQuestionOnMeasure(message);
+  const eligibilityCheck = isEligibilityCheck(message);
+  const discovery = isDiscoveryIntent(message);
+  
+  const qaModeActive = Boolean((sessionQaMode || questionsFirst || directQuestionOnMeasure || eligibilityCheck) && !proceedToMatching);
+  
+  const modeHint: 'qa' | 'handoff_human' | 'profiling' | 'small_talk' | 'scan_refine' | 'discovery' =
     asksHumanConsultant
       ? 'handoff_human'
-      : qaModeActive || questionLike || conversationalIntent
+      : directQuestionOnMeasure || eligibilityCheck
         ? 'qa'
-        : smallTalk
-          ? 'small_talk'
-          : proceedToMatching
-            ? 'scan_refine'
-            : 'profiling';
+        : discovery
+          ? 'discovery'
+          : qaModeActive || questionLike || conversationalIntent
+            ? 'qa'
+            : smallTalk
+              ? 'small_talk'
+              : proceedToMatching
+                ? 'scan_refine'
+                : 'profiling';
 
   return {
     questionLike,
@@ -158,7 +213,10 @@ export function detectTurnIntent(args: {
     proceedToMatching,
     asksHumanConsultant,
     qaModeActive,
+    directQuestionOnMeasure,
+    eligibilityCheck,
+    discovery,
     modeHint
-  } satisfies TurnIntent & { modeHint: 'qa' | 'handoff_human' | 'profiling' | 'small_talk' | 'scan_refine' };
+  };
 }
 

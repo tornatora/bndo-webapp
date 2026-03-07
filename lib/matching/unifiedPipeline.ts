@@ -619,10 +619,10 @@ function isGenericFundingGoal(text: string) {
   
   // Se contiene parole ad alto valore semantico non è generico
   const specificTerms = [
-    'ristruttur', 'macchinar', 'software', 'digitalizz', 'hardware', 'impiant', 
-    'fotovolta', 'turismo', 'alberghier', 'ristorazione', 'bar', 'commercio',
-    'e-commerce', 'export', 'internazionalizz', 'assunzion', 'personale',
-    'ricerca', 'sviluppo', 'innovazione', 'brevett', 'certificazion'
+    'ristruttur', 'macchinar', 'attrezz', 'software', 'digital', 'capannone', 
+    'energia', 'fotovolta', 'assunz', 'formaz', 'export', 'internaz', 
+    'brevett', 'ricerca', 'sviluppo', 'marketing', 'pubblicit', 'mezzi', 'veicoli',
+    'sito', 'e-commerce', 'alberghier', 'turism', 'ristorazione', 'bar'
   ];
   
   if (words.some(w => specificTerms.some(t => w.includes(t)))) return false;

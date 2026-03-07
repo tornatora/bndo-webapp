@@ -268,7 +268,7 @@ function enforceConsultantDirectness(
     .filter(Boolean);
 
   if (shouldScanNow) {
-    return 'Ho un quadro chiaro. Avvio subito una ricerca approfondita per individuare le opportunità più concrete per il tuo profilo.';
+    return 'Ottimo, ho i dettagli necessari. Ti mostro subito le migliori opportunità che ho individuato per te.';
   }
 
   const fluffPattern =
@@ -382,7 +382,8 @@ async function generateAssistantTextWithOpenAI(args: {
     'Massimo 1-2 frasi per risposta, dirette e operative. Zero markdown, liste, bullet points.',
     '',
     'CONVERSAZIONE:',
-    "RISPONDI PRIMA alla domanda/esigenza concreta dell'utente, POI se serve chiedi UN solo dato critico, con naturalezza.",
+    'RISPONDI PRIMA alla domanda/esigenza concreta dell\'utente, POI se serve chiedi UN solo dato critico, con naturalezza.',
+    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo grounded basandoti solo sul contesto specialistico fornito. Se i dati non bastano, dillo chiaramente senza inventare.',
     'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
@@ -880,7 +881,7 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   if (!n) return null;
 
   if (
-    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla)/.test(
+    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla|da aprire|da costituire|nuova attivita|non e ancora attiva|non l ho ancora aperta)/.test(
       n
     )
   ) {
@@ -888,7 +889,7 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   }
 
   if (
-    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva)/.test(
+    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva|operativa|gia operativa|attiva|gia attiva|ho gia l azienda|azienda attiva|impresa attiva|siamo gia operativi|societa attiva)/.test(
       n,
     )
   ) {
@@ -1154,7 +1155,7 @@ function extractSectorFromMessage(message: string): string | null {
 
   const n = normalizeForMatch(raw);
   const known = [
-    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola'] },
+    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
     { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b'] },
     { sector: 'ristorazione', hints: ['ristorazione', 'ristorante', 'bar', 'pizzeria', 'food'] },
     { sector: 'commercio', hints: ['commercio', 'negozio', 'retail', 'ecommerce', 'e commerce'] },
@@ -1479,6 +1480,9 @@ function answerFinanceQuestion(message: string): string | null {
     n.includes('incentiv') ||
     n.includes('finanziamento');
 
+  // Do not return generic help message if it's a discovery turn (handled by extraction)
+  if (hasFinanceKeywords && !/\?$/.test(n) && !isQuestionLike(message)) return null;
+
   if (hasFinanceKeywords) return 'Ti aiuto volentieri a trovare il bando giusto. Dimmi cosa vuoi finanziare e in quale regione.';
 
   return null;
@@ -1551,16 +1555,23 @@ export async function POST(request: Request) {
     let profileMemory = session.profileMemory ?? emptyProfileMemory();
     let profileProgressedThisTurn = false;
 
-    const conversationalIntent = isConversationalIntent(trimmed);
-    const questionLike = isQuestionLike(trimmed);
-    const greeting = isGreeting(trimmed);
-    const smallTalk = isSmallTalkOnly(trimmed);
-    const asksHumanConsultant = wantsHumanConsultant(trimmed);
+    const intent = detectTurnIntent({ message: trimmed, sessionQaMode: session.qaMode || false });
+    const {
+      conversationalIntent,
+      questionLike,
+      greeting,
+      smallTalk,
+      asksHumanConsultant,
+      questionsFirst,
+      proceedToMatching,
+      directQuestionOnMeasure,
+      eligibilityCheck,
+      discovery,
+      qaModeActive
+    } = intent;
+
     const handoffRequested = session.humanHandoffRequested || asksHumanConsultant;
     const handoffCompleted = session.humanHandoffCompleted || false;
-    const qaModeActive = session.qaMode || false;
-    const questionsFirst = wantsQuestionsFirst(trimmed);
-    const proceedToMatching = wantsToProceedToMatching(trimmed);
 
     // Extraction pass
     const detectedRegionSignal = detectRegionSignal(trimmed);
