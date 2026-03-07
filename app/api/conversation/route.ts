@@ -871,12 +871,15 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   }
 
   if (
-    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola)/.test(
+    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola)/.test(
       n,
     )
   ) {
     return true;
   }
+
+  return null;
+}
 
   return null;
 }

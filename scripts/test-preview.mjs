@@ -1,3 +1,5 @@
+let lastCookie = null;
+
 async function fetchScan(url, payload) {
   const res = await fetch(`${url}/api/scan-bandi`, {
     method: 'POST',
@@ -12,11 +14,19 @@ async function fetchScan(url, payload) {
 }
 
 async function fetchChat(url, payload) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (lastCookie) {
+      headers['Cookie'] = lastCookie;
+  }
   const res = await fetch(`${url}/api/conversation`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload)
   });
+  const cookie = res.headers.get('set-cookie');
+  if (cookie) {
+      lastCookie = cookie.split(';')[0];
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`HTTP ${res.status}: ${text}`);
@@ -30,6 +40,8 @@ async function runTests(previewUrl) {
   // 1) SICILIA / AGRICOLO / SOFTWARE (Chat flow)
   console.log('\n--- TEST 1: SICILIA AGRICOLO SOFTWARE ---');
   await fetch(`${previewUrl}/api/conversation`, { method: 'DELETE' }); // Reset
+  lastCookie = null;
+
   const c1 = await fetchChat(previewUrl, { message: 'bando per software nel settore agricolo in Sicilia' });
   console.log('Turn 1:', c1.assistantText);
   console.log('Ready to scan:', c1.readyToScan);
@@ -39,6 +51,7 @@ async function runTests(previewUrl) {
       const c2 = await fetchChat(previewUrl, { message: 'azienda gia attiva' });
       console.log('Turn 2:', c2.assistantText);
       console.log('Ready to scan:', c2.readyToScan);
+      console.log('Final Profile:', JSON.stringify(c2.userProfile));
   }
 
   // 2) CAMPANIA TURISMO (Scanner check)
