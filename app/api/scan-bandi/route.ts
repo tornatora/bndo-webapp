@@ -4773,6 +4773,14 @@ export async function POST(req: Request) {
         // --- Unified pipeline score overlay ---
         const unifiedEval = unifiedScoreMap.get(String(doc.id ?? '')) ?? unifiedScoreMap.get(resultId);
         const useUnified = unifiedEval && !unifiedEval.hardExcluded;
+
+        // Override legacy flags with unified results if available
+        const overrideRegionOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
+        const overrideBusinessStageOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'stage')?.compatible ?? businessStage.ok : businessStage.ok;
+        const overrideGoalIntentOk = useUnified ? unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.compatible ?? goalIntentMatch.ok : goalIntentMatch.ok;
+        const overrideStrictTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 80 : strictTextOk;
+        const overrideRelaxedTextOk = useUnified ? (unifiedEval.dimensions.find(d => d.dimension === 'purpose')?.score ?? 0) >= 60 : relaxedTextOk;
+
         const finalScore = useUnified ? unifiedEval.totalScore / 100 : localScore;
         const finalMatchReasons = useUnified && unifiedEval.whyFit.length > 0
           ? unifiedEval.whyFit.slice(0, 3)
@@ -4838,16 +4846,16 @@ export async function POST(req: Request) {
 
         return {
           isOpen,
-          regionOk,
+          regionOk: overrideRegionOk,
           atecoOk: atecoMatch.ok,
           beneficiariesOk: beneficiariesMatch.ok,
-          businessStageOk: businessStage.ok,
+          businessStageOk: overrideBusinessStageOk,
           demographicsOk: demographicMatch.ok,
-          goalIntentOk: goalIntentMatch.ok,
+          goalIntentOk: overrideGoalIntentOk,
           strategicOk: strategic.ok,
           economicReliable: hasReliableEconomicDataDoc(doc),
-          strictTextOk,
-          relaxedTextOk,
+          strictTextOk: overrideStrictTextOk,
+          relaxedTextOk: overrideRelaxedTextOk,
           contributionMatched: contribution.matched,
           hardEligibilityPassed: hardEligibility.passed,
           hardEligibilityDiagnostics: hardEligibility.diagnostics,
