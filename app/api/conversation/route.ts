@@ -714,22 +714,35 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
   const missingSignals: ScanMissingSignal[] = [];
   const southYouthStartupPriority = isSouthYouthStartupPriorityProfile(profile);
 
-  if (!profile.fundingGoal?.trim()) missingSignals.push('fundingGoal');
-  if (!profile.location?.region?.trim() || profile.locationNeedsConfirmation) missingSignals.push('location');
-  if (!hasBusinessContext(profile)) missingSignals.push('businessContext');
+  const goalText = profile.fundingGoal?.trim() ?? '';
+  const goalIsGeneric = goalText ? isGenericFundingGoal(goalText) : true;
+  const hasRegion = Boolean(profile.location?.region?.trim()) && !profile.locationNeedsConfirmation;
+  const hasContext = hasBusinessContext(profile);
+
+  if (!goalText) missingSignals.push('fundingGoal');
+  if (!hasRegion) missingSignals.push('location');
+  if (!hasContext) missingSignals.push('businessContext');
   if (profile.businessExists === false && needsFounderEligibilityData(profile)) missingSignals.push('founderEligibility');
 
   const hasTopic = hasTopicSignal(profile);
   const hasPrecision = hasPrecisionSignal(profile);
-  const goalText = profile.fundingGoal?.trim() ?? '';
-  const goalIsGeneric = goalText ? isGenericFundingGoal(goalText) : true;
-  if (!hasTopic || (!southYouthStartupPriority && goalIsGeneric && !hasPrecision)) {
-    missingSignals.push('topicPrecision');
+
+  // LOGICA PROATTIVA: 
+  // Se non è generico e abbiamo i 3 pilastri (Cosa, Dove, Chi), siamo pronti.
+  const corePilarsOk = goalText && !goalIsGeneric && hasRegion && hasContext;
+  
+  // Se è generico, serve almeno un segnale di precisione (budget o settore o ateco)
+  const genericWithPrecisionOk = goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority);
+
+  if (!corePilarsOk && !genericWithPrecisionOk) {
+      if (!missingSignals.includes('topicPrecision')) {
+          missingSignals.push('topicPrecision');
+      }
   }
 
   return {
-    ready: missingSignals.length === 0,
-    missingSignals,
+    ready: missingSignals.length === 0 || corePilarsOk,
+    missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
 }

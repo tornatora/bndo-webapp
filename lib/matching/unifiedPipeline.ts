@@ -195,6 +195,22 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
   const isNationalAuthority = NATIONAL_AUTHORITIES.some(auth => authorityNorm.includes(auth));
   const isNationalTitle = NATIONAL_REGION_KEYWORDS.some(kw => titleNorm.includes(kw) && !titleNorm.includes('regione'));
 
+  // 1b. Region Authority Overrule: 
+  // Se l'autorità è chiaramente una Regione specifica (es. "Regione Marche"), 
+  // e NON è l'autorità dell'utente, blocca subito, ignorando la lista regioni (che potrebbe essere sporca).
+  if (authorityNorm.includes('regione')) {
+      const detectedAuthorityRegions = detectRegionsFromText(authorityNorm);
+      if (detectedAuthorityRegions.length > 0 && !detectedAuthorityRegions.includes(userRegion)) {
+          return {
+            dimension: 'territory',
+            compatible: false,
+            score: 0,
+            confidence: 'high',
+            note: `Bando riservato a ${detectedAuthorityRegions.join(', ')} (emesso da ${authorityName})`,
+          };
+      }
+  }
+
   // 2. Se il bando specifica regioni, usale come fonte primaria
   if (grantRegions.length > 0) {
     const normalizedGrants = grantRegions.map((r) => normalizeForMatch(r));
@@ -247,7 +263,10 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
 
   // 3. Analisi dell'autorità regionale
   if (authorityNorm.includes('regione')) {
-    if (authorityNorm.includes(userRegionNormalized)) {
+    const detectedAuthorityRegions = detectRegionsFromText(authorityNorm);
+    const isTargetRegion = authorityNorm.includes(userRegionNormalized) || detectedAuthorityRegions.includes(userRegion);
+    
+    if (isTargetRegion) {
       return {
         dimension: 'territory',
         compatible: true,
@@ -257,9 +276,8 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
       };
     }
     
-    // Rileva se l'autorità appartiene a un'altra regione specifica
-    const otherRegions = detectRegionsFromText(authorityNorm);
-    if (otherRegions.length > 0 && !otherRegions.includes(userRegion)) {
+    // Se l'autorità è di una regione diversa, ESCLUDI categoricamente
+    if (detectedAuthorityRegions.length > 0 && !detectedAuthorityRegions.includes(userRegion)) {
       return {
         dimension: 'territory',
         compatible: false,
@@ -270,27 +288,64 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
     }
   }
 
-  // 4. Analisi inferita dal testo
+  // 4. Analisi inferita dal testo (Titolo ed Ente)
   const inferredRegions = detectRegionsFromText(combinedNorm);
-  if (inferredRegions.length > 0) {
-    if (inferredRegions.includes(userRegion)) {
+  
+  // Aggiungi controllo demonimi nel titolo
+  const regionalDemonyms: Record<string, string[]> = {
+    'Abruzzo': ['abruzzese', 'abruzzesi'],
+    'Basilicata': ['lucano', 'lucana', 'lucani', 'lucane'],
+    'Calabria': ['calabrese', 'calabresi'],
+    'Campania': ['campano', 'campana', 'campani', 'campane'],
+    'Emilia-Romagna': ['emiliano', 'emiliana', 'romagnolo', 'romagnola'],
+    'Friuli-Venezia Giulia': ['friulano', 'friulana', 'giuliano', 'giuliana'],
+    'Lazio': ['laziale', 'laziali'],
+    'Liguria': ['ligure', 'liguri'],
+    'Lombardia': ['lombardo', 'lombarda', 'lombardi', 'lombarde'],
+    'Marche': ['marchigiano', 'marchigiana'],
+    'Molise': ['molisano', 'molisana'],
+    'Piemonte': ['piemontese', 'piemontesi'],
+    'Puglia': ['pugliese', 'pugliesi'],
+    'Sardegna': ['sardo', 'sarda', 'sardi', 'sarde'],
+    'Sicilia': ['siciliano', 'siciliana', 'siciliani', 'siciliane'],
+    'Toscana': ['toscano', 'toscana'],
+    'Trentino-Alto Adige': ['trentino', 'altoatesino', 'altoatesina'],
+    'Umbria': ['umbro', 'umbra'],
+    "Valle d'Aosta": ['valdostano', 'valdostana'],
+    'Veneto': ['veneto', 'veneta', 'veneti', 'venete'],
+  };
+
+  const titleDemonyms: string[] = [];
+  for (const [r, keywords] of Object.entries(regionalDemonyms)) {
+      if (keywords.some(k => titleNorm.includes(k))) {
+          titleDemonyms.push(r);
+      }
+  }
+
+  const allInferred = Array.from(new Set([...inferredRegions, ...titleDemonyms]));
+
+  if (allInferred.length > 0) {
+    if (allInferred.includes(userRegion)) {
        return {
         dimension: 'territory',
         compatible: true,
         score: 100,
         confidence: 'medium',
-        note: `Bando inferito come disponibile in ${userRegion}`,
+        note: `Bando disponibile in ${userRegion} (rilevato da testo)`,
       };
     }
     
-    // Se ha inferito altre regioni ma non quella dell'utente
-    return {
-      dimension: 'territory',
-      compatible: false,
-      score: 0,
-      confidence: 'medium',
-      note: `Bando specifico per altri territori: ${inferredRegions.join(', ')}`,
-    };
+    // Se ha rilevato regioni specifiche e NESSUNA è quella dell'utente,
+    // e NON è un'autorità nazionale fidata, escludi.
+    if (!isNationalAuthority) {
+        return {
+          dimension: 'territory',
+          compatible: false,
+          score: 0,
+          confidence: 'high',
+          note: `Bando specifico per altri territori: ${allInferred.join(', ')}`,
+        };
+    }
   }
 
   // 5. Fallback nazionale basato su autorità fidata
@@ -446,13 +501,13 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 
   const purposes = toStringArray(grant.purposes).map((p) => normalizeForMatch(p));
   const titleNorm = normalizeForMatch(grant.title || '');
-  const descriptionNorm = normalizeForMatch(grant.description || '').slice(0, 1000);
+  const descriptionNorm = normalizeForMatch(grant.description || '').slice(0, 1200);
   const combinedGrantText = `${titleNorm} ${purposes.join(' ')} ${descriptionNorm}`;
 
   // Keywords del profilo utente
   const userKeywords = fundingGoal
     .split(/\s+/)
-    .filter((w) => w.length >= 4);
+    .filter((w) => w.length >= 3);
 
   const goalIsGeneric = isGenericFundingGoal(fundingGoal);
 
@@ -466,11 +521,15 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
     };
   }
 
+  // Identifica i termini "pesanti" (es. ristrutturazione, software, macchinari)
+  const heavyKeywords = userKeywords.filter(w => 
+    w.length >= 5 && !['azienda', 'impresa', 'nuova', 'attivita', 'progetto'].includes(w)
+  );
+
   // Check for negative matches (India, Foreign countries, failed payments)
-  const negativeKeywords = ['india', 'estero', 'internazionalizzazione', 'export', 'insoluti', 'mancati pagamenti', 'crisi d impresa'];
+  const negativeKeywords = ['india', 'estero', 'internazionalizzazione', 'export', 'insoluti', 'mancati pagamenti', 'crisi d impresa', 'liquidazione'];
   const hasNegativeKeyword = negativeKeywords.some(kw => titleNorm.includes(kw));
   
-  // If user goal doesn't contain these words, but the bando does, penalize heavily
   const userMentionsNegative = negativeKeywords.some(kw => fundingGoal.includes(kw));
   
   if (hasNegativeKeyword && !userMentionsNegative) {
@@ -479,7 +538,7 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
         compatible: false,
         score: 0,
         confidence: 'high',
-        note: `Bando specifico per finalità non richieste (es. estero/crisi)`,
+        note: `Bando escluso: finalità specifica non richiesta (es. estero/crisi)`,
       };
   }
 
@@ -491,34 +550,40 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
   }
 
   const matchRatio = matchedKeywords / userKeywords.length;
+  
+  // Se abbiamo termini pesanti, almeno uno deve essere presente
+  const heavyMatch = heavyKeywords.length === 0 || heavyKeywords.some(w => combinedGrantText.includes(w));
 
-  // Se l'obiettivo è specifico e non c'è una corrispondenza forte, escludi categoricamente
-  if (!goalIsGeneric && matchRatio < 0.6) {
-    return {
-      dimension: 'purpose',
-      compatible: false,
-      score: Math.round(matchRatio * 50),
-      confidence: 'high',
-      note: `Corrispondenza insufficiente con l'obiettivo specifico (${Math.round(matchRatio * 100)}%)`,
-    };
+  // LOGICA DI RIGORE MASSIMO
+  if (!goalIsGeneric) {
+      // Se non c'è match sui termini pesanti o il ratio è troppo basso, escludi
+      if (!heavyMatch || matchRatio < 0.5) {
+          return {
+            dimension: 'purpose',
+            compatible: false,
+            score: 0,
+            confidence: 'high',
+            note: `Incompatibile con l'obiettivo specifico: ${fundingGoal}`,
+          };
+      }
   }
 
-  // Rigore nel matching semantico
-  if (matchRatio >= 0.8) {
+  // Rigore nel matching semantico per i punteggi
+  if (matchRatio >= 0.75) {
     return {
       dimension: 'purpose',
       compatible: true,
       score: 100,
       confidence: 'high',
-      note: `Finalità altamente coerente`,
+      note: `Finalità perfettamente coerente`,
     };
   }
 
-  if (matchRatio >= 0.5) {
+  if (matchRatio >= 0.4) {
     return {
       dimension: 'purpose',
       compatible: true,
-      score: 85,
+      score: 80,
       confidence: 'high',
       note: `Finalità coerente`,
     };
@@ -526,10 +591,10 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 
   return {
     dimension: 'purpose',
-    compatible: goalIsGeneric, // Solo se generico lasciamo passare con score basso
+    compatible: goalIsGeneric, 
     score: Math.round(matchRatio * 100),
     confidence: 'medium',
-    note: `Bassa corrispondenza con la finalità`,
+    note: `Corrispondenza parziale con la finalità`,
   };
 }
 
@@ -539,17 +604,28 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 function isGenericFundingGoal(text: string) {
   const n = normalizeForMatch(text);
   if (!n) return true;
-  const words = n.split(' ').filter(Boolean);
-  if (words.length <= 2) return true;
+  const words = n.split(' ').filter(w => w.length >= 3);
+  
+  // Se contiene parole ad alto valore semantico non è generico
+  const specificTerms = [
+    'ristruttur', 'macchinar', 'software', 'digitalizz', 'hardware', 'impiant', 
+    'fotovolta', 'turismo', 'alberghier', 'ristorazione', 'bar', 'commercio',
+    'e-commerce', 'export', 'internazionalizz', 'assunzion', 'personale',
+    'ricerca', 'sviluppo', 'innovazione', 'brevett', 'certificazion'
+  ];
+  
+  if (words.some(w => specificTerms.some(t => w.includes(t)))) return false;
+  
+  if (words.length <= 1) return true;
   
   const generic = [
     'bando', 'bandi', 'finanziamento', 'finanziamenti', 'contributo', 'contributi',
     'agevolazione', 'agevolazioni', 'investimento', 'investimenti', 'spese',
-    'progetto', 'attivita', 'impresa', 'azienda', 'fondo perduto', 'aiuto', 'aiuti'
+    'progetto', 'attivita', 'impresa', 'azienda', 'fondo perduto', 'aiuto', 'aiuti',
+    'aprire', 'avviare', 'nuova', 'nuove'
   ];
   
-  // Se contiene solo parole generiche
-  return words.every(w => generic.includes(w) || w.length < 4);
+  return words.every(w => generic.includes(w));
 }
 
 /**

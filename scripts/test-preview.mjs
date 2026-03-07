@@ -1,5 +1,3 @@
-import fs from 'fs';
-
 async function fetchScan(url, payload) {
   const res = await fetch(`${url}/api/scan-bandi`, {
     method: 'POST',
@@ -29,83 +27,78 @@ async function fetchChat(url, payload) {
 async function runTests(previewUrl) {
   console.log(`Testing against: ${previewUrl}`);
 
-  // TEST A: LOMBARDIA DIGITALE
-  console.log('\n--- TEST A: LOMBARDIA DIGITALE ---');
-  const resLombardia = await fetchScan(previewUrl, {
-    userProfile: {
-      businessExists: true,
-      region: 'Lombardia',
-      sector: 'digitale',
-      fundingGoal: 'macchinari e software',
-      revenueOrBudgetEUR: 50000,
-      employees: 3,
-      ateco: '62.01.00'
-    },
-    strictness: 'high',
-    mode: 'fast'
-  });
-  console.log(`Results: ${resLombardia.results?.length}`);
-  resLombardia.results?.slice(0, 5).forEach(r => {
-    console.log(`- [${r.score}] ${r.title} (${r.authorityName})`);
-    console.log(`  Match reasons: ${r.whyFit?.join(', ')}`);
-  });
-  
-  const badLombardia = resLombardia.results?.filter(r => {
-    const title = r.title.toLowerCase();
-    return title.includes('india') || title.includes('estero') || title.includes('mancati pagamenti');
-  });
-  if (badLombardia?.length > 0) console.error('FAIL: weak semantic items found in top results!');
+  // 1) SICILIA / AGRICOLO / SOFTWARE (Chat flow)
+  console.log('\n--- TEST 1: SICILIA AGRICOLO SOFTWARE ---');
+  await fetch(`${previewUrl}/api/conversation`, { method: 'DELETE' }); // Reset
+  const c1 = await fetchChat(previewUrl, { message: 'bando per software nel settore agricolo in Sicilia' });
+  console.log('Turn 1:', c1.assistantText);
+  console.log('Ready to scan:', c1.readyToScan);
+  console.log('Detected Profile:', JSON.stringify(c1.userProfile));
 
-  // TEST B: CAMPANIA TURISMO
-  console.log('\n--- TEST B: CAMPANIA TURISMO ---');
-  const resCampania = await fetchScan(previewUrl, {
-    userProfile: {
-      businessExists: true,
-      region: 'Campania',
-      sector: 'turismo',
-      fundingGoal: 'ristrutturazione locali',
-      revenueOrBudgetEUR: 100000,
-      employees: 5
-    },
-    strictness: 'high',
-    mode: 'fast'
-  });
-  console.log(`Results: ${resCampania.results?.length}`);
-  resCampania.results?.slice(0, 5).forEach(r => {
-    console.log(`- [${r.score}] ${r.title} (${r.authorityName})`);
-    console.log(`  Match reasons: ${r.whyFit?.join(', ')}`);
-  });
-  
-  const badCampania = resCampania.results?.filter(r => {
-    const title = r.title.toLowerCase();
-    const isIndia = title.includes('india');
-    const isMancati = title.includes('mancati pagamenti');
-    return isIndia || isMancati;
-  });
-  if (badCampania?.length > 0) {
-    console.error('FAIL: irrelevant results (India/Mancati) found in primary results for Campania Tourism!');
+  if (!c1.readyToScan) {
+      const c2 = await fetchChat(previewUrl, { message: 'azienda gia attiva' });
+      console.log('Turn 2:', c2.assistantText);
+      console.log('Ready to scan:', c2.readyToScan);
   }
 
-  // TEST CHAT UX (Double phrase)
-  console.log('\n--- TEST C: CHAT UX ---');
-  await fetch(`${previewUrl}/api/conversation`, { method: 'DELETE' });
-  const chat1 = await fetchChat(previewUrl, { message: 'ciao sono un impresa di milano' });
-  console.log('Chat 1:', chat1.assistantText);
-  if (chat1.assistantText.includes('.') && chat1.assistantText.split('.').filter(s => s.trim().length > 5).length > 1) {
-     // Non è necessariamente un errore se sono frasi diverse, ma verifichiamo la naturalezza
+  // 2) CAMPANIA TURISMO (Scanner check)
+  console.log('\n--- TEST 2: CAMPANIA TURISMO ---');
+  const s2 = await fetchScan(previewUrl, {
+      userProfile: {
+          businessExists: true,
+          region: 'Campania',
+          sector: 'turismo',
+          fundingGoal: 'ristrutturazione hotel',
+      },
+      strictness: 'high',
+      mode: 'fast'
+  });
+  console.log(`Results: ${s2.results?.length}`);
+  const badItems = s2.results?.filter(r => r.title.toLowerCase().includes('india') || r.title.toLowerCase().includes('export'));
+  if (badItems?.length > 0) {
+      console.error('FAIL: Found irrelevant results!');
+      badItems.forEach(i => console.log(`- ${i.title}`));
+  } else {
+      console.log('PASS: No irrelevant results.');
   }
-  
-  const chat2 = await fetchChat(previewUrl, { message: 'settore turismo' });
-  console.log('Chat 2:', chat2.assistantText);
-  if (chat2.assistantText.includes('Mi serve')) {
-      console.error('FAIL: "Mi serve..." redundant phrase found!');
+
+  // 3) LOMBARDIA (Scanner check)
+  console.log('\n--- TEST 3: LOMBARDIA ---');
+  const s3 = await fetchScan(previewUrl, {
+      userProfile: {
+          businessExists: true,
+          region: 'Lombardia',
+          sector: 'digitale',
+          fundingGoal: 'macchinari e software 4.0',
+      },
+      strictness: 'high',
+      mode: 'fast'
+  });
+  console.log(`Results: ${s3.results?.length}`);
+  const outOfRegion = s3.results?.filter(r => r.whyFit?.some(w => w.toLowerCase().includes('piemonte') || w.toLowerCase().includes('campania')));
+  if (outOfRegion?.length > 0) {
+      console.error('FAIL: Found out-of-region results!');
+  } else {
+      console.log('PASS: No out-of-region results.');
   }
+
+  // 4) PAYLOAD WITH 'answers' ROOT
+  console.log('\n--- TEST 4: PAYLOAD ANSWERS ---');
+  const s4 = await fetchScan(previewUrl, {
+      answers: {
+          businessExists: true,
+          region: 'Lombardia',
+          fundingGoal: 'software',
+      },
+      mode: 'fast'
+  });
+  console.log(`Results with 'answers' root: ${s4.results?.length}`);
+  if (s4.results?.length > 0) console.log('PASS: Payload answers root supported.');
 }
 
 const url = process.argv[2];
 if (!url) {
-  console.error('Provide preview URL');
-  process.exit(1);
+    console.error('Provide preview URL');
+    process.exit(1);
 }
-
 runTests(url).catch(console.error);

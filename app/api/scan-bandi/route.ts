@@ -4884,7 +4884,7 @@ export async function POST(req: Request) {
         x.goalIntentOk &&
         x.strategicOk &&
         x.hardEligibilityPassed &&
-        x.economicReliable,
+        (x.economicReliable || (x.result.probabilityScore ?? 0) >= 75),
     );
     const openAndRegion =
       openAndRegionStrict.length > 0

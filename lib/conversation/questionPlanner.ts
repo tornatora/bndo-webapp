@@ -12,95 +12,67 @@ export function nextBestFieldFromStep(step: Step): NextBestField | null {
 export function questionFor(step: Step, seed: string, attempt: number) {
   const turnSeed = `${seed}:${attempt}`;
   if (step === 'activityType') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Mi basta una parola: PMI, startup, professionista, ETS o da costituire?',
-          "Dimmi solo se l'attività esiste già o è da costituire."
-        ])
-      : pickOne(turnSeed, [
-          "Hai già un'attività o devi costituirla?"
-        ]);
+    return pickOne(turnSeed, [
+      "L'attività è già operativa o devi ancora costituirla?",
+      "Hai già un'impresa attiva o si tratta di una nuova iniziativa?"
+    ]);
   }
 
   if (step === 'sector') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Che settore? (es. turismo, commercio, manifattura, ICT)',
-          'Mi indichi il settore principale in cui operi?'
-        ])
-      : pickOne(turnSeed, ['In che settore operi? (es. turismo, commercio, manifattura, ICT)']);
+    return pickOne(turnSeed, [
+      "In quale settore operi principalmente?",
+      "Qual è l'ambito di attività della tua impresa?"
+    ]);
   }
 
   if (step === 'ateco') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          "Hai l'ATECO? Anche 2 cifre bastano. Se non lo sai, descrivi l'attività.",
-          "Se ce l'hai, condividi il codice ATECO; altrimenti dimmi cosa fai."
-        ])
-      : pickOne(turnSeed, [
-          "Mi dai il codice ATECO? Anche le prime 2 cifre bastano."
-        ]);
+    return pickOne(turnSeed, [
+      "Hai il codice ATECO o puoi descrivermi l'attività nel dettaglio?",
+      "Qual è il codice ATECO dell'azienda? (Bastano anche le prime 2 cifre)"
+    ]);
   }
 
   if (step === 'location') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Mi dici la regione in cui operi?',
-          'Per filtrare bene i bandi, mi confermi la regione?'
-        ])
-      : pickOne(turnSeed, ['In che regione operi?']);
+    return pickOne(turnSeed, [
+      "In che regione ha sede il progetto?",
+      "Dove si trova l'unità locale da finanziare?"
+    ]);
   }
 
   if (step === 'employees') {
-    return attempt >= 2
-      ? pickOne(turnSeed, ['Quanti dipendenti/addetti circa? (numero)', 'Mi dai un numero indicativo di addetti?'])
-      : pickOne(turnSeed, ['Indicativamente, quanti dipendenti/addetti avete?']);
+    return pickOne(turnSeed, [
+      "Quanti dipendenti o addetti ha l'azienda?",
+      "Qual è la dimensione del team in termini di addetti?"
+    ]);
   }
 
   if (step === 'fundingGoal') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Dimmi in una riga cosa vuoi finanziare (es. sito, macchinari, software, ristrutturazione, assunzioni).',
-          'Qual e la spesa principale che vuoi coprire con il bando?'
-        ])
-      : pickOne(turnSeed, [
-          'Cosa vuoi finanziare in concreto?'
-        ]);
+    return pickOne(turnSeed, [
+      "Cosa devi acquistare o realizzare in concreto?",
+      "Qual è l'obiettivo principale dell'investimento?"
+    ]);
   }
 
   if (step === 'budget') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Che importo vuoi investire e quale contributo vorresti ottenere? Anche stima.',
-          "Mi dai due numeri indicativi: investimento totale e contributo richiesto?"
-        ])
-      : pickOne(turnSeed, ['Che importo vuoi investire e quanto contributo ti serve?']);
+    return pickOne(turnSeed, [
+      "A quanto ammonta indicativamente l'investimento previsto?",
+      "Che budget hai ipotizzato per questo progetto?"
+    ]);
   }
 
   if (step === 'contributionPreference') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          "Hai una preferenza sul tipo di aiuto? Fondo perduto, agevolato, voucher, credito d'imposta o misto?",
-          "Ti interessa una forma specifica di incentivo o va bene anche una combinazione mista?"
-        ])
-      : pickOne(turnSeed, [
-          "Preferisci fondo perduto, agevolato, voucher, credito d'imposta o misto?"
-        ]);
+    return pickOne(turnSeed, [
+      "Preferisci fondo perduto, finanziamento agevolato o ti interessano entrambi?",
+      "Cerchi una forma di agevolazione specifica (es. fondo perduto)?"
+    ]);
   }
 
   if (step === 'contactEmail') {
-    return attempt >= 2
-      ? pickOne(turnSeed, ['Mi condividi una mail valida per il consulente?', 'Mi lasci una mail dove possiamo inviarti il riepilogo?'])
-      : pickOne(turnSeed, ['Perfetto. Mi lasci una mail valida a cui il consulente puo scriverti?']);
+    return "Qual è la tua mail per ricevere il riepilogo e il contatto del consulente?";
   }
 
   if (step === 'contactPhone') {
-    return attempt >= 2
-      ? pickOne(turnSeed, [
-          'Mi serve anche il numero di telefono per il ricontatto.',
-          'Per chiudere il passaggio al consulente, mi dai il numero di telefono?'
-        ])
-      : pickOne(turnSeed, ['Ultimo passaggio: mi indichi il numero di telefono su cui vuoi essere ricontattato?']);
+    return "A quale numero di telefono preferisci essere ricontattato?";
   }
 
   return 'Ho gli elementi necessari. Procedo subito a individuare le opportunità migliori per te.';
@@ -108,14 +80,11 @@ export function questionFor(step: Step, seed: string, attempt: number) {
 
 export function naturalBridgeQuestion(step: Step, attempt: number) {
   if (attempt > 2) return null;
-  if (step === 'fundingGoal') return 'Partiamo da qui: cosa vuoi finanziare in concreto?';
-  if (step === 'activityType') return "Dimmi se hai già un'attività o devi costituirla.";
-  if (step === 'location') return 'Indicami la regione e filtro solo bandi pertinenti.';
-  if (step === 'budget') return "Con un importo indicativo restringo subito il match.";
-  if (step === 'contributionPreference') return "Preferisci fondo perduto, agevolato, voucher o credito d'imposta?";
-  if (step === 'ateco') return "Se hai il codice ATECO (anche 2 cifre), miglioro subito la precisione.";
-  if (step === 'sector') return 'Indicami anche il settore principale.';
-  if (step === 'contactEmail') return 'Per passarti al consulente umano mi serve una mail valida.';
-  if (step === 'contactPhone') return 'Ultimo dato: il numero per il ricontatto.';
+  if (step === 'fundingGoal') return 'Per iniziare, mi serve capire cosa vuoi finanziare.';
+  if (step === 'activityType') return 'Un dettaglio importante: l\'azienda esiste già?';
+  if (step === 'location') return 'Per filtrare i bandi territoriali mi serve la regione.';
+  if (step === 'budget') return 'Con un importo indicativo posso essere molto più preciso.';
+  if (step === 'ateco') return 'Se hai il codice ATECO riduciamo drasticamente il rumore.';
+  if (step === 'sector') return 'Mi indichi il settore principale di riferimento?';
   return null;
 }
