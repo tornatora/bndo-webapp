@@ -366,7 +366,7 @@ async function generateAssistantTextWithOpenAI(args: {
     '',
     'CONVERSAZIONE:',
     "RISPONDI PRIMA alla domanda/esigenza concreta dell'utente, POI se serve chiedi UN solo dato critico, con naturalezza.",
-    'Se i dati sono sufficienti per il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
+    'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
     'Non ripetere domande gia risposte. Non chiedere dati gia nel profilo.',
@@ -521,21 +521,21 @@ const REGION_DEMONYM_MAP: Array<{ region: (typeof IT_REGIONS)[number]; tokens: s
   { region: 'Basilicata', tokens: ['lucano', 'lucana', 'lucani', 'lucane', 'basilicatese', 'basilicatesi'] },
   { region: 'Calabria', tokens: ['calabrese', 'calabresi'] },
   { region: 'Campania', tokens: ['campano', 'campana', 'campani', 'campane'] },
-  { region: 'Emilia-Romagna', tokens: ['emiliano', 'emiliana', 'emiliani', 'emiliane', 'romagnolo', 'romagnola', 'romagnoli', 'romagnole'] },
-  { region: 'Friuli-Venezia Giulia', tokens: ['friulano', 'friulana', 'friulani', 'friulane', 'giuliano', 'giuliana', 'giuliani', 'giuliane'] },
+  { region: 'Emilia-Romagna', tokens: ['emiliano', 'emiliana', 'romagnolo', 'romagnola'] },
+  { region: 'Friuli-Venezia Giulia', tokens: ['friulano', 'friulana', 'giuliano', 'giuliana'] },
   { region: 'Lazio', tokens: ['laziale', 'laziali'] },
   { region: 'Liguria', tokens: ['ligure', 'liguri'] },
   { region: 'Lombardia', tokens: ['lombardo', 'lombarda', 'lombardi', 'lombarde'] },
-  { region: 'Marche', tokens: ['marchigiano', 'marchigiana', 'marchigiani', 'marchigiane'] },
-  { region: 'Molise', tokens: ['molisano', 'molisana', 'molisani', 'molisane'] },
+  { region: 'Marche', tokens: ['marchigiano', 'marchigiana'] },
+  { region: 'Molise', tokens: ['molisano', 'molisana'] },
   { region: 'Piemonte', tokens: ['piemontese', 'piemontesi'] },
   { region: 'Puglia', tokens: ['pugliese', 'pugliesi'] },
   { region: 'Sardegna', tokens: ['sardo', 'sarda', 'sardi', 'sarde'] },
   { region: 'Sicilia', tokens: ['siciliano', 'siciliana', 'siciliani', 'siciliane'] },
-  { region: 'Toscana', tokens: ['toscano', 'toscana', 'toscani', 'toscane'] },
-  { region: 'Trentino-Alto Adige', tokens: ['trentini', 'trentino', 'altoatesino', 'altoatesina', 'sudtirolese', 'sudtirolesi'] },
-  { region: 'Umbria', tokens: ['umbro', 'umbra', 'umbri', 'umbre'] },
-  { region: "Valle d'Aosta", tokens: ['valdostano', 'valdostana', 'valdostani', 'valdostane'] },
+  { region: 'Toscana', tokens: ['toscano', 'toscana'] },
+  { region: 'Trentino-Alto Adige', tokens: ['trentino', 'altoatesino', 'altoatesina'] },
+  { region: 'Umbria', tokens: ['umbro', 'umbra'] },
+  { region: "Valle d'Aosta", tokens: ['valdostano', 'valdostana'] },
   { region: 'Veneto', tokens: ['veneto', 'veneta', 'veneti', 'venete'] },
 ];
 
@@ -593,64 +593,28 @@ function isProfileEmpty(p: UserProfile) {
 function isGenericFundingGoal(text: string) {
   const n = normalizeForMatch(text);
   if (!n) return true;
-  const words = n.split(' ').filter(Boolean);
-  if (words.length <= 2) return true;
-  if (
-    /(cerco fondo perduto|cerco contribut|cerco agevolaz|voglio fondo perduto|voglio contribut|cerco un bando|voglio un bando)/.test(
-      n,
-    )
-  ) {
-    return true;
-  }
-
+  const words = n.split(' ').filter(w => w.length >= 3);
+  
+  // Se contiene parole ad alto valore semantico non è generico
+  const specificTerms = [
+    'ristruttur', 'macchinar', 'attrezz', 'software', 'digital', 'capannone', 
+    'energia', 'fotovolta', 'assunz', 'formaz', 'export', 'internaz', 
+    'brevett', 'ricerca', 'sviluppo', 'marketing', 'pubblicit', 'mezzi', 'veicoli',
+    'sito', 'e-commerce', 'alberghier', 'turism', 'ristorazione', 'bar'
+  ];
+  
+  if (words.some(w => specificTerms.some(t => w.includes(t)))) return false;
+  
+  if (words.length <= 1) return true;
+  
   const generic = [
-    'bando',
-    'bandi',
-    'finanziamento',
-    'finanziamenti',
-    'contributo',
-    'contributi',
-    'agevolazione',
-    'agevolazioni',
-    'fondo perduto',
-    'voucher',
-    'credito imposta',
-    'credito d imposta',
-    'incentivo',
-    'incentivi'
+    'bando', 'bandi', 'finanziamento', 'finanziamenti', 'contributo', 'contributi',
+    'agevolazione', 'agevolazioni', 'investimento', 'investimenti', 'spese',
+    'progetto', 'attivita', 'impresa', 'azienda', 'fondo perduto', 'aiuto', 'aiuti',
+    'aprire', 'avviare', 'nuova', 'nuove'
   ];
-
-  const hasGeneric = generic.some((g) => n.includes(g));
-  if (!hasGeneric) return false;
-
-  // If the user also provided specific intent keywords, treat as not generic.
-  const specific = [
-    'sito',
-    'ecommerce',
-    'macchin',
-    'attrezz',
-    'software',
-    'digital',
-    'ristruttur',
-    'capannone',
-    'energia',
-    'fotovolta',
-    'assunz',
-    'formaz',
-    'export',
-    'internaz',
-    'brevett',
-    'ricerca',
-    'sviluppo',
-    'marketing',
-    'pubblicit',
-    'mezzi',
-    'veicoli'
-  ];
-  const hasSpecific = specific.some((s) => n.includes(s));
-  if (hasSpecific) return false;
-
-  return words.length <= 12;
+  
+  return words.every(w => generic.includes(w));
 }
 
 function hasTopicSignal(profile: UserProfile) {
@@ -741,7 +705,7 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
   }
 
   return {
-    ready: missingSignals.length === 0 || Boolean(corePilarsOk),
+    ready: missingSignals.length === 0 || corePilarsOk,
     missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
@@ -749,28 +713,7 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
 
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
   if (step === 'location' && profile.locationNeedsConfirmation && profile.location?.region) {
-    return `Perfetto, ho ${profile.location.region} come riferimento. Vuoi avviare l'attività in ${profile.location.region} o in un'altra regione?`;
-  }
-
-  if (attempt >= 2) {
-    if (step === 'location') return 'Mi basta la regione (es. Calabria) e chiudo il filtro territoriale.';
-    if (step === 'sector') return 'Indicami solo il settore principale (es. turismo, commercio, digitale).';
-    if (step === 'ateco') return 'Se lo conosci, indicami il codice ATECO (anche 2 cifre).';
-    if (step === 'budget') return "Mi dai un importo indicativo dell'investimento o del contributo richiesto?";
-    if (step === 'fundingGoal') return 'Qual è la spesa principale che vuoi finanziare?';
-    if (step === 'contributionPreference') return 'Preferisci fondo perduto, finanziamento agevolato o misto?';
-  }
-
-  if (step === 'activityType' && profile.businessExists === null) {
-    return attempt >= 2
-      ? "Per continuare mi confermi solo questo: hai gia un'attivita attiva oppure devi costituirla?"
-      : "Per filtrare i bandi giusti devo capire se hai gia un'attivita attiva o se devi costituirla.";
-  }
-
-  if (step === 'activityType' && needsFounderEligibilityData(profile)) {
-    return attempt >= 2
-      ? "Per chiudere il check requisiti mi servono entrambi i dati: età (o conferma under35/over35) e stato occupazionale."
-      : "Per verificare le misure corrette mi servono due dati: età (anche under35/over35) e stato occupazionale.";
+    return `In quale regione ha sede il progetto?`;
   }
 
   return questionFor(step, seed, attempt);
@@ -1498,510 +1441,209 @@ function answerFinanceQuestion(message: string): string | null {
     n.includes('voucher') ||
     n.includes('credito') ||
     n.includes('incentiv') ||
-    n.includes('finanza') ||
-    n.includes('requisit');
-  if (hasFinanceKeywords && n.length >= 14) {
-    return 'Dipende dal bando specifico: cambiano ente, territorio, beneficiari e spese. Se mi dici regione e obiettivo, ti rispondo in modo puntuale.';
-  }
+    n.includes('finanziamento');
 
-  return null;
-}
-
-function answerMetaQuestion(message: string): string | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-
-  const asksWho =
-    n.includes('chi sei') ||
-    n.includes('cosa sai fare') ||
-    n.includes('cosa puoi fare') ||
-    n.includes('in cosa mi aiuti') ||
-    n.includes('come funzioni') ||
-    n.includes('sei intelligente') ||
-    n.includes('sei capace') ||
-    n.includes('mi puoi aiutare');
-
-  if (!asksWho) return null;
-
-  return 'Ti aiuto come un consulente BNDO: chiarisco i dubbi e poi faccio il matching sui bandi davvero compatibili, spiegando perché gli altri vanno esclusi.';
-}
-
-function answerConversationalIntent(message: string): string | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-
-  if (n.includes('possiamo prima parlare') || n.includes('parliamo prima') || n.includes('prima parliamo')) {
-    return 'Certo. Partiamo dalla tua domanda e poi passiamo al matching.';
-  }
-
-  if (wantsQuestionsFirst(message)) {
-    return 'Certo, fai pure la prima domanda.';
-  }
-
-  if (n.includes('non ho capito') || n.includes('spiegami meglio') || n.includes('fammi capire')) {
-    return 'Chiaro, te lo rispiego in modo semplice e diretto.';
-  }
-
-  if (n.includes('non so da dove iniziare') || n.includes('non so come iniziare')) {
-    return 'Tranquillo, ci penso io a guidarti: ti faccio solo le domande essenziali.';
-  }
+  if (hasFinanceKeywords) return 'Ti aiuto volentieri a trovare il bando giusto. Dimmi cosa vuoi finanziare e in quale regione.';
 
   return null;
 }
 
 function parseContributionPreference(message: string): ContributionPreference | null {
-  const v = normalizeForMatch(message);
-  if (!v) return null;
-  if (v.includes('fondo perduto')) return 'fondo_perduto';
-  if (v.includes('credito') && v.includes('imposta')) return 'credito_imposta';
-  if (v.includes('voucher')) return 'voucher';
-  if (v.includes('agevolato') || v.includes('tasso zero') || v.includes('finanziamento')) return 'finanziamento_agevolato';
-  if (v.includes('misto') || v.includes('mix')) return 'misto';
-  if (v.includes('non importa') || v.includes('indifferente') || v.includes('qualsiasi')) return 'non_importa';
+  const n = normalizeForMatch(message);
+  if (!n) return null;
+  if (n.includes('fondo perduto')) return 'fondo_perduto';
+  if (n.includes('agevolato') || n.includes('finanziamento')) return 'finanziamento_agevolato';
+  if (n.includes('credito imposta') || n.includes('credito d imposta')) return 'credito_imposta';
+  if (n.includes('voucher')) return 'voucher';
+  if (n.includes('entrambi') || n.includes('misto') || n.includes('tutti')) return 'misto';
+  if (n.includes('non importa') || n.includes('qualsiasi')) return 'non_importa';
   return null;
 }
 
-function mergeProfile(base: UserProfile, updates: Partial<UserProfile>): UserProfile {
-  const next: UserProfile = { ...base, ...updates } as UserProfile;
-  if (updates.location) {
-    next.location = { ...base.location, ...updates.location };
-  }
-  if (updates.slotSource) {
-    next.slotSource = { ...(base.slotSource ?? {}), ...(updates.slotSource ?? {}) };
-  }
-  // Ensure nested objects exist.
-  if (!next.location) next.location = { region: null, municipality: null };
-  if (!next.slotSource) next.slotSource = {};
-  return next;
+function isSouthYouthStartupProfile(args: {
+  businessExists: boolean | null;
+  region: string | null;
+  age: number | null;
+  ageBand: UserProfile['ageBand'];
+  employmentStatus: string | null;
+}) {
+  if (args.businessExists !== false) return false;
+  if (!args.region || !SOUTH_PRIORITY_REGIONS.has(args.region)) return false;
+  const under35 = (args.age !== null && args.age <= 35) || args.ageBand === 'under35';
+  if (!under35) return false;
+  const employmentNorm = normalizeForMatch(args.employmentStatus ?? '');
+  return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
 }
 
-function computeScanHash(profile: UserProfile) {
-  // Only include fields relevant for matching/scoring. Keep stable ordering.
-  const obj = {
-    activityType: profile.activityType ?? null,
-    businessExists: profile.businessExists ?? null,
-    sector: profile.sector ?? null,
-    ateco: profile.ateco ?? null,
-    region: profile.location?.region ?? null,
-    municipality: profile.location?.municipality ?? null,
-    age: profile.age ?? null,
-    ageBand: profile.ageBand ?? null,
-    employmentStatus: profile.employmentStatus ?? null,
-    legalForm: profile.legalForm ?? null,
-    employees: profile.employees ?? null,
-    revenueOrBudgetEUR: profile.revenueOrBudgetEUR ?? null,
-    requestedContributionEUR: profile.requestedContributionEUR ?? null,
-    fundingGoal: profile.fundingGoal ?? null,
-    contributionPreference: profile.contributionPreference ?? null
-  };
-  return Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url');
+function computeScanHash(p: UserProfile) {
+  const bits = [
+    p.businessExists,
+    p.location?.region,
+    p.fundingGoal,
+    p.sector,
+    p.budgetAnswered ? p.revenueOrBudgetEUR : null,
+    p.ageBand,
+    p.employmentStatus
+  ];
+  return bits.map(String).join('|');
 }
 
-function isScanReady(profile: UserProfile) {
-  return isScanReadyAdaptive(profile).ready;
-}
-
-function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
-  const trimmed = message.trim();
-  if (!trimmed) return { profile, error: 'Risposta vuota.' };
-
-  if (step === 'activityType') {
-    if (trimmed.length < 2) return { profile, error: 'Mi serve una descrizione un po piu chiara del tipo di attivita.' };
-    const normalizedActivity = parseActivityType(trimmed) ?? trimmed;
-    const inferredBusinessExists = parseBusinessExistsFromMessage(normalizedActivity);
-    return {
-      profile: {
-        ...profile,
-        activityType: normalizedActivity,
-        businessExists: inferredBusinessExists ?? profile.businessExists,
-        slotSource: {
-          ...(profile.slotSource ?? {}),
-          activityType: 'explicit',
-          ...(inferredBusinessExists !== null ? { businessExists: 'inferred' as const } : {}),
-        }
-      },
-      error: null
-    };
-  }
-
-  if (step === 'sector') {
-    if (trimmed.length < 2) return { profile, error: 'Mi dici il settore con una parola o due?' };
-    return { profile: { ...profile, sector: trimmed, slotSource: { ...(profile.slotSource ?? {}), sector: 'explicit' } }, error: null };
-  }
-
-  if (step === 'ateco') {
-    const lowered = trimmed.toLowerCase();
-    if (/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered)) {
-      const desc = trimmed.replace(/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/gi, '').trim();
-      return {
-        profile: {
-          ...profile,
-          ateco: desc || null,
-          atecoAnswered: true,
-          slotSource: { ...(profile.slotSource ?? {}), ateco: desc ? 'explicit' : 'inferred' },
-        },
-        error: null,
-      };
-    }
-    if (trimmed.length < 2) return { profile, error: 'Mi scrivi il codice ATECO (anche 2 cifre) oppure una breve descrizione dell\'attivita.' };
-    return {
-      profile: { ...profile, ateco: trimmed, atecoAnswered: true, slotSource: { ...(profile.slotSource ?? {}), ateco: 'explicit' } },
-      error: null,
-    };
-  }
-
-  if (step === 'location') {
-    const loc = parseRegionAndMunicipality(trimmed);
-    if (!loc.region && profile.locationNeedsConfirmation && profile.location.region) {
-      if (isAffirmativeConfirmation(trimmed)) {
-        return {
-          profile: {
-            ...profile,
-            locationNeedsConfirmation: false,
-            slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
-          },
-          error: null,
-        };
-      }
-      const asksDifferentRegion = /\b(altro|altrove|un altra regione|altra regione|diversa regione)\b/.test(normalizeForMatch(trimmed));
-      if (!asksDifferentRegion) {
-        return {
-          profile: {
-            ...profile,
-            locationNeedsConfirmation: false,
-            slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
-          },
-          error: null,
-        };
-      }
-    }
-    if (!loc.region) {
-      return { profile, error: 'Mi scrivi la Regione? (es. Lombardia, Lazio, Campania)' };
-    }
-    return {
-      profile: {
-        ...profile,
-        location: { region: loc.region, municipality: loc.municipality },
-        locationNeedsConfirmation: false,
-        slotSource: { ...(profile.slotSource ?? {}), location: 'explicit' },
-      },
-      error: null,
-    };
-  }
-
-  if (step === 'employees') {
-    const n = parseEmployees(trimmed);
-    if (n === null) return { profile, error: 'Non riesco a capire il numero dipendenti. Puoi scrivere un numero?' };
-    return { profile: { ...profile, employees: n, slotSource: { ...(profile.slotSource ?? {}), employees: 'explicit' } }, error: null };
-  }
-
-  if (step === 'budget') {
-    const lowered = trimmed.toLowerCase();
-    if (/\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered)) {
-      return {
-        profile: {
-          ...profile,
-          revenueOrBudgetEUR: null,
-          budgetAnswered: true,
-          slotSource: { ...(profile.slotSource ?? {}), budget: 'explicit' },
-        },
-        error: null,
-      };
-    }
-
-    const n = parseBudgetEUR(trimmed);
-    if (n === null) {
-      return {
-        profile,
-        error: 'Non riesco a capire il budget/fatturato. Puoi scrivere un numero? (es. 50k, 120000) Oppure "non so".'
-      };
-    }
-
-    return {
-      profile: {
-        ...profile,
-        revenueOrBudgetEUR: n,
-        requestedContributionEUR: profile.requestedContributionEUR ?? parseRequestedContributionEUR(trimmed),
-        budgetAnswered: true,
-        slotSource: { ...(profile.slotSource ?? {}), budget: 'explicit' }
-      },
-      error: null
-    };
-  }
-
-  if (step === 'fundingGoal') {
-    if (trimmed.length < 2) return { profile, error: 'Mi descrivi meglio l\'obiettivo?' };
-    const hasObjectiveSignal = hasConcreteObjectiveSignal(trimmed);
-    const hasOtherSignal =
-      Boolean(parseActivityType(trimmed)) ||
-      Boolean(detectRegionAnywhere(trimmed)) ||
-      Boolean(extractAtecoFromMessage(trimmed)) ||
-      Boolean(extractSectorFromMessage(trimmed)) ||
-      parseEmployees(trimmed) !== null ||
-      parseBudgetEUR(trimmed) !== null ||
-      Boolean(parseContributionPreference(trimmed));
-
-    if (!hasObjectiveSignal && hasOtherSignal) {
-      return { profile, error: null };
-    }
-
-    if (isGenericFundingGoal(trimmed)) {
-      if (hasOtherSignal) return { profile, error: null };
-      return {
-        profile,
-        error: 'Ok. Per fare un match serio mi serve un dettaglio in piu: che cosa vuoi finanziare concretamente?'
-      };
-    }
-    return {
-      profile: {
-        ...profile,
-        fundingGoal: trimmed,
-        businessExists: parseBusinessExistsFromMessage(trimmed) ?? profile.businessExists,
-        slotSource: { ...(profile.slotSource ?? {}), fundingGoal: 'explicit' }
-      },
-      error: null
-    };
-  }
-
-  if (step === 'contributionPreference') {
-    const pref = parseContributionPreference(trimmed);
-    if (!pref) {
-      return {
-        profile,
-        error: "Non mi e chiaro. Preferisci fondo perduto, agevolato, voucher, credito d'imposta o misto?"
-      };
-    }
-    return {
-      profile: {
-        ...profile,
-        contributionPreference: pref,
-        slotSource: { ...(profile.slotSource ?? {}), contributionPreference: 'explicit' },
-      },
-      error: null,
-    };
-  }
-
-  if (step === 'contactEmail') {
-    const email = parseEmail(trimmed);
-    if (!email) return { profile, error: 'Mi serve una mail valida (es. nome@azienda.it).' };
-    return { profile: { ...profile, contactEmail: email }, error: null };
-  }
-
-  if (step === 'contactPhone') {
-    const phone = parsePhone(trimmed);
-    if (!phone) return { profile, error: 'Mi serve un numero di telefono valido con almeno 8 cifre.' };
-    return { profile: { ...profile, contactPhone: phone }, error: null };
-  }
-
-  return { profile, error: null };
-}
-
-export async function POST(req: Request) {
-  const rate = checkRateLimit(req, { keyPrefix: 'conversation', windowMs: 60_000, max: 45 });
+export async function POST(request: Request) {
+  const rate = checkRateLimit(request, { keyPrefix: 'conversation', windowMs: 60_000, max: 25 });
   if (!rate.ok) {
     return NextResponse.json(
-      { error: 'Troppi messaggi ravvicinati. Riprova tra pochi secondi.' },
+      { error: 'Stai inviando troppi messaggi. Attendi qualche istante.' },
       { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } }
     );
   }
 
   try {
-    const payload = payloadSchema.parse(await req.json());
-    const message = payload.message;
+    const body = await request.json();
+    const { message } = payloadSchema.parse(body);
+    const trimmed = message.trim();
 
-    const existing = readSessionCookie();
-    const session: Session =
-      existing ?? { step: getNextStep(emptyProfile()), userProfile: emptyProfile(), lastScanHash: null, askedCounts: {}, lastAskedStep: null };
+    const session = readSessionCookie() ?? {
+      step: 'fundingGoal' as Step,
+      userProfile: emptyProfile(),
+      askedCounts: {},
+      lastAskedStep: null,
+      recentTurns: [],
+      qaMode: false
+    };
 
-    const trimmed = String(message ?? '').trim();
-    const turnIntent = detectTurnIntent({ message: trimmed, sessionQaMode: Boolean(session.qaMode) });
-    const {
-      questionLike,
-      smallTalk,
-      greeting,
-      questionsFirst,
-      proceedToMatching,
-      asksHumanConsultant,
-      conversationalIntent,
-      qaModeActive
-    } = turnIntent;
-    const isNewSession = !existing || isProfileEmpty(session.userProfile);
+    let profile = session.userProfile;
     let profileMemory = session.profileMemory ?? emptyProfileMemory();
-    const prefersChatBeforeProfiling =
-      questionsFirst || (conversationalIntent && /\b(parlar|parliam|prima)\b/.test(normalizeForMatch(trimmed)));
+    let profileProgressedThisTurn = false;
 
-    // Extract high-signal fields from any message (even if it's not the expected step).
-    const extracted: Partial<UserProfile> = {};
+    const conversationalIntent = isConversationalIntent(trimmed);
+    const questionLike = isQuestionLike(trimmed);
+    const greeting = isGreeting(trimmed);
+    const smallTalk = isSmallTalkOnly(trimmed);
+    const asksHumanConsultant = wantsHumanConsultant(trimmed);
+    const handoffRequested = session.humanHandoffRequested || asksHumanConsultant;
+    const handoffCompleted = session.humanHandoffCompleted || false;
+    const qaModeActive = session.qaMode || false;
+    const questionsFirst = wantsQuestionsFirst(trimmed);
+    const proceedToMatching = wantsToProceedToMatching(trimmed);
+
+    // Extraction pass
     const detectedRegionSignal = detectRegionSignal(trimmed);
     const detectedRegion = detectedRegionSignal?.region ?? null;
-    const existingRegion = session.userProfile.location.region;
-    const isRegionChange =
-      Boolean(existingRegion && detectedRegion) &&
-      normalizeForMatch(existingRegion ?? '') !== normalizeForMatch(detectedRegion ?? '');
-    const canOverrideRegion =
-      existingRegion === null ||
-      session.step === 'location' ||
-      (userIsStatingOwnLocation(trimmed) && (isRegionChange || /in realt|corregg|ho sbagliat|non sono/i.test(trimmed)));
-    if (detectedRegion && canOverrideRegion) {
-      extracted.location = { region: detectedRegion, municipality: null };
-      extracted.locationNeedsConfirmation = detectedRegionSignal?.source === 'demonym';
-      if (detectedRegionSignal?.source === 'explicit') {
-        extracted.locationNeedsConfirmation = false;
-      }
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), location: detectedRegionSignal?.source === 'demonym' ? 'demonym' : 'explicit' };
-    }
-    const detectedAteco = extractAtecoFromMessage(trimmed);
-    const atecoMentioned = normalizeForMatch(trimmed).includes('ateco');
-    const hasDottedAtecoPattern = /\b\d{2}\.\d{1,2}(?:\.\d{1,2})?\b/.test(trimmed);
-    if (detectedAteco && (session.step === 'ateco' || atecoMentioned || hasDottedAtecoPattern)) {
-      extracted.ateco = detectedAteco;
-      extracted.atecoAnswered = true;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), ateco: atecoMentioned ? 'explicit' : 'inferred' };
-    }
-    const detectedActivity = parseActivityType(trimmed);
-    if (detectedActivity && (session.step === 'activityType' || !session.userProfile.activityType)) {
-      extracted.activityType = detectedActivity;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), activityType: 'inferred' };
-    }
-    const detectedBusinessExists = parseBusinessExistsFromMessage(trimmed);
-    if (detectedBusinessExists !== null) {
-      extracted.businessExists = detectedBusinessExists;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), businessExists: 'inferred' };
-    }
-    const detectedAge = parseAge(trimmed);
-    if (detectedAge !== null) {
-      extracted.age = detectedAge;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), age: 'explicit' };
-    }
-    const detectedAgeBand = parseAgeBand(trimmed);
-    if (detectedAgeBand) {
-      extracted.ageBand = detectedAgeBand;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), ageBand: 'inferred' };
-    }
-    const detectedEmployment = parseEmploymentStatus(trimmed);
-    if (detectedEmployment && (session.step === 'activityType' || !session.userProfile.employmentStatus)) {
-      extracted.employmentStatus = detectedEmployment;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), employmentStatus: 'inferred' };
-    }
-    const detectedLegalForm = parseLegalForm(trimmed);
-    if (detectedLegalForm && (session.step === 'activityType' || !session.userProfile.legalForm)) {
-      extracted.legalForm = detectedLegalForm;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), legalForm: 'inferred' };
-    }
-    const detectedEmployees = parseEmployees(trimmed);
-    if (
-      detectedEmployees !== null &&
-      (session.step === 'employees' || (session.userProfile.employees === null && messageMentionsEmployees(trimmed)))
-    ) {
-      extracted.employees = detectedEmployees;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), employees: 'explicit' };
-    }
-    const detectedBudget = parseBudgetEUR(trimmed);
-    if (
-      detectedBudget !== null &&
-      (session.step === 'budget' || (!session.userProfile.budgetAnswered && messageMentionsBudget(trimmed)))
-    ) {
-      extracted.revenueOrBudgetEUR = detectedBudget;
-      extracted.budgetAnswered = true;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), budget: 'explicit' };
-    }
-    const detectedRequestedContribution = parseRequestedContributionEUR(trimmed);
-    if (
-      detectedRequestedContribution !== null &&
-      (session.step === 'budget' || session.userProfile.requestedContributionEUR === null)
-    ) {
-      extracted.requestedContributionEUR = detectedRequestedContribution;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), requestedContributionEUR: 'explicit' };
-    }
-    const detectedPref = parseContributionPreference(trimmed);
-    if (detectedPref && (session.step === 'contributionPreference' || !session.userProfile.contributionPreference)) {
-      extracted.contributionPreference = detectedPref;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), contributionPreference: 'explicit' };
-    }
-    const detectedEmail = parseEmail(trimmed);
-    if (detectedEmail) extracted.contactEmail = detectedEmail;
-    const detectedPhone = parsePhone(trimmed);
-    if (detectedPhone) extracted.contactPhone = detectedPhone;
+    const isStatingLocation = userIsStatingOwnLocation(trimmed);
+    const explicitBudget = parseBudgetEUR(trimmed);
+    const explicitContribution = parseRequestedContributionEUR(trimmed);
+    const explicitEmployees = parseEmployees(trimmed);
+    const explicitBusinessExists = parseBusinessExistsFromMessage(trimmed);
+    const explicitAge = parseAge(trimmed);
+    const explicitAgeBand = parseAgeBand(trimmed);
+    const explicitEmploymentStatus = parseEmploymentStatus(trimmed);
+    const explicitLegalForm = parseLegalForm(trimmed);
+    const explicitEmail = parseEmail(trimmed);
+    const explicitPhone = parsePhone(trimmed);
+    const explicitActivityType = parseActivityType(trimmed);
+    const explicitSector = extractSectorFromMessage(trimmed);
+    const explicitFundingGoal = extractFundingGoalFromMessage(trimmed);
+    const explicitContributionPref = parseContributionPreference(trimmed);
+    const explicitAteco = extractAtecoFromMessage(trimmed);
 
-    const detectedSector = extractSectorFromMessage(trimmed);
-    if (detectedSector && (session.step === 'sector' || !session.userProfile.sector)) {
-      extracted.sector = detectedSector;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), sector: 'inferred' };
+    // Update profile
+    const nextProfile = { ...profile };
+    const extractionSources: Record<string, 'explicit' | 'demonym' | 'inferred'> = { ...profile.slotSource };
+
+    if (detectedRegion) {
+      nextProfile.location = { ...nextProfile.location, region: detectedRegion };
+      nextProfile.locationNeedsConfirmation = !isStatingLocation && detectedRegionSignal?.source !== 'explicit';
+      extractionSources.location = detectedRegionSignal?.source ?? 'explicit';
+    }
+    if (explicitBudget !== null) {
+      nextProfile.revenueOrBudgetEUR = explicitBudget;
+      nextProfile.budgetAnswered = true;
+      extractionSources.budget = 'explicit';
+    }
+    if (explicitContribution !== null) {
+      nextProfile.requestedContributionEUR = explicitContribution;
+      extractionSources.requestedContributionEUR = 'explicit';
+    }
+    if (explicitEmployees !== null) {
+      nextProfile.employees = explicitEmployees;
+      extractionSources.employees = 'explicit';
+    }
+    if (explicitBusinessExists !== null) {
+      nextProfile.businessExists = explicitBusinessExists;
+      extractionSources.businessExists = 'explicit';
+    }
+    if (explicitAge !== null) {
+      nextProfile.age = explicitAge;
+      extractionSources.age = 'explicit';
+    }
+    if (explicitAgeBand !== null) {
+      nextProfile.ageBand = explicitAgeBand;
+      extractionSources.ageBand = 'explicit';
+    }
+    if (explicitEmploymentStatus !== null) {
+      nextProfile.employmentStatus = explicitEmploymentStatus;
+      extractionSources.employmentStatus = 'explicit';
+    }
+    if (explicitLegalForm !== null) {
+      nextProfile.legalForm = explicitLegalForm;
+      extractionSources.legalForm = 'explicit';
+    }
+    if (explicitEmail) {
+      nextProfile.contactEmail = explicitEmail;
+      extractionSources.contactEmail = 'explicit';
+    }
+    if (explicitPhone) {
+      nextProfile.contactPhone = explicitPhone;
+      extractionSources.contactPhone = 'explicit';
+    }
+    if (explicitActivityType) {
+      nextProfile.activityType = explicitActivityType;
+      extractionSources.activityType = 'explicit';
+    }
+    if (explicitSector) {
+      nextProfile.sector = explicitSector;
+      extractionSources.sector = 'explicit';
+    }
+    if (explicitFundingGoal) {
+      nextProfile.fundingGoal = explicitFundingGoal;
+      extractionSources.fundingGoal = 'explicit';
+    }
+    if (explicitContributionPref) {
+      nextProfile.contributionPreference = explicitContributionPref;
+      extractionSources.contributionPreference = 'explicit';
+    }
+    if (explicitAteco) {
+      nextProfile.ateco = explicitAteco;
+      nextProfile.atecoAnswered = true;
+      extractionSources.ateco = 'explicit';
     }
 
-    const detectedGoal = extractFundingGoalFromMessage(trimmed);
-    if (detectedGoal && (session.step === 'fundingGoal' || !session.userProfile.fundingGoal)) {
-      extracted.fundingGoal = detectedGoal;
-      extracted.slotSource = { ...(extracted.slotSource ?? {}), fundingGoal: 'inferred' };
+    const changed = getChangedFields(profile, nextProfile);
+    if (changed.length > 0) {
+      profile = { ...nextProfile, slotSource: extractionSources };
+      profileMemory = markProfileFields(profileMemory, changed, 'extractor');
+      profileProgressedThisTurn = true;
     }
 
-    let profile = mergeProfile(session.userProfile, extracted);
-    if (profile.age !== null) {
-      profile.ageBand = profile.age <= 35 ? 'under35' : 'over35';
-      profile.slotSource = { ...(profile.slotSource ?? {}), ageBand: profile.slotSource?.ageBand ?? 'inferred' };
-    }
-    const extractedChanged = getChangedFields(session.userProfile, profile);
-    let profileProgressedThisTurn = extractedChanged.length > 0;
-    if (extractedChanged.length) {
-      profileMemory = markProfileFields(profileMemory, extractedChanged, 'extractor');
-    }
+    const isNewSession = isProfileEmpty(profile);
+    const prefersChatBeforeProfiling = questionsFirst || qaModeActive;
 
-    // If the message looks like a question, answer it but don't force validation errors.
-    const measureUpdateReply =
-      questionLike && isMeasureUpdateQuestion(trimmed) ? await resolveMeasureUpdateReply(trimmed) : null;
-    const qa = questionLike && !measureUpdateReply ? answerFinanceQuestion(trimmed) : null;
-    const metaQa = answerMetaQuestion(trimmed);
-    const conversationalReply = answerConversationalIntent(trimmed);
-    const handoffAlreadyOpen = Boolean(session.humanHandoffRequested && !session.humanHandoffCompleted);
-    const handoffRequested = asksHumanConsultant || handoffAlreadyOpen;
-    const handoffCompleted = Boolean(session.humanHandoffCompleted && !asksHumanConsultant);
-    const hasQaAnswer = Boolean(
-      questionLike || questionsFirst || conversationalIntent || measureUpdateReply || qa || metaQa || conversationalReply
-    );
+    // Knowledge/Status Check
+    const measureUpdateQuestion = isMeasureUpdateQuestion(trimmed);
+    const measureUpdateReply = measureUpdateQuestion ? resolveMeasureUpdateReply(trimmed) : null;
+    const qa = answerFinanceQuestion(trimmed);
+    const metaQa = genericQuestionReply(trimmed);
+    const hasQaAnswer = Boolean(qa || metaQa || measureUpdateReply);
 
-    // Special: greeting-only messages must ALWAYS start the BNDO triage.
-    // This prevents stale cookies (previous profile) from producing unrelated "refine your search" replies.
-    if (greeting && smallTalk && !qa && !measureUpdateReply) {
-      const assistantText =
-        "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare.";
-
-      // Reset to a fresh profile on greeting-only, to avoid leaking old region/ATECO into a new chat.
-      const freshProfile = mergeProfile(emptyProfile(), extracted);
-
-      const nextSession: Session = {
-        step: 'fundingGoal',
-        userProfile: freshProfile,
-        profileMemory,
-        lastScanHash: null,
-        askedCounts: { fundingGoal: 1 },
-        lastAskedStep: 'fundingGoal',
-        qaMode: false,
-        humanHandoffRequested: false,
-        humanHandoffCompleted: false,
-        recentTurns: [
-          { role: 'user', text: trimmed },
-          { role: 'assistant', text: assistantText }
-        ]
-      };
-      writeSessionCookie(nextSession);
-
-      return NextResponse.json(
-        withConversationMeta({
-          userProfile: nextSession.userProfile,
-          step: nextSession.step,
-          assistantText,
-          readyToScan: false,
-          mode: 'profiling',
-          aiSource: null,
-          needsClarification: true
-        })
-      );
-    }
+    // AI pass for conversational parts
+    const conversationalReply = (conversationalIntent || (prefersChatBeforeProfiling && smallTalk))
+      ? 'Certamente. Posso rispondere ai tuoi dubbi sulla finanza agevolata o aiutarti a trovare il bando giusto per il tuo progetto. Cosa preferisci approfondire?'
+      : null;
 
     // Special: first-touch greeting should feel human and set context.
     if (greeting && isNewSession && !qa && !measureUpdateReply) {
       const assistantText =
-        "Ciao, sono il tuo assistente BNDO. Dimmi in una frase il tuo progetto (attivita gia attiva o da aprire) e cosa vuoi finanziare.";
+        "Ciao, sono il tuo consulente BNDO. Dimmi in una frase cosa vuoi finanziare e in quale regione operi.";
 
       const askedCounts = session.askedCounts ?? {};
       const attempt = (askedCounts.fundingGoal ?? 0) + 1;
@@ -2154,13 +1796,13 @@ export async function POST(req: Request) {
     }
 
     // Apply the message as an answer to the expected step (when it makes sense).
-    const shouldTreatAsStepAnswer = !hasQaAnswer && !smallTalk && !proceedToMatching; // if we are answering a question or user is just greeting, don't treat it as a strict step answer
+    const shouldTreatAsStepAnswer = !hasQaAnswer && !smallTalk && !proceedToMatching;
     if (shouldTreatAsStepAnswer) {
       const locationConfirmationReply =
         session.step === 'location' &&
         Boolean(profile.locationNeedsConfirmation && profile.location.region) &&
         (isAffirmativeConfirmation(trimmed) || !/\b(altro|altrove|un altra regione|altra regione|diversa regione)\b/.test(normalizeForMatch(trimmed)));
-      // Only validate/consume the step if the relevant field is still missing.
+      
       const shouldConsumeStep =
         (session.step === 'activityType' && !profile.activityType) ||
         (session.step === 'sector' && !profile.sector) ||
@@ -2223,6 +1865,7 @@ export async function POST(req: Request) {
     const stalledOnSameField = session.lastAskedStep === nextStep && !profileProgressedThisTurn && rawAttempt > 2;
     const effectiveNextStep = stalledOnSameField ? fallbackStepAfterStall(nextStep, profile) : nextStep;
     const attempt = (askedCounts[effectiveNextStep] ?? 0) + 1;
+    
     const completenessScore = profileCompletenessScore(
       normalizeProfileInput({
         activityType: profile.activityType,
@@ -2240,10 +1883,12 @@ export async function POST(req: Request) {
       }),
       scanReadiness.missingSignals,
     );
+    
     const readinessCode = scanReadinessReasonForStep(effectiveNextStep, profile);
     const shouldEmitRecap = shouldScanNow || hasCriticalRecapDelta(session.userProfile, profile);
     const recap = shouldEmitRecap ? profileRecap(profile) : null;
     const questionHint = shouldScanNow ? null : questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
+    
     const assistantCore = (() => {
       if (shouldScanNow) {
         return 'Ho un quadro chiaro. Avvio subito una ricerca approfondita per individuare le opportunità più concrete per il tuo profilo.';
@@ -2411,7 +2056,6 @@ export async function POST(req: Request) {
       .slice(-8);
 
     const nextSession: Session = {
-      // When we trigger a scan, keep the next refinement step in session so the user can answer immediately after results.
       step: shouldScanNow ? effectiveNextStep : smallTalk && scanReady ? 'ready' : effectiveNextStep,
       userProfile: profile,
       profileMemory,
@@ -2439,6 +2083,7 @@ export async function POST(req: Request) {
       effectiveNextStep !== 'ready' &&
       !shouldScanNow &&
       (Boolean(questionHint) || Boolean(naturalBridgeQuestion(effectiveNextStep, attempt)) || Boolean(repetition.tooSimilar));
+    
     return NextResponse.json(
       withConversationMeta({
         userProfile: nextSession.userProfile,
@@ -2462,7 +2107,6 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE() {
-  // Clear conversation state so a new profiling flow starts from scratch.
   cookies().set(COOKIE_NAME, '', {
     httpOnly: true,
     sameSite: 'lax',
@@ -2471,4 +2115,67 @@ export async function DELETE() {
     maxAge: 0
   });
   return NextResponse.json({ ok: true });
+}
+
+function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
+  const next = { ...profile };
+  const lowered = message.toLowerCase().trim();
+
+  if (step === 'activityType') {
+    const act = parseActivityType(message);
+    if (!act) return { profile, error: "Non ho capito se l'attività è già attiva o da aprire. Puoi chiarire?" };
+    next.activityType = act;
+    next.businessExists = parseBusinessExistsFromMessage(message);
+  } else if (step === 'sector') {
+    const s = extractSectorFromMessage(message);
+    if (!s) return { profile, error: "Qual è il settore principale di attività (es. agricoltura, turismo, software)?" };
+    next.sector = s;
+  } else if (step === 'ateco') {
+    const a = extractAtecoFromMessage(message);
+    if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
+        next.atecoAnswered = true;
+        return { profile: next, error: null };
+    }
+    if (!a) return { profile, error: "Puoi indicarmi il codice ATECO o descrivere meglio cosa fa l'azienda?" };
+    next.ateco = a;
+    next.atecoAnswered = true;
+  } else if (step === 'location') {
+    const loc = parseRegionAndMunicipality(message);
+    const anywhere = detectRegionAnywhere(message);
+    const finalRegion = loc.region ?? anywhere;
+    if (!finalRegion) return { profile, error: "In quale regione ha sede l'attività o il progetto?" };
+    next.location = { region: finalRegion, municipality: loc.municipality };
+    next.locationNeedsConfirmation = false;
+  } else if (step === 'employees') {
+    const e = parseEmployees(message);
+    if (e === null) return { profile, error: "Quanti dipendenti o addetti ha l'azienda? Indica un numero indicativo." };
+    next.employees = e;
+  } else if (step === 'fundingGoal') {
+    const goal = extractFundingGoalFromMessage(message) ?? message;
+    if (goal.length < 5) return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, sede)" };
+    next.fundingGoal = goal;
+  } else if (step === 'budget') {
+    if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
+        next.budgetAnswered = true;
+        return { profile: next, error: null };
+    }
+    const b = parseBudgetEUR(message);
+    if (b === null) return { profile, error: "Qual è l'importo indicativo dell'investimento? (es. 50.000 euro)" };
+    next.revenueOrBudgetEUR = b;
+    next.budgetAnswered = true;
+  } else if (step === 'contributionPreference') {
+    const cp = parseContributionPreference(message);
+    if (!cp) return { profile, error: "Preferisci fondo perduto, finanziamento agevolato o ti interessano entrambi?" };
+    next.contributionPreference = cp;
+  } else if (step === 'contactEmail') {
+    const email = parseEmail(message);
+    if (!email) return { profile, error: "Indica una mail valida per ricevere il riepilogo." };
+    next.contactEmail = email;
+  } else if (step === 'contactPhone') {
+    const phone = parsePhone(message);
+    if (!phone) return { profile, error: "Indica un numero di telefono valido per essere ricontattato." };
+    next.contactPhone = phone;
+  }
+
+  return { profile: next, error: null };
 }
