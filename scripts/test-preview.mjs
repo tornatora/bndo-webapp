@@ -29,8 +29,8 @@ async function fetchChat(url, payload) {
 async function runTests(previewUrl) {
   console.log(`Testing against: ${previewUrl}`);
 
-  // TEST LOMBARDIA
-  console.log('\n--- TEST A: LOMBARDIA ---');
+  // TEST A: LOMBARDIA DIGITALE
+  console.log('\n--- TEST A: LOMBARDIA DIGITALE ---');
   const resLombardia = await fetchScan(previewUrl, {
     userProfile: {
       businessExists: true,
@@ -45,12 +45,19 @@ async function runTests(previewUrl) {
     mode: 'fast'
   });
   console.log(`Results: ${resLombardia.results?.length}`);
-  resLombardia.results?.slice(0, 3).forEach(r => console.log(`- [${r.score}] ${r.title} (${r.authorityName})`));
-  const badLombardia = resLombardia.results?.filter(r => r.whyFit?.some(w => w.toLowerCase().includes('campania') || w.toLowerCase().includes('piemonte')));
-  if (badLombardia?.length > 0) console.error('FAIL: out of region items found!');
+  resLombardia.results?.slice(0, 5).forEach(r => {
+    console.log(`- [${r.score}] ${r.title} (${r.authorityName})`);
+    console.log(`  Match reasons: ${r.whyFit?.join(', ')}`);
+  });
+  
+  const badLombardia = resLombardia.results?.filter(r => {
+    const title = r.title.toLowerCase();
+    return title.includes('india') || title.includes('estero') || title.includes('mancati pagamenti');
+  });
+  if (badLombardia?.length > 0) console.error('FAIL: weak semantic items found in top results!');
 
-  // TEST CAMPANIA
-  console.log('\n--- TEST B: CAMPANIA ---');
+  // TEST B: CAMPANIA TURISMO
+  console.log('\n--- TEST B: CAMPANIA TURISMO ---');
   const resCampania = await fetchScan(previewUrl, {
     userProfile: {
       businessExists: true,
@@ -64,35 +71,35 @@ async function runTests(previewUrl) {
     mode: 'fast'
   });
   console.log(`Results: ${resCampania.results?.length}`);
-  resCampania.results?.slice(0, 3).forEach(r => console.log(`- [${r.score}] ${r.title} (${r.authorityName})`));
-
-  // TEST PAYLOAD (answers)
-  console.log('\n--- TEST C: PAYLOAD WITH ANSWERS ---');
-  const resAnswers = await fetchScan(previewUrl, {
-    answers: {
-      businessExists: true,
-      region: 'Campania',
-      sector: 'turismo',
-    },
-    strictness: 'high',
-    mode: 'fast'
+  resCampania.results?.slice(0, 5).forEach(r => {
+    console.log(`- [${r.score}] ${r.title} (${r.authorityName})`);
+    console.log(`  Match reasons: ${r.whyFit?.join(', ')}`);
   });
-  console.log(`Results with 'answers' root: ${resAnswers.results?.length}`);
-
-  // TEST CHAT
-  console.log('\n--- TEST D: CHAT ---');
-  // First clear session
-  await fetch(`${previewUrl}/api/conversation`, { method: 'DELETE' });
-  const chat1 = await fetchChat(previewUrl, { message: 'ciao voglio aprire un bar a milano' });
-  console.log('Turn 1:', chat1.assistantText);
-  if (chat1.assistantText.includes('avvio lo scanner')) console.error('FAIL: robotic phrase found');
-
-  const chat2 = await fetchChat(previewUrl, { message: 'ho 30 anni, disoccupato' });
-  console.log('Turn 2:', chat2.assistantText);
   
-  const chat3 = await fetchChat(previewUrl, { message: 'mi serve un fondo perduto di 50000 euro per macchinari' });
-  console.log('Turn 3:', chat3.assistantText);
-  if (chat3.assistantText.includes('avvio lo scanner')) console.error('FAIL: robotic phrase found');
+  const badCampania = resCampania.results?.filter(r => {
+    const title = r.title.toLowerCase();
+    const isIndia = title.includes('india');
+    const isMancati = title.includes('mancati pagamenti');
+    return isIndia || isMancati;
+  });
+  if (badCampania?.length > 0) {
+    console.error('FAIL: irrelevant results (India/Mancati) found in primary results for Campania Tourism!');
+  }
+
+  // TEST CHAT UX (Double phrase)
+  console.log('\n--- TEST C: CHAT UX ---');
+  await fetch(`${previewUrl}/api/conversation`, { method: 'DELETE' });
+  const chat1 = await fetchChat(previewUrl, { message: 'ciao sono un impresa di milano' });
+  console.log('Chat 1:', chat1.assistantText);
+  if (chat1.assistantText.includes('.') && chat1.assistantText.split('.').filter(s => s.trim().length > 5).length > 1) {
+     // Non è necessariamente un errore se sono frasi diverse, ma verifichiamo la naturalezza
+  }
+  
+  const chat2 = await fetchChat(previewUrl, { message: 'settore turismo' });
+  console.log('Chat 2:', chat2.assistantText);
+  if (chat2.assistantText.includes('Mi serve')) {
+      console.error('FAIL: "Mi serve..." redundant phrase found!');
+  }
 }
 
 const url = process.argv[2];

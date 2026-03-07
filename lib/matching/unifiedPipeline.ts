@@ -57,14 +57,14 @@ export type PipelineResult = {
  * Pesi per il calcolo del punteggio (devono sommare a 100)
  */
 const DIMENSION_WEIGHTS: Record<MatchDimension, number> = {
-  subject: 20,
+  subject: 15,
   territory: 15,
-  purpose: 20,
-  expenses: 15,
-  sector: 10,
-  stage: 10,
-  status: 5,
-  special: 5,
+  purpose: 35,
+  expenses: 10,
+  sector: 15,
+  stage: 5,
+  status: 3,
+  special: 2,
 };
 
 /**
@@ -449,20 +449,12 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
   const descriptionNorm = normalizeForMatch(grant.description || '');
   const combinedGrantText = `${titleNorm} ${purposes.join(' ')} ${descriptionNorm}`;
 
-  if (purposes.length === 0 && !titleNorm.includes(fundingGoal)) {
-    return {
-      dimension: 'purpose',
-      compatible: true,
-      score: 40,
-      confidence: 'low',
-      note: 'Finalità del bando non specificate chiaramente',
-    };
-  }
-
   // Keywords del profilo utente
   const userKeywords = fundingGoal
     .split(/\s+/)
     .filter((w) => w.length >= 4);
+
+  const goalIsGeneric = isGenericFundingGoal(fundingGoal);
 
   if (userKeywords.length === 0) {
     return {
@@ -483,6 +475,17 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
 
   const matchRatio = matchedKeywords / userKeywords.length;
 
+  // Se l'obiettivo è specifico e non c'è NESSUN match, escludi categoricamente
+  if (!goalIsGeneric && matchedKeywords === 0) {
+    return {
+      dimension: 'purpose',
+      compatible: false,
+      score: 0,
+      confidence: 'high',
+      note: `Nessuna corrispondenza con l'obiettivo specifico: ${fundingGoal}`,
+    };
+  }
+
   // Rigore nel matching semantico
   if (matchRatio >= 0.8) {
     return {
@@ -490,7 +493,7 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
       compatible: true,
       score: 100,
       confidence: 'high',
-      note: `Finalità altamente coerente (${matchedKeywords}/${userKeywords.length} match)`,
+      note: `Finalità altamente coerente`,
     };
   }
 
@@ -500,28 +503,57 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
       compatible: true,
       score: 85,
       confidence: 'high',
-      note: `Finalità coerente (${matchedKeywords}/${userKeywords.length} match)`,
+      note: `Finalità coerente`,
     };
   }
 
-  if (matchRatio >= 0.25) {
+  if (matchRatio >= 0.2) {
     return {
       dimension: 'purpose',
       compatible: true,
-      score: 65,
+      score: 50,
       confidence: 'medium',
-      note: `Finalità parzialmente coerente (${matchedKeywords}/${userKeywords.length} match)`,
+      note: `Finalità solo parzialmente coerente`,
     };
   }
 
-  // Se il match è scarso
+  // Se il match è molto scarso ed è un obiettivo specifico, marca come incompatibile
+  if (!goalIsGeneric) {
+    return {
+      dimension: 'purpose',
+      compatible: false,
+      score: 10,
+      confidence: 'medium',
+      note: `Corrispondenza insufficiente con l'obiettivo: ${fundingGoal}`,
+    };
+  }
+
   return {
     dimension: 'purpose',
-    compatible: true, // Non escludiamo a meno che non sia esplicitamente vietato
-    score: 30,
+    compatible: true,
+    score: 20,
     confidence: 'medium',
-    note: `Finalità con scarsa corrispondenza (${matchedKeywords}/${userKeywords.length} match)`,
+    note: `Bassa corrispondenza con la finalità`,
   };
+}
+
+/**
+ * Helper to determine if a goal is too generic
+ */
+function isGenericFundingGoal(text: string) {
+  const n = normalizeForMatch(text);
+  if (!n) return true;
+  const words = n.split(' ').filter(Boolean);
+  if (words.length <= 2) return true;
+  
+  const generic = [
+    'bando', 'bandi', 'finanziamento', 'finanziamenti', 'contributo', 'contributi',
+    'agevolazione', 'agevolazioni', 'investimento', 'investimenti', 'spese',
+    'progetto', 'attivita', 'impresa', 'azienda', 'fondo perduto', 'aiuto', 'aiuti'
+  ];
+  
+  // Se contiene solo parole generiche
+  return words.every(w => generic.includes(w) || w.length < 4);
 }
 
 /**

@@ -2244,23 +2244,7 @@ export async function POST(req: Request) {
       if (effectiveNextStep === 'ready') {
         return 'Se vuoi, affino subito il match: dammi il dato più importante tra ATECO, importo o forma di contributo.';
       }
-      const q = questionHint ?? questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
-      if (attempt > 1) return q;
-      const reason =
-        effectiveNextStep === 'location'
-          ? profile.locationNeedsConfirmation && profile.location?.region
-            ? null
-            : 'Mi serve la regione.'
-          : effectiveNextStep === 'activityType'
-            ? profile.businessExists === null
-              ? "Mi serve capire se l'attività è già attiva o da aprire."
-              : needsFounderEligibilityData(profile)
-                ? 'Mi servono età e stato occupazionale.'
-                : null
-            : effectiveNextStep === 'budget'
-              ? 'Mi serve un importo indicativo.'
-              : null;
-      return [reason, q].filter(Boolean).join(' ');
+      return questionForStepWithProfile(effectiveNextStep, profile, seed, attempt);
     })();
 
     const llmQaMode = qaModeActive || prefersChatBeforeProfiling;
