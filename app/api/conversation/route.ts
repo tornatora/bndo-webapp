@@ -705,11 +705,12 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
   }
 
   return {
-    ready: missingSignals.length === 0 || corePilarsOk,
+    ready: missingSignals.length === 0 || !!corePilarsOk,
     missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
-}
+  }
+
 
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
   if (step === 'location' && profile.locationNeedsConfirmation && profile.location?.region) {
@@ -1630,7 +1631,7 @@ export async function POST(request: Request) {
 
     // Knowledge/Status Check
     const measureUpdateQuestion = isMeasureUpdateQuestion(trimmed);
-    const measureUpdateReply = measureUpdateQuestion ? resolveMeasureUpdateReply(trimmed) : null;
+    const measureUpdateReply = measureUpdateQuestion ? await resolveMeasureUpdateReply(trimmed) : null;
     const qa = answerFinanceQuestion(trimmed);
     const metaQa = genericQuestionReply(trimmed);
     const hasQaAnswer = Boolean(qa || metaQa || measureUpdateReply);
@@ -2030,7 +2031,8 @@ export async function POST(request: Request) {
     const dedupedAssistantText = repetition.tooSimilar
       ? antiEchoAssistantText || 'Capisco.'
       : antiEchoAssistantText;
-    const qaDirectFallback = (measureUpdateReply ?? metaQa ?? qa)?.trim() ?? null;
+    const qaCandidate: string | null = measureUpdateReply ?? metaQa ?? qa;
+    const qaDirectFallback = qaCandidate?.trim() ?? null;
     let qaShapedAssistantText =
       llmQaMode && !proceedToMatching && !shouldScanNow ? enforceQaModeReply(dedupedAssistantText) : dedupedAssistantText;
     if (llmQaMode && metaQa) {
