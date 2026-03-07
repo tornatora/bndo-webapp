@@ -881,9 +881,6 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   return null;
 }
 
-  return null;
-}
-
 function parseAge(message: string): number | null {
   const lowered = message.toLowerCase();
   const match =
