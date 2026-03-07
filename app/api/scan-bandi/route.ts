@@ -1290,7 +1290,7 @@ function buildScannerProfilePayload(args: {
     employmentStatus,
   } = args;
 
-  const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal) ?? true;
+  const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal) ?? (typeof rawProfile.businessExists === 'boolean' ? rawProfile.businessExists : null);
 
   return {
     region: region ?? null,
