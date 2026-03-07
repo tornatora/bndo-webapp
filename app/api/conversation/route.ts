@@ -5,7 +5,7 @@ import { addAIFallbackUsage, addPaidAIUsage, canUsePaidAI } from '@/lib/aiBudget
 import { detectTurnIntent, normalizeForMatch } from '@/lib/conversation/intentRouter';
 import { extractProfileFromMessage } from '@/lib/engines/profileExtractor';
 import { computeConfidenceMetadata } from '@/lib/engines/confidenceMetadata';
-import { nextBestFieldFromStep, naturalBridgeQuestion, questionFor } from '@/lib/conversation/questionPlanner';
+import { nextBestFieldFromStep, naturalBridgeQuestion, questionFor, questionForFounderEligibility } from '@/lib/conversation/questionPlanner';
 import { emptyProfileMemory, getChangedFields, markProfileFields, summarizeProfileForPrompt } from '@/lib/conversation/profileMemory';
 import { findClosestSimilarReply } from '@/lib/conversation/repetitionGuard';
 import { composeAssistantReply } from '@/lib/conversation/responseComposer';
@@ -725,6 +725,10 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
 function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
   if (step === 'location' && profile.locationNeedsConfirmation && profile.location?.region) {
     return `In quale regione ha sede il progetto?`;
+  }
+
+  if (step === 'activityType' && hasBusinessContext(profile) && needsFounderEligibilityData(profile)) {
+    return questionForFounderEligibility(seed, attempt);
   }
 
   return questionFor(step, seed, attempt);
@@ -1857,7 +1861,7 @@ export async function POST(request: Request) {
         (isAffirmativeConfirmation(trimmed) || !/\b(altro|altrove|un altra regione|altra regione|diversa regione)\b/.test(normalizeForMatch(trimmed)));
       
       const shouldConsumeStep =
-        (session.step === 'activityType' && !profile.activityType) ||
+        (session.step === 'activityType' && !hasBusinessContext(profile)) ||
         (session.step === 'sector' && !profile.sector) ||
         (session.step === 'ateco' && !profile.atecoAnswered) ||
         (session.step === 'location' &&
@@ -2179,6 +2183,17 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
   const lowered = message.toLowerCase().trim();
 
   if (step === 'activityType') {
+    if (hasBusinessContext(profile) && needsFounderEligibilityData(profile)) {
+      const age = parseAge(message);
+      const ageBand = parseAgeBand(message);
+      const employment = parseEmploymentStatus(message);
+      if (age !== null) next.age = age;
+      if (ageBand !== null) next.ageBand = ageBand;
+      if (employment !== null) next.employmentStatus = employment;
+      if (age !== null || ageBand !== null || employment !== null) {
+        return { profile: next, error: null };
+      }
+    }
     const act = parseActivityType(message);
     if (!act) return { profile, error: "Non ho capito se l'attività è già attiva o da aprire. Puoi chiarire?" };
     next.activityType = act;

@@ -637,11 +637,24 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       ]);
     }, 8000);
 
+    const hasSignals = Boolean((nextProfile.fundingGoal?.trim() || nextProfile.sector?.trim()) && nextProfile.location?.region);
+    const scanMode = hasSignals ? 'full' : 'fast';
+    const scanProfile = {
+      ...nextProfile,
+      location: {
+        region: nextProfile.location?.region ?? null,
+        municipality: nextProfile.location?.municipality ?? null,
+      },
+      businessExists: nextProfile.businessExists ?? null,
+      activityType: nextProfile.activityType ?? null,
+      ageBand: nextProfile.ageBand ?? null,
+      employmentStatus: nextProfile.employmentStatus ?? null,
+    };
     try {
       const scanRes = await fetch('/api/scan-bandi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userProfile: nextProfile, limit: 10, mode: 'fast', channel: 'chat', strictness: 'high' })
+        body: JSON.stringify({ userProfile: scanProfile, limit: 10, mode: scanMode, channel: 'chat', strictness: 'high' })
       });
       const scanJson = (await scanRes.json()) as ScanResponse & { error?: string };
       if (activeScanTokenRef.current !== scanToken) return;

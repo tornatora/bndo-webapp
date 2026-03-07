@@ -9,6 +9,15 @@ export function nextBestFieldFromStep(step: Step): NextBestField | null {
   return step === 'ready' ? null : step;
 }
 
+export function questionForFounderEligibility(seed: string, attempt: number): string {
+  const turnSeed = `${seed}:${attempt}`;
+  return pickOne(turnSeed, [
+    "Per verificare l'ammissibilità: quanti anni hai e qual è la tua situazione occupazionale? (es. disoccupato, studente, occupato)",
+    "Mi serve età e stato occupazionale per i bandi: sei under 35? Lavori già o sei disoccupato/inoccupato?",
+    "Per filtrare i bandi adatti: hai meno di 35 anni? Qual è la tua situazione lavorativa attuale?",
+  ]);
+}
+
 export function questionFor(step: Step, seed: string, attempt: number) {
   const turnSeed = `${seed}:${attempt}`;
   if (step === 'activityType') {
