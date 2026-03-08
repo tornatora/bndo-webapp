@@ -657,44 +657,10 @@ function passesChatStrictCandidate(result: ScanResult, context: ChatStrictContex
   if (!isContributionFocusedText(searchText)) return false;
   if (!isBusinessTargetText(searchText)) return false;
 
-  // === PATCH: Filtro regione hard ===
-  if (context.region) {
-    const regionNorm = normalizeForMatch(context.region);
-    const resultText = normalizeForMatch(
-      [result.title, result.authorityName, ...(result.requirements ?? [])].filter(Boolean).join(' ')
-    );
-
-    const isNational = /(nazionale|tutta italia|tutto il territorio|tutte le regioni)/.test(resultText);
-    const coversUserRegion = resultText.includes(regionNorm);
-    const isStrategicNational = strategicTitle;
-
-    if (!isNational && !coversUserRegion && !isStrategicNational) {
-      const authorityNorm = normalizeForMatch(result.authorityName ?? '');
-      const authorityIsNational = authorityNorm.includes('invitalia') ||
-        authorityNorm.includes('ministero') ||
-        authorityNorm.includes('agenzia delle entrate') ||
-        authorityNorm.includes('mise') ||
-        authorityNorm.includes('mimit');
-      const authorityMatchesRegion = authorityNorm.includes(regionNorm);
-
-      if (!authorityIsNational && !authorityMatchesRegion) return false;
-    }
-  }
-
-  // Filtro businessExists=false (originale)
   if (
     context.businessExists === false &&
     /(imprese gia attive|imprese attive|aziende gia attive|almeno due bilanci|impresa esistente)/.test(searchText) &&
     !/(da costituire|nuova impresa|startup|autoimpiego|aspiranti imprenditori|persone fisiche)/.test(searchText)
-  ) {
-    return false;
-  }
-
-  // === PATCH: Se businessExists=true, escludi bandi SOLO per nuove imprese ===
-  if (
-    context.businessExists === true &&
-    /(esclusivamente.*nuov|solo.*da costituire|solo.*aspiranti|riservato.*nuov)/.test(searchText) &&
-    !/(imprese gia attive|imprese attive|aziende gia attive|imprese esistenti)/.test(searchText)
   ) {
     return false;
   }
@@ -725,78 +691,14 @@ function hasStrategicTitleHint(result: ScanResult) {
   return CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
 }
 
-// === PATCH: Deduplica titoli migliorata ===
 function normalizeTitleDedupeKey(title: string): string {
   let key = normalizeForMatch(title)
-    .replace(/\b(anno|edizione|misura|bando|avviso|contributi|decreto|determina|delibera)\b/g, ' ')
-    .replace(/\b\d{4}\b/g, ' ')      // rimuovi anni
-    .replace(/\b[ivxlcdm]+\b/g, ' ')  // rimuovi numeri romani
-    .replace(/\b(primo|secondo|terzo|quarto|quinto|sesto)\b/g, ' ')
+    .replace(/\b(anno|edizione|misura|bando|avviso|contributi)\b/g, ' ')
+    .replace(/\b\d{4}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (key.includes('fusese') || key.includes('fund for self employment')) key = 'fusese';
   return key;
-}
-
-// === PATCH: Filtro bandi scaduti ===
-function filterExpiredFromEligible(candidates: Candidate[], now = new Date()): Candidate[] {
-  return candidates.filter((candidate) => {
-    const deadline = candidate.result.deadlineAt;
-    if (!deadline) return true;
-
-    const deadlineDate = new Date(deadline);
-    if (Number.isNaN(deadlineDate.getTime())) return true;
-
-    // Tolleranza di 1 giorno per fusi orari
-    const deadlineWithTolerance = new Date(deadlineDate.getTime() + 24 * 60 * 60 * 1000);
-    return now.getTime() <= deadlineWithTolerance.getTime();
-  });
-}
-
-// === PATCH: Ranking migliorato con penalità/bonus ===
-function computeEnhancedScore(candidate: Candidate, context: ChatStrictContext): number {
-  let score = candidate.result.score;
-
-  // Bonus per match regione esplicito
-  if (context.region) {
-    const resultText = normalizeForMatch(
-      [candidate.result.title, candidate.result.authorityName, ...(candidate.result.requirements ?? [])].filter(Boolean).join(' ')
-    );
-    if (resultText.includes(normalizeForMatch(context.region))) {
-      score += 0.1;
-    }
-  }
-
-  // Bonus per match settore esplicito
-  if (context.sector) {
-    const resultText = normalizeForMatch(
-      [candidate.result.title, ...(candidate.result.requirements ?? [])].filter(Boolean).join(' ')
-    );
-    if (resultText.includes(normalizeForMatch(context.sector))) {
-      score += 0.08;
-    }
-  }
-
-  // Penalità per hardStatus unknown
-  if (candidate.result.hardStatus === 'unknown') {
-    score -= 0.05;
-  }
-
-  // Bonus per authority trusted
-  const authorityBoost = classifyAuthorityPriority(candidate.result.authorityName).boost;
-  score += authorityBoost;
-
-  // Penalità per scadenza molto vicina (< 7 giorni)
-  if (candidate.result.deadlineAt) {
-    const deadline = new Date(candidate.result.deadlineAt);
-    const now = new Date();
-    const daysLeft = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-    if (daysLeft > 0 && daysLeft < 7) {
-      score -= 0.03;
-    }
-  }
-
-  return Math.max(0, Math.min(1, score));
 }
 
 function mergeEconomicOffer(

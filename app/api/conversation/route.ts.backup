@@ -472,7 +472,7 @@ async function generateAssistantTextWithOpenAI(args: {
       }
     ],
     temperature: 0.45,
-    max_output_tokens: qaMode ? 250 : 180  // === PATCH: più token per risposte QA ===
+    max_output_tokens: 180
   } as const;
 
   try {
@@ -706,24 +706,17 @@ function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
   // Se è generico, serve almeno un segnale di precisione (budget o settore o ateco)
   const genericWithPrecisionOk = Boolean(goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority));
 
-  // === PATCH: Regione + settore/ateco bastano per scansione (anche senza fundingGoal) ===
-  const hasTopicSubstitute = Boolean(
-    (profile.sector && profile.sector.trim().length >= 3) ||
-    (profile.ateco && /\d{2}/.test(profile.ateco))
-  );
-  const regionPlusTopicOk = Boolean(hasRegion && hasContext && hasTopicSubstitute && !goalText);
-
-  if (!corePilarsOk && !genericWithPrecisionOk && !regionPlusTopicOk) {
+  if (!corePilarsOk && !genericWithPrecisionOk) {
       if (!missingSignals.includes('topicPrecision')) {
           missingSignals.push('topicPrecision');
       }
   }
 
-  const isReady = corePilarsOk || regionPlusTopicOk || missingSignals.length === 0;
+  const isReady = corePilarsOk || missingSignals.length === 0;
 
   return {
     ready: isReady,
-    missingSignals: (corePilarsOk || regionPlusTopicOk) ? [] : missingSignals,
+    missingSignals: corePilarsOk ? [] : missingSignals,
     southYouthStartupPriority,
   };
 }
@@ -881,34 +874,21 @@ function parseBusinessExistsFromMessage(message: string): boolean | null {
   const n = normalizeForMatch(message);
   if (!n) return null;
 
-  // === PATCH: Pattern espansi per "non ha impresa" ===
   if (
-    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla|da avviare|vorrei creare|voglio creare|sto per aprire|non ho ancora aperto|non ho ancora avviato|idea di business|idea imprenditoriale|progetto imprenditoriale)/.test(
+    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla|da aprire|da costituire|nuova attivita|non e ancora attiva|non l ho ancora aperta)/.test(
       n
     )
   ) {
     return false;
   }
 
-  // === PATCH: Pattern espansi per "ha impresa" ===
   if (
-    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva|fatturiamo|abbiamo fatturato|anni di attivita|da anni|dal \d{4})/.test(
+    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva|operativa|gia operativa|attiva|gia attiva|ho gia l azienda|azienda attiva|impresa attiva|siamo gia operativi|societa attiva)/.test(
       n,
     )
   ) {
     return true;
   }
-
-  // === PATCH: Short messages (≤5 parole) come risposte dirette ===
-  const words = n.split(' ').filter(w => w.length >= 2);
-  if (words.length <= 5) {
-    if (/(^no$|^no |non ancora|non ho|non esiste|da aprire|da avviare|da creare|nuova)/.test(n)) return false;
-    if (/(^si$|^si |^sì|attiva|operativa|esistente|avviata|aperta|ho gia|già|confermo)/.test(n)) return true;
-  }
-
-  // === PATCH: Strong signals anche in messaggi lunghi ===
-  if (/(la mia azienda|la mia impresa|la mia attivita|nella mia azienda|gestisco|amministro|dirigo)/.test(n)) return true;
-  if (/(non esiste ancora|devo ancora|ancora da|prima di aprire|prima di avviare|prima di costituire)/.test(n)) return false;
 
   return null;
 }
@@ -1206,7 +1186,7 @@ function extractFundingGoalFromMessage(message: string): string | null {
   if (raw.length < 8) return null;
   const n = normalizeForMatch(raw);
 
-  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta|capannone|energia|brevett|ricerca|sviluppo|export|internazionalizz|formaz|albergo|hotel|turistic)\b/.test(n);
+  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
 
   const humanConsultantOnly =
     /\b(consulen|persona|umano|ricontatt|richiam|farmi chiam|telefon|parlare con)\b/.test(n) &&
@@ -1222,20 +1202,10 @@ function extractFundingGoalFromMessage(message: string): string | null {
     if (idx >= 0) {
         const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
         const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
-        // === PATCH: rimuovi placeholder regionali dal goal ===
-        const withoutRegion = cleaned.replace(/\b(in |a |ad |nella |nel |nella regione |nella provincia di )(abruzzo|basilicata|calabria|campania|emilia.romagna|friuli.venezia giulia|lazio|liguria|lombardia|marche|molise|piemonte|puglia|sardegna|sicilia|toscana|trentino.alto adige|umbria|valle d.aosta|veneto)\b/gi, '').trim();
-        const finalCleaned = withoutRegion.length > 5 ? withoutRegion : cleaned;
-        if (finalCleaned.length > 5) return finalCleaned.length > 180 ? `${finalCleaned.slice(0, 180).trim()}…` : finalCleaned;
+        if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
     }
   }
   
-  // === PATCH: intent patterns senza trigger espliciti ===
-  const intentMatch = n.match(/(aprire|avviare|creare|lanciare|sviluppare|ampliare|ammodernare|ristrutturare|digitalizzare|acquistare)\s+(.{5,})/);
-  if (intentMatch?.[2]) {
-    const cleaned = intentMatch[2].replace(/^(un |una |il |la |lo |l |i |le |gli |dei |delle )/g, '').trim();
-    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
-  }
-
   // if no trigger but starts with "bando per " or "contributi per "
   const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
   if (prefixMatch) {
@@ -1478,40 +1448,12 @@ function answerFinanceQuestion(message: string): string | null {
   const n = normalizeForMatch(message);
   if (!n) return null;
 
-  // === PATCH: Risposte grounded più complete su misure specifiche ===
   if (n.includes('resto al sud')) {
-    if (n.includes('requisit') || n.includes('chi puo')) return 'Resto al Sud 2.0: under 56, residenti (o che trasferiranno residenza) in Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia. Impresa da costituire o costituita da max 36 mesi. Mix fondo perduto + finanziamento agevolato.';
-    if (n.includes('importo') || n.includes('quanto') || n.includes('massimo')) return 'Resto al Sud 2.0: da 10.000 a 200.000 euro. Fino al 100% delle spese ammissibili, con mix di fondo perduto (fino al 65%) e prestito agevolato.';
-    if (n.includes('scaden') || n.includes('quando')) return 'Resto al Sud 2.0 è a sportello: nessuna scadenza fissa, fondi fino a esaurimento. Conviene presentare domanda il prima possibile.';
-    return 'Resto al Sud 2.0 sostiene nuove attività nel Mezzogiorno con mix fondo perduto e finanziamento agevolato fino a 200.000 euro. Se mi dai regione e obiettivo, verifico la compatibilità.';
-  }
-
-  if (n.includes('sabatini') || n.includes('nuova sabatini')) {
-    return 'Nuova Sabatini: contributo in conto interessi per acquisto macchinari, attrezzature, software da parte di PMI già attive. Investimento da 20.000 a 4.000.000 euro. Agevolazione pari al 2,75% annuo (3,575% per investimenti 4.0 e green).';
-  }
-
-  if (n.includes('smart start') || n.includes('smart&start')) {
-    return 'Smart&Start Italia: finanziamento agevolato (tasso zero) fino a 1,5 milioni per startup innovative. Copertura fino all\'80% delle spese, con quota a fondo perduto del 20% per imprese del Mezzogiorno o a prevalenza femminile/giovanile.';
-  }
-
-  if (n.includes('on tasso zero') || n.includes('nuove imprese a tasso zero') || n.includes('oltre nuove imprese')) {
-    return 'ON – Oltre Nuove Imprese a Tasso Zero: per imprese giovanili (< 35 anni) o femminili, costituite da max 60 mesi o da costituire. Progetti fino a 3 milioni con mix contributo (fino al 20%) e finanziamento agevolato a tasso zero.';
-  }
-
-  if (n.includes('fondo impresa femminile') || (n.includes('impresa femminile') && n.includes('fondo'))) {
-    return 'Fondo Impresa Femminile: contributi a fondo perduto per avvio e sviluppo di imprese femminili. Importi da 5.000 a 400.000 euro a seconda della linea (avvio/sviluppo). Copertura fino all\'80% per nuove imprese.';
-  }
-
-  if (n.includes('transizione 5') || n.includes('credito imposta 5') || n.includes('piano transizione')) {
-    return 'Transizione 5.0: credito d\'imposta dal 35% al 45% per investimenti in beni strumentali nuovi (materiali e immateriali) integrati con riduzione dei consumi energetici. Imprese già attive di qualsiasi dimensione.';
+    return 'Resto al Sud sostiene avvio o sviluppo di nuove attività nelle aree ammesse, con mix tra contributo e finanziamento. Se mi dai regione e obiettivo, ti dico subito se sei compatibile.';
   }
 
   if (n.includes('autoimpiego') || (n.includes('centro') && n.includes('nord'))) {
-    return 'Autoimpiego Centro-Nord: per under 35 disoccupati/inoccupati nelle regioni del Centro-Nord. Mix fondo perduto e finanziamento agevolato fino a 200.000 euro per avviare nuove attività.';
-  }
-
-  if (n.includes('zes') || n.includes('zona economica speciale')) {
-    return 'ZES Unica Mezzogiorno: credito d\'imposta per investimenti in beni strumentali nelle regioni del Sud. Per imprese già attive o nuovi stabilimenti. L\'agevolazione varia in base alla dimensione dell\'impresa e alla regione.';
+    return 'Autoimpiego Centro-Nord è una misura per nuove attività nelle regioni ammesse. Conta la coerenza tra territorio, profilo del proponente e spese previste.';
   }
 
   if (n.includes('differenza') && (n.includes('fondo perduto') || n.includes('contributo'))) {
@@ -1523,7 +1465,7 @@ function answerFinanceQuestion(message: string): string | null {
   }
 
   if (n.includes('de minimis')) {
-    return 'Il de minimis è un tetto di 300.000 euro di aiuti pubblici su 3 esercizi fiscali (dal 2024). Per capire la tua capienza devo sapere se hai già ricevuto contributi negli ultimi 3 anni.';
+    return 'Il de minimis è un tetto di aiuti pubblici su 3 esercizi. Per capire la tua capienza devo sapere se hai già ricevuto contributi negli ultimi 3 anni.';
   }
 
   if (n.includes('a sportello')) {
@@ -1532,18 +1474,6 @@ function answerFinanceQuestion(message: string): string | null {
 
   if (n.includes('spese ammiss')) {
     return 'Le spese ammissibili dipendono dal bando: in genere investimenti, digitalizzazione, consulenze e talvolta personale/opere. Se mi dai il nome del bando, ti rispondo in modo preciso.';
-  }
-
-  if (n.includes('cumulabil') || (n.includes('piu bandi') && n.includes('insieme'))) {
-    return 'Si possono cumulare più agevolazioni sullo stesso investimento, purché la somma non superi il 100% delle spese e si rispettino i limiti de minimis e le regole di ogni singolo bando.';
-  }
-
-  if ((n.includes('stranier') || n.includes('non comunitari') || n.includes('extracomunitari')) && (n.includes('bando') || n.includes('contribut') || n.includes('agevol'))) {
-    return 'I cittadini stranieri possono accedere a molte agevolazioni se hanno residenza in Italia e permesso di soggiorno valido. Alcune misure richiedono residenza da almeno un anno. Dipende dal bando specifico.';
-  }
-
-  if (n.includes('cooperativ') && (n.includes('bando') || n.includes('contribut') || n.includes('agevol'))) {
-    return 'Le cooperative possono accedere a molte misure nazionali (Nuova Sabatini, Fondo Garanzia PMI) e regionali. Alcune misure come Resto al Sud richiedono specifiche forme societarie.';
   }
 
   const hasFinanceKeywords =

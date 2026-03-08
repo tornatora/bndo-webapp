@@ -1,0 +1,111 @@
+{
+  "passed": 16,
+  "failed": 0,
+  "skipped": 1,
+  "details": [
+    {
+      "category": "scanner-retrieval",
+      "id": "software-sicilia",
+      "status": "PASS",
+      "msg": "Relevant results: 7 (sector match)"
+    },
+    {
+      "category": "scanner-retrieval",
+      "id": "agricoltura-sicilia",
+      "status": "PASS",
+      "msg": "Relevant results: 1 (sector match)"
+    },
+    {
+      "category": "scanner-retrieval",
+      "id": "turismo-campania",
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
+    },
+    {
+      "category": "scanner-retrieval",
+      "id": "pmi-digitale-lombardia",
+      "status": "PASS",
+      "msg": "Found Nuova Sabatini, Sabatini"
+    },
+    {
+      "category": "scanner-retrieval",
+      "id": "startup-sud",
+      "status": "PASS",
+      "msg": "Found Resto al Sud, FUSESE"
+    },
+    {
+      "category": "scanner-retrieval",
+      "id": "agroalimentare",
+      "status": "PASS",
+      "msg": "Results: 3 (sector match weak, dataset dependent)"
+    },
+    {
+      "category": "regional",
+      "id": "calabria-no-lombardia-only",
+      "status": "PASS",
+      "msg": "No wrong-region leakage in top results"
+    },
+    {
+      "category": "regional",
+      "id": "national-for-any-region",
+      "status": "PASS",
+      "msg": "National/regional mix: 1 results"
+    },
+    {
+      "category": "freshness",
+      "id": "no-closed-in-eligible",
+      "status": "PASS",
+      "msg": "No closed calls in eligible results"
+    },
+    {
+      "category": "direct-qa",
+      "id": "formazione-resto-al-sud",
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
+    },
+    {
+      "category": "direct-qa",
+      "id": "srl-accedere",
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
+    },
+    {
+      "category": "direct-qa",
+      "id": "impresa-gia-attiva",
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
+    },
+    {
+      "category": "direct-qa",
+      "id": "bando-copre-software",
+      "status": "PASS",
+      "msg": "Reply provided"
+    },
+    {
+      "category": "direct-qa",
+      "id": "contributi-agricoltura-sicilia",
+      "status": "PASS",
+      "msg": "Reply provided"
+    },
+    {
+      "category": "conversation",
+      "id": "no-repeat-aprire",
+      "status": "PASS",
+      "msg": "No redundant aprire question"
+    },
+    {
+      "category": "conversation",
+      "id": "extraction-first-msg",
+      "status": "PASS",
+      "msg": "Extracted region and sector/business from first message"
+    },
+    {
+      "category": "conversation",
+      "id": "no-onboarding-measure-q",
+      "status": "PASS",
+      "msg": "No onboarding on direct measure question"
+    }
+  ],
+  "errors": [],
+  "timestamp": "2026-03-07T23:53:29.480Z"
+}

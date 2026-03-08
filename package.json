@@ -24,7 +24,9 @@
     "test:phase-b": "npx tsx scripts/test-phase-b-unit.ts",
     "test:phase-c": "npx tsx scripts/test-phase-c-unit.ts",
     "stress:safe": "node scripts/stress-safe.mjs",
-    "eval:production-readiness": "node scripts/production-readiness-eval.mjs"
+    "eval:production-readiness": "node scripts/production-readiness-eval.mjs",
+    "eval:mass-unit": "npx tsx scripts/eval-mass-unit.ts",
+    "eval:all": "npm run eval:mass-unit && npm run test:phase-a && npm run test:phase-b && npm run test:phase-c"
   },
   "dependencies": {
     "@supabase/ssr": "0.5.2",

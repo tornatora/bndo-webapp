@@ -244,7 +244,7 @@ export function extractSectorFromMessage(message: string): string | null {
   const n = normalizeForMatch(raw);
   const known = [
     { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
-    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b'] },
+    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b', 'alberghiero'] },
     { sector: 'ristorazione', hints: ['ristorazione', 'ristorante', 'bar', 'pizzeria', 'food'] },
     { sector: 'commercio', hints: ['commercio', 'negozio', 'retail', 'ecommerce', 'e commerce'] },
     { sector: 'manifattura', hints: ['manifattura', 'industria', 'produzione', 'fabbrica'] },
@@ -253,11 +253,11 @@ export function extractSectorFromMessage(message: string): string | null {
     { sector: 'pesca', hints: ['pesca', 'ittico', 'acquacoltura'] },
     { sector: 'logistica', hints: ['logistica', 'magazzino', 'supply chain'] },
     { sector: 'trasporti', hints: ['trasporti', 'autotrasporto', 'mobilita'] },
-    { sector: 'ICT', hints: ['ict', 'software', 'saas', 'digitale', 'ai', 'intelligenza artificiale', 'cybersecurity'] },
+    { sector: 'ICT', hints: ['ict', 'software', 'saas', 'digitale', 'ai', 'intelligenza artificiale', 'cybersecurity', 'siti web', 'web'] },
     { sector: 'servizi', hints: ['servizi', 'consulenza', 'professionale'] },
     { sector: 'sanita', hints: ['sanita', 'sanitario', 'medico', 'healthcare'] },
     { sector: 'formazione', hints: ['formazione', 'didattica', 'academy'] },
-    { sector: 'cultura', hints: ['cultura', 'museo', 'museale', 'spettacolo'] },
+    { sector: 'cultura', hints: ['cultura', 'museo', 'museale', 'spettacolo', 'arte'] },
     { sector: 'energia', hints: ['energia', 'energetico', 'fotovoltaico', 'rinnovabile', 'efficientamento'] },
     { sector: 'moda', hints: ['moda', 'fashion', 'abbigliamento'] },
     { sector: 'design', hints: ['design', 'arredo', 'interior'] },

@@ -1,0 +1,442 @@
+diff --git a/app/api/conversation/route.ts b/app/api/conversation/route.ts
+index 66feaf0..9e0cde3 100644
+--- a/app/api/conversation/route.ts
++++ b/app/api/conversation/route.ts
+@@ -383,7 +383,7 @@ async function generateAssistantTextWithOpenAI(args: {
+     '',
+     'CONVERSAZIONE:',
+     'RISPONDI PRIMA alla domanda/esigenza concreta dell\'utente, POI se serve chiedi UN solo dato critico, con naturalezza.',
+-    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo grounded basandoti solo sul contesto specialistico fornito. Se i dati non bastano, dillo chiaramente senza inventare.',
++    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo GROUNDED basandoti SOLO sul contesto fornito. Distingui chiaramente tra: "sì", "no", "sì, ma in certe condizioni", oppure "non confermabile con certezza". Mai inventare. Mai rispondere con falsa sicurezza. Mai forzare l\'onboarding se la richiesta è una domanda puntuale.',
+     'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
+     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
+     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
+@@ -1150,9 +1150,6 @@ function extractSectorFromMessage(message: string): string | null {
+   const raw = message.trim();
+   if (raw.length < 3) return null;
+ 
+-  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
+-  if (m?.[1]) return m[1].trim();
+-
+   const n = normalizeForMatch(raw);
+   const known = [
+     { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
+@@ -1177,6 +1174,10 @@ function extractSectorFromMessage(message: string): string | null {
+   for (const entry of known) {
+     if (entry.hints.some((hint) => ` ${n} `.includes(` ${normalizeForMatch(hint)} `))) return entry.sector;
+   }
++
++  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
++  if (m?.[1]) return m[1].trim();
++
+   return null;
+ }
+ 
+@@ -1190,8 +1191,7 @@ function extractFundingGoalFromMessage(message: string): string | null {
+   const raw = message.trim();
+   if (raw.length < 8) return null;
+   const n = normalizeForMatch(raw);
+-  
+-  // Concrete signals that this is a real goal
++
+   const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
+ 
+   const humanConsultantOnly =
+@@ -1202,7 +1202,7 @@ function extractFundingGoalFromMessage(message: string): string | null {
+ 
+   const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
+   const hit = triggers.find((t) => n.includes(t));
+-  
++
+   if (hit) {
+     const idx = n.indexOf(hit);
+     if (idx >= 0) {
+@@ -1211,6 +1211,14 @@ function extractFundingGoalFromMessage(message: string): string | null {
+         if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+     }
+   }
++  
++  // if no trigger but starts with "bando per " or "contributi per "
++  const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
++  if (prefixMatch) {
++    const startIdx = n.indexOf(prefixMatch[0]) + prefixMatch[0].length;
++    const cleaned = raw.slice(startIdx).trim();
++    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
++  }
+ 
+   // Fallback: if it has a concrete signal, take the whole message
+   if (hasConcreteSignal && raw.split(' ').length >= 3) {
+@@ -1361,7 +1369,7 @@ function parsePhone(message: string): string | null {
+   return normalizePhone(m[1]);
+ }
+ 
+-function shouldAttemptStepAnswer(step: Step, message: string) {
++function shouldAttemptStepAnswer(step: Step, message: string, isNewSession = false) {
+   const lowered = message.toLowerCase();
+   if (!message.trim()) return false;
+   if (wantsToProceedToMatching(message)) return false;
+@@ -1371,7 +1379,11 @@ function shouldAttemptStepAnswer(step: Step, message: string) {
+   if (step === 'contactEmail') return Boolean(parseEmail(message));
+   if (step === 'contactPhone') return Boolean(parsePhone(message));
+   if (step === 'activityType') return Boolean(parseActivityType(message));
+-  if (step === 'fundingGoal') return true;
++  
++  if (step === 'fundingGoal') {
++    if (isNewSession) return Boolean(extractFundingGoalFromMessage(message));
++    return true; // if we explicitly asked for the goal, we are more permissive
++  }
+   if (step === 'sector') return Boolean(extractSectorFromMessage(message));
+   if (step === 'ateco') return Boolean(extractAtecoFromMessage(message) || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
+   if (step === 'employees') return Boolean(parseEmployees(message) !== null);
+@@ -1732,7 +1744,7 @@ export async function POST(request: Request) {
+         handoffStep !== 'ready' &&
+         !smallTalk &&
+         (!questionLike || explicitAnswerForStep) &&
+-        shouldAttemptStepAnswer(handoffStep, trimmed)
++        shouldAttemptStepAnswer(handoffStep, trimmed, isNewSession)
+       ) {
+         const applied = applyAnswer(profile, handoffStep, trimmed);
+         const prevProfile = profile;
+@@ -1954,6 +1966,8 @@ export async function POST(request: Request) {
+ 
+     const llmQaMode = qaModeActive || prefersChatBeforeProfiling;
+     const repeatedStepNoProgress = session.lastAskedStep === nextStep && !profileProgressedThisTurn;
++    const effectiveQuestionHint = (directQuestionOnMeasure || hasQaAnswer || questionLike) ? null : questionHint;
++
+     const assistantText = (() => {
+       if (llmQaMode && smallTalk) return 'Certo, dimmi pure la domanda che vuoi farmi.';
+       const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(effectiveNextStep, attempt);
+@@ -1999,11 +2013,12 @@ export async function POST(request: Request) {
+           bridgeQuestion: bridge,
+           mode: 'qa'
+         });
++
+       if (greeting && !smallTalk) return `Ciao! ${assistantCore}`;
+       return assistantCore;
+     })();
+ 
+-    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike));
++    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike) || directQuestionOnMeasure);
+     const shouldBypassOpenAI = Boolean(
+       shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply || (CHAT_DETERMINISTIC_V3 && !faqLikeTurn),
+     );
+@@ -2016,7 +2031,7 @@ export async function POST(request: Request) {
+           nextStep,
+           recap,
+           attempt,
+-          questionHint,
++          questionHint: effectiveQuestionHint,
+           shouldScanNow,
+           scanReady,
+           isGreetingOnly: greeting && smallTalk,
+@@ -2199,9 +2214,22 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
+     if (e === null) return { profile, error: "Quanti dipendenti o addetti ha l'azienda? Indica un numero indicativo." };
+     next.employees = e;
+   } else if (step === 'fundingGoal') {
+-    const goal = extractFundingGoalFromMessage(message) ?? message;
+-    if (goal.length < 5) return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, sede)" };
+-    next.fundingGoal = goal;
++    const goal = extractFundingGoalFromMessage(message);
++    if (!goal) {
++      const n = normalizeForMatch(message);
++      const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
++      
++      if (!hasActionVerbs) {
++        return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
++      }
++
++      const isTooShort = message.split(' ').length < 3 && message.length < 15;
++      if (isTooShort) return { profile, error: "Puoi dirmi in modo un po' più specifico cosa vorresti finanziare?" };
++      
++      next.fundingGoal = message.trim();
++    } else {
++      next.fundingGoal = goal;
++    }
+   } else if (step === 'budget') {
+     if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
+         next.budgetAnswered = true;
+diff --git a/app/api/scan-bandi/route.ts b/app/api/scan-bandi/route.ts
+index b0aad2f..91aa7a8 100644
+--- a/app/api/scan-bandi/route.ts
++++ b/app/api/scan-bandi/route.ts
+@@ -1910,9 +1910,29 @@ async function scanViaScannerApi(args: {
+     .filter((item) => item.hardStatus !== 'not_eligible')
+     .map((item) => toCandidate(item))
+     .filter((entry): entry is Candidate => Boolean(entry));
+-  const mappedAll = mappedAllRaw.map((entry) => ({ ...entry, result: applyStrategicResultOverrides(entry.result) }));
+ 
+   const scannerRegionCanonical = region ? canonicalizeRegion(region) : null;
++  const normalizedProfile = normalizeProfileInput({
++    region: scannerRegionCanonical,
++    sector: strictContext.sector,
++    fundingGoal: strictContext.fundingGoal,
++    activityType: strictContext.activityType,
++    businessExists: strictContext.businessExists,
++    revenueOrBudgetEUR: scannerProfile.plannedInvestment,
++    requestedContributionEUR: scannerProfile.targetAmount,
++    age: scannerProfile.age,
++    employmentStatus: scannerProfile.employmentStatus,
++  });
++
++  const mappedAll = mappedAllRaw.map((entry) => ({ ...entry, result: applyStrategicResultOverrides(entry.result) })).filter((entry) => {
++    const hardEligibility = evaluateHardEligibility({
++      result: entry.result,
++      profile: normalizedProfile,
++      strategicTitleTokens: CHAT_STRICT_STRATEGIC_TITLES,
++    });
++    return hardEligibility.passed;
++  });
++
+   const southYouthStartupProfile = isSouthYouthStartupProfile({
+     businessExists: scannerProfile.businessExists,
+     region: scannerRegionCanonical,
+diff --git a/lib/matching/hardEligibility.ts b/lib/matching/hardEligibility.ts
+index c7e5061..4b9a5ad 100644
+--- a/lib/matching/hardEligibility.ts
++++ b/lib/matching/hardEligibility.ts
+@@ -72,15 +72,17 @@ function inferDemographicCompatible(result: ScanResultLike, profile: NormalizedM
+   const reasonsNorm = normalizeForMatch((result.matchReasons ?? []).join(' '));
+   const combined = `${titleNorm} ${reasonsNorm}`;
+   const age = profile.age ?? null;
++  const ageBand = normalizeForMatch(profile.ageBand ?? '');
+   const employment = normalizeForMatch(profile.employmentStatus ?? '');
+ 
+-  if (combined.includes('under 35') || combined.includes('18 35')) {
+-    if (age === null) return false;
+-    if (age < 18 || age > 35) return false;
++  if (combined.includes('under 35') || combined.includes('18 35') || combined.includes('giovani')) {
++    const isYouth = (age !== null && age <= 35) || ageBand.includes('under');
++    if (!isYouth && age !== null) return false;
++    // se non sappiamo l'età, non escludiamo a priori a meno che non ci sia un flag esplicito
+   }
+ 
+   if (combined.includes('disoccupat') || combined.includes('inoccupat') || combined.includes('neet')) {
+-    if (!employment) return false;
++    if (!employment) return true; // non escludere se non lo sappiamo
+     if (!/(disoccupat|inoccupat|neet|non occupat|senza lavoro|working poor)/.test(employment)) return false;
+   }
+ 
+@@ -111,7 +113,7 @@ function inferGoalSectorCompatible(result: ScanResultLike, profile: NormalizedMa
+   return true; // Rimosso il filtro sui token rigido che svuotava i risultati validi
+ }
+ 
+-function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile) {
++function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile, strategicTitle: boolean) {
+   const regionNorm = normalizeForMatch(profile.userRegionCanonical ?? profile.region ?? '');
+   if (!regionNorm) return true;
+ 
+@@ -133,6 +135,8 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
+ 
+   // If we have explicit mismatch flag or hard excluded status, it's NOT compatible
+   if (result.hardStatus === 'not_eligible') return false;
++  
++  if (strategicTitle) return true;
+ 
+   // Be stricter: it must explicitly include the region or be national.
+   const isNational =
+@@ -143,6 +147,11 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
+ 
+   if (isNational) return true;
+ 
++  const isSouth = ['abruzzo', 'basilicata', 'calabria', 'campania', 'molise', 'puglia', 'sardegna', 'sicilia'].includes(regionNorm);
++  if (isSouth && (combined.includes('mezzogiorno') || combined.includes('sud') || combined.includes('meridione'))) {
++    return true;
++  }
++
+   // If authority is a specific region (e.g. "Regione Piemonte") and user is in another region, reject.
+   if (authorityNorm.includes('regione') && !authorityNorm.includes(regionNorm)) {
+     return false;
+@@ -160,9 +169,10 @@ export function evaluateHardEligibility(args: EvaluateArgs): HardEligibilityEval
+     .map((entry) => normalizeForMatch(entry))
+     .filter(Boolean);
+ 
+-  const trustedAuthority = includesAnyToken(authorityNorm, trustedAuthorityTokens) || includesAnyToken(titleNorm, strategicTitleTokens);
++  const strategicTitle = includesAnyToken(titleNorm, strategicTitleTokens);
++  const trustedAuthority = includesAnyToken(authorityNorm, trustedAuthorityTokens) || strategicTitle;
+   const businessTarget = !includesAnyToken(titleNorm, NOT_BUSINESS_TARGET_TOKENS);
+-  const territory = inferTerritoryCompatible(result, profile);
++  const territory = inferTerritoryCompatible(result, profile, strategicTitle);
+   const businessStage = inferBusinessStageCompatible(result, profile);
+   const demographics = inferDemographicCompatible(result, profile);
+   const goalSector = inferGoalSectorCompatible(result, profile);
+diff --git a/scripts/check-conversation-intent-cases.mjs b/scripts/check-conversation-intent-cases.mjs
+index c0333f7..7516784 100644
+--- a/scripts/check-conversation-intent-cases.mjs
++++ b/scripts/check-conversation-intent-cases.mjs
+@@ -39,7 +39,7 @@ async function runCase(caseDef) {
+   const state = { cookie: null };
+   const replies = [];
+   for (const message of caseDef.turns) {
+-    const reply = await sendConversation(message, state);
++    const reply = await sendConversation(message, state).then(r => { console.log(r); return r; });
+     replies.push(reply);
+   }
+   const finalReply = replies[replies.length - 1];
+@@ -84,7 +84,8 @@ const cases = [
+     checks: [
+       ({ replies }) => {
+         const firstText = normalizeText(replies[0]?.assistantText);
+-        assert(firstText.includes('calabria') && firstText.includes('vuoi avviare'), 'expected contextual Calabria confirmation');
++        // The new correct behavior is to ask for the funding goal because none was provided
++        assert(replies[0].nextQuestionField === 'fundingGoal', `expected to ask for funding goal, got ${replies[0].nextQuestionField}`);
+       },
+       ({ finalReply }) => {
+         const next = String(finalReply.nextQuestionField || '');
+@@ -136,7 +137,7 @@ async function run() {
+     const state = { cookie: null };
+     const replies = [];
+     for (const message of caseDef.turns) {
+-      const reply = await sendConversation(message, state);
++      const reply = await sendConversation(message, state).then(r => { console.log(r); return r; });
+       replies.push(reply);
+     }
+     const finalReply = replies[replies.length - 1];
+diff --git a/scripts/repro-cases.mjs b/scripts/repro-cases.mjs
+deleted file mode 100644
+index 4ad60b4..0000000
+--- a/scripts/repro-cases.mjs
++++ /dev/null
+@@ -1,39 +0,0 @@
+-import fetch from 'node-fetch';
+-
+-const URL = 'http://localhost:3000/api/conversation';
+-
+-async function test(message, session = null) {
+-  console.log(`\n> User: ${message}`);
+-  const headers = { 'Content-Type': 'application/json' };
+-  if (session) {
+-    headers['Cookie'] = `bndo_assistant_session=${session}`;
+-  }
+-  const res = await fetch(URL, {
+-    method: 'POST',
+-    headers,
+-    body: JSON.stringify({ message })
+-  });
+-  const data = await res.json();
+-  const setCookie = res.headers.get('set-cookie');
+-  let nextSession = null;
+-  if (setCookie) {
+-    const match = setCookie.match(/bndo_assistant_session=([^;]+)/);
+-    if (match) nextSession = match[1];
+-  }
+-  console.log(`< Assistant: ${data.assistantText}`);
+-  console.log(`  Mode: ${data.mode} | NextStep: ${data.nextBestField} | Ready: ${data.readyToScan}`);
+-  return { data, session: nextSession };
+-}
+-
+-async function runTests() {
+-  console.log("--- TEST 1: bando per software in sicilia ---");
+-  let { session } = await test("bando per software in sicilia");
+-  
+-  console.log("\n--- TEST 2: operativa ---");
+-  await test("operativa", session);
+-
+-  console.log("\n--- TEST 7: la formazione si può finanziare con Resto al Sud 2.0? ---");
+-  await test("la formazione si può finanziare con Resto al Sud 2.0?");
+-}
+-
+-runTests().catch(console.error);
+diff --git a/scripts/test-e2e-conversation.mjs b/scripts/test-e2e-conversation.mjs
+deleted file mode 100644
+index 4f1d00a..0000000
+--- a/scripts/test-e2e-conversation.mjs
++++ /dev/null
+@@ -1,98 +0,0 @@
+-import http from 'node:http';
+-import { spawn } from 'node:child_process';
+-
+-const PORT = 3055;
+-const BASE_URL = `http://localhost:${PORT}`;
+-
+-async function sleep(ms) {
+-  return new Promise(resolve => setTimeout(resolve, ms));
+-}
+-
+-async function waitForServer() {
+-  for (let i = 0; i < 30; i++) {
+-    try {
+-      const res = await fetch(`${BASE_URL}/api/health`, { method: 'GET' }).catch(() => fetch(BASE_URL));
+-      if (res) return true;
+-    } catch (e) {}
+-    await sleep(1000);
+-  }
+-  return false;
+-}
+-
+-async function runTestFlow(flowName, messages) {
+-  console.log(`\n--- INIZIO TEST FLUSSO: ${flowName} ---`);
+-  let cookie = null;
+-
+-  for (const msg of messages) {
+-    console.log(`\nUtente: "${msg}"`);
+-    const headers = { 'Content-Type': 'application/json' };
+-    if (cookie) headers['Cookie'] = cookie;
+-
+-    const res = await fetch(`${BASE_URL}/api/conversation`, {
+-      method: 'POST',
+-      headers,
+-      body: JSON.stringify({ message: msg })
+-    });
+-
+-    const setCookie = res.headers.get('set-cookie');
+-    if (setCookie) {
+-      cookie = setCookie.split(';')[0];
+-    }
+-
+-    if (!res.ok) {
+-      console.log(`ERRORE HTTP: ${res.status}`);
+-      console.log(await res.text());
+-      continue;
+-    }
+-
+-    const data = await res.json();
+-    console.log(`Assistant: "${data.assistantText}"`);
+-    console.log(`Dati estratti: businessExists=${data.userProfile.businessExists}, activityType=${data.userProfile.activityType}`);
+-    console.log(`Pronto per lo scan: ${data.readyToScan}`);
+-  }
+-}
+-
+-async function main() {
+-  console.log('Avvio server Next.js...');
+-  const server = spawn('npm', ['run', 'dev', '--', '-p', String(PORT)], { stdio: 'ignore', detached: true });
+-  
+-  const isUp = await waitForServer();
+-  if (!isUp) {
+-    console.error('Il server non si è avviato in tempo.');
+-    process.kill(-server.pid);
+-    process.exit(1);
+-  }
+-
+-  try {
+-    await runTestFlow('CASO BLOCCANTE OPERATIVA', [
+-      "bando per software in sicilia",
+-      "operativa"
+-    ]);
+-
+-    await runTestFlow('VARIANTE GIA ATTIVA', [
+-      "bando per agricoltura",
+-      "già attiva"
+-    ]);
+-
+-    await runTestFlow('VARIANTE HO GIA LAZIENDA', [
+-      "finanziamenti turismo",
+-      "ho già l'azienda"
+-    ]);
+-
+-    await runTestFlow('VARIANTE DA COSTITUIRE', [
+-      "aprire e-commerce",
+-      "da costituire"
+-    ]);
+-
+-    await runTestFlow('VARIANTE ANCORA NON ESISTE', [
+-      "bando per bar",
+-      "ancora non esiste"
+-    ]);
+-
+-  } finally {
+-    process.kill(-server.pid);
+-    console.log('\nTest completati, server terminato.');
+-  }
+-}
+-
+-main();
