@@ -104,11 +104,13 @@ const cases = [
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             userProfile: {
+              location: profile.location ? { region: profile.location.region, municipality: profile.location.municipality } : null,
               region: profile.location?.region,
               businessExists: profile.businessExists,
               ageBand: profile.ageBand,
               employmentStatus: profile.employmentStatus,
               fundingGoal: profile.fundingGoal,
+              sector: profile.sector,
               contributionPreference: profile.contributionPreference,
             },
             mode: 'fast',
@@ -126,6 +128,28 @@ const cases = [
         const idxOn = lower.findIndex((t) => t.includes('oltre nuove imprese') || t.includes('nuove imprese a tasso zero'));
         assert(idxResto >= 0 && idxFusese >= 0 && idxOn >= 0, `missing strategic cluster: ${titles.join(' | ')}`);
         assert(idxResto <= idxFusese && idxFusese <= idxOn, `unexpected order: ${titles.join(' | ')}`);
+      },
+    ],
+  },
+  {
+    id: 'no-double-activity-type-question',
+    turns: ['Ciao', 'Devo aprire un agriturismo in Calabria'],
+    checks: [
+      ({ finalReply }) => {
+        assert(finalReply.userProfile?.businessExists === false, 'expected businessExists=false for "devo aprire"');
+      },
+      ({ finalReply }) => {
+        const sector = normalizeText(finalReply.userProfile?.sector ?? '');
+        assert(sector.includes('agricolt') || sector.includes('turism'), 'expected sector agriculture/tourism from agriturismo');
+      },
+      ({ replies }) => {
+        const activityQuestion = 'attivita e gia operativa o devi ancora costituirla';
+        let count = 0;
+        for (const r of replies) {
+          const t = normalizeText(r?.assistantText ?? '');
+          if (t.includes('attivita') && (t.includes('gia operativa') || t.includes('devi ancora costituirla'))) count++;
+        }
+        assert(count <= 1, 'should not ask "aprire o gia attiva" more than once');
       },
     ],
   },

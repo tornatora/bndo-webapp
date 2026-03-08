@@ -4393,13 +4393,7 @@ export async function POST(req: Request) {
     const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR);
     const fundingGoalSignalQuery = fundingGoal ? tokenizeKeywords(normalizeForMatch(fundingGoal)).slice(0, 4).join(' ') || null : null;
 
-    const bookingBase = process.env.NEXT_PUBLIC_BOOKING_URL;
-    if (!bookingBase) {
-      return NextResponse.json(
-        { error: 'Missing NEXT_PUBLIC_BOOKING_URL. Impostalo in .env.local (vedi .env.example).' },
-        { status: 500 }
-      );
-    }
+    const bookingBase = process.env.NEXT_PUBLIC_BOOKING_URL?.trim() || '/prenota';
 
     const scannerProfile = buildScannerProfilePayload({
       rawProfile,

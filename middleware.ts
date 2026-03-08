@@ -90,9 +90,16 @@ export async function middleware(request: NextRequest) {
     request
   });
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.next({ request });
+  }
+
+  try {
   const supabase = createServerClient<Database, 'public'>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -130,6 +137,9 @@ export async function middleware(request: NextRequest) {
     }
 
     return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/dashboard'));
+  }
+  } catch {
+    return NextResponse.next({ request });
   }
 
   return response;
