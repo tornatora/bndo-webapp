@@ -1244,8 +1244,8 @@ function extractFundingGoalFromMessage(message: string): string | null {
     if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
 
-  // Fallback: if it has a concrete signal, take the whole message
-  if (hasConcreteSignal && raw.split(' ').length >= 3) {
+  // Fallback: if it has a concrete signal, take the whole message (even single words like "macchinari")
+  if (hasConcreteSignal) {
       return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
   }
 
@@ -2296,16 +2296,17 @@ function applyAnswer(profile: UserProfile, step: Step, message: string): { profi
     const goal = extractFundingGoalFromMessage(message);
     if (!goal) {
       const n = normalizeForMatch(message);
-      const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
-      
-      if (!hasActionVerbs) {
-        return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
+      // Accept single concrete keywords directly (macchinari, software, etc.)
+      const concreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|fotovolta|capannone|energia|brevett|ricerca|sviluppo|export|internazionalizz|formaz|albergo|hotel|turistic|agricol|agriturism|startup|autoimpiego)\b/.test(n);
+      if (concreteSignal) {
+        next.fundingGoal = message.trim();
+      } else {
+        const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
+        if (!hasActionVerbs) {
+          return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
+        }
+        next.fundingGoal = message.trim();
       }
-
-      const isTooShort = message.split(' ').length < 3 && message.length < 15;
-      if (isTooShort) return { profile, error: "Puoi dirmi in modo un po' più specifico cosa vorresti finanziare?" };
-      
-      next.fundingGoal = message.trim();
     } else {
       next.fundingGoal = goal;
     }
