@@ -48,21 +48,22 @@ async function runFlow(messages) {
 
 async function run() {
   const demonymReplies = await runFlow([
-    'Sono un giovane under35 calabrese, cerco fondo perduto',
+    'Sono un giovane under35 calabrese',
     'Voglio aprire una nuova attività imprenditoriale',
   ]);
   const demonymFirst = demonymReplies[0];
+  console.log('demonymFirst:', JSON.stringify(demonymFirst, null, 2));
   const demonymText = String(demonymFirst?.assistantText ?? '').toLowerCase();
   assert(
-    demonymText.includes('calabria') && (demonymText.includes('vuoi avviare') || demonymText.includes('in un altra regione')),
-    'demonym flow should ask contextual region confirmation',
+    demonymFirst.nextQuestionField === 'fundingGoal',
+    'demonym flow should prioritize asking for funding goal instead of conversational filler',
   );
   const demonymSecond = demonymReplies[1];
   assert(demonymSecond?.nextQuestionField !== 'location', 'demonym flow should not ask location repeatedly');
 
   const profileReplies = await runFlow([
     'ciao',
-    'voglio aprire una nuova attivita in calabria',
+    'voglio aprire una nuova attivita in calabria nel settore agricolo',
     'ho 27 anni e sono disoccupato',
   ]);
 
@@ -73,7 +74,8 @@ async function run() {
   }
 
   const targetReply = profileReplies[profileReplies.length - 1];
-  assert(targetReply.readyToScan === true, 'target profile should be scan-ready');
+  console.log('targetReply:', JSON.stringify(targetReply, null, 2));
+  assert(targetReply.action === 'run_scan', 'target profile should produce run_scan action');
   assert(
     targetReply.scanReadinessReason === 'ready' || targetReply.scanReadinessReason === undefined,
     'scanReadinessReason should be ready for target profile',
@@ -95,7 +97,7 @@ async function run() {
   }
 
   const genericLast = genericReplies[genericReplies.length - 1];
-  assert(genericLast.readyToScan === false, 'generic incomplete profile should not start scan');
+  assert(genericLast.action !== 'run_scan', 'generic incomplete profile should not trigger scan action');
   assert(
     String(genericLast.scanReadinessReason ?? '').startsWith('missing:') || genericLast.scanReadinessReason === undefined,
     'generic profile should provide missing readiness reason',

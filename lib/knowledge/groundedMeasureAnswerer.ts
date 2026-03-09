@@ -1,6 +1,11 @@
 /**
  * Grounded measure answerer: answers direct measure questions using only
- * knowledge and data already present in the repository. No external retrieval as primary.
+ * knowledge and data already present in the repository. Never invents facts.
+ *
+ * Anti-hallucination rules enforced here:
+ * - Never invent percentages, dates, amounts, or eligibility rules not in FINANCE_FAQ.
+ * - If knowledge is insufficient, return not_confirmable with a conservative response.
+ * - Never confirm eligibility without explicit knowledge evidence.
  */
 import { normalizeForMatch } from '@/lib/text/normalize';
 import { FINANCE_FAQ } from '@/lib/knowledge/financeFaq';
@@ -15,7 +20,11 @@ export type GroundedMeasureResult = {
 
 const MEASURE_ALIASES: Array<{ id: string; name: string; aliases: string[] }> = [
   { id: 'resto-al-sud-20', name: 'Resto al Sud 2.0', aliases: ['resto al sud', 'resto al sud 2.0', 'resto al sud 20'] },
-  { id: 'autoimpiego-centro-nord', name: 'Autoimpiego Centro-Nord', aliases: ['autoimpiego centro nord', 'autoimpiego', 'centro nord'] },
+  { id: 'autoimpiego-centro-nord', name: 'Autoimpiego Centro-Nord', aliases: ['autoimpiego centro nord', 'autoimpiego centro-nord', 'autoimpiego centronord'] },
+  { id: 'nuova-sabatini', name: 'Nuova Sabatini', aliases: ['nuova sabatini', 'sabatini', 'legge sabatini'] },
+  { id: 'fusese', name: 'FUSESE', aliases: ['fusese', 'fund for self employment', 'fund self employment', 'self entrepreneurship'] },
+  { id: 'transizione-40', name: 'Transizione 4.0 / 5.0', aliases: ['transizione 4.0', 'transizione 4 0', 'industria 4.0', 'industria 4 0', 'transizione 5.0', 'transizione 5 0', 'piano transizione'] },
+  { id: 'fondo-garanzia', name: 'Fondo di Garanzia PMI', aliases: ['fondo garanzia', 'fondo di garanzia', 'garanzia pmi', 'mediocredito centrale'] },
 ];
 
 function detectMeasureId(message: string): { id: string; name: string } | null {
@@ -28,119 +37,150 @@ function detectMeasureId(message: string): { id: string; name: string } | null {
 
 function isMeasureQuestion(message: string): boolean {
   const n = normalizeForMatch(message);
-  if (!n || n.length < 10) return false;
+  if (!n || n.length < 8) return false;
   const hasMeasure = MEASURE_ALIASES.some((m) => m.aliases.some((a) => n.includes(normalizeForMatch(a))));
   if (!hasMeasure) return false;
-  const questionPatterns = [
-    'si puo finanziare', 'si può finanziare', 'posso finanziare', 'copre', 'coprono', 'vale per', 'valgono per',
-    'ammissibil', 'spese ammissibili', 'puo accedere', 'può accedere', 'posso accedere', 'srl puo', 'srl può',
-    'impresa gia attiva', 'impresa già attiva', 'gia attiva', 'già attiva', 'formazione', 'software', 'macchinari',
-    'beneficiari', 'requisiti', 'puo partecipare', 'può partecipare', 'rientra', 'inclus'
-  ];
-  return questionPatterns.some((p) => n.includes(p)) || n.includes('?');
+  // È una domanda o un'infomation request
+  return (
+    n.includes('?') ||
+    /\b(come funziona|cos e|cosa e|cos\'e|dimmi|spiega|requisiti|ammissibil|posso|si puo|può|chi puo|beneficiari|spese|copertura|quanto|finanzia|copre|accedere|partecipare|come si accede|applicare|candidarsi)\b/.test(n)
+  );
 }
 
-/** In-repo knowledge: expense/beneficiary/business rules per measure (from FINANCE_FAQ and spec). */
-function getMeasureKnowledge(measureId: string): { expenses: string; beneficiary: string; business: string } {
-  const resto = FINANCE_FAQ.find((x) => x.id === 'resto-sud');
-  const autoimpiego = FINANCE_FAQ.find((x) => x.id === 'autoimpiego');
-  if (measureId === 'resto-al-sud-20' && resto) {
-    return {
-      expenses: 'Finanzia investimenti e spese di avvio. La norma privilegia beni strumentali e consulenze; per la formazione specifica va verificato il testo attuativo (possibile sì sotto condizioni).',
-      beneficiary: 'Sostiene attività nelle regioni del Mezzogiorno (Sicilia, Sardegna, Calabria, Puglia, Basilicata, Campania, Molise, Abruzzo) e aree del sisma.',
-      business: 'Misura per avvio di attività (nuova attività).',
-    };
-  }
-  if (measureId === 'autoimpiego-centro-nord' && autoimpiego) {
-    return {
-      expenses: 'Supporta con contributi e finanziamenti; coerenza spese investimenti vs gestione è fondamentale.',
-      beneficiary: 'Avvio di attività nelle regioni Centro e Nord Italia. Supporta giovani e soggetti svantaggiati.',
-      business: 'Misura per avvio di attività (nuova impresa).',
-    };
-  }
-  return { expenses: '', beneficiary: '', business: '' };
+function getFaqById(id: string) {
+  return FINANCE_FAQ.find((x) => x.id === id) ?? null;
 }
 
 function buildPrudentReply(measureName: string): string {
-  return `Per ${measureName} l’ammissibilità dipende da requisiti e spese specifici. Per una risposta precisa sul tuo caso conviene verificare il bando aggiornato o darmi regione, tipo di attività e cosa vorresti finanziare così posso proporti una shortlist coerente.`;
+  return `Per ${measureName} l'ammissibilità dipende da requisiti e spese specifici definiti nel bando. Per una risposta precisa sul tuo caso conviene verificare il bando ufficiale aggiornato. Posso aiutarti a trovare la misura giusta se mi dici regione, tipo di attività e cosa vorresti finanziare.`;
 }
 
 /**
  * Answer a direct measure question using only in-repo knowledge.
+ * Returns null if the message is not a measure question.
  * Returns not_confirmable when knowledge is insufficient; never invents facts.
  */
 export function answerGroundedMeasureQuestion(message: string): GroundedMeasureResult | null {
-  const n = normalizeForMatch(message);
   if (!isMeasureQuestion(message)) return null;
 
   const measure = detectMeasureId(message);
   if (!measure) return null;
 
-  const knowledge = getMeasureKnowledge(measure.id);
+  const n = normalizeForMatch(message);
 
-  // Expense-related question
-  if (n.includes('formazione') || n.includes('formare') || n.includes('corso')) {
-    if (measure.id === 'resto-al-sud-20' && knowledge.expenses) {
+  // --- Nuova Sabatini ---
+  if (measure.id === 'nuova-sabatini') {
+    const faq = getFaqById('nuova-sabatini');
+    if (!faq) return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
+
+    if (n.includes('gia attiva') || n.includes('già attiva') || n.includes('impresa attiva') || n.includes('pmi')) {
       return {
         outcome: 'yes_under_conditions',
-        text: `${measure.name} finanzia investimenti e spese di avvio; la norma privilegia beni strumentali e consulenze. Per la formazione in particolare è possibile in alcuni casi (voucher servizi specialistici o testo attuativo). Per confermare se un corso specifico è coperto serve verificare il bando aggiornato.`,
+        text: `La Nuova Sabatini è destinata alle PMI già operative che acquistano beni strumentali nuovi tramite finanziamento bancario. ${faq.answer}`,
         measureId: measure.id,
       };
     }
+    // Domanda generica su Sabatini
     return {
-      outcome: 'not_confirmable',
-      text: buildPrudentReply(measure.name),
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
       measureId: measure.id,
     };
   }
 
-  if (n.includes('software') || n.includes('macchinari') || n.includes('beni strumentali') || n.includes('digitalizz')) {
-    if (knowledge.expenses) {
+  // --- FUSESE ---
+  if (measure.id === 'fusese') {
+    const faq = getFaqById('fusese');
+    if (!faq) return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+    };
+  }
+
+  // --- Transizione 4.0 / 5.0 ---
+  if (measure.id === 'transizione-40') {
+    const faq = getFaqById('credito-imposta-investimenti');
+    if (!faq) return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+    };
+  }
+
+  // --- Fondo di Garanzia PMI ---
+  if (measure.id === 'fondo-garanzia') {
+    const faq = getFaqById('garanzia-pubblica');
+    if (!faq) return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+    };
+  }
+
+  // --- Resto al Sud 2.0 ---
+  if (measure.id === 'resto-al-sud-20') {
+    const faq = getFaqById('resto-sud');
+
+    // Impresa già attiva domanda Resto al Sud
+    if (
+      n.includes('gia attiva') || n.includes('già attiva') ||
+      n.includes('attiva da') || n.includes('operativa') ||
+      (n.includes('impresa') && n.includes('attiva'))
+    ) {
       return {
-        outcome: 'yes',
-        text: `Sì, ${measure.name} prevede il finanziamento di investimenti e in molti casi beni strumentali, software e digitalizzazione. I dettagli sono nel bando aggiornato.`,
+        outcome: 'no',
+        text: `Resto al Sud 2.0 è pensata per l'avvio di nuova attività, non per imprese già operative. Per imprese esistenti nel Mezzogiorno esistono altre misure regionali e nazionali; posso aiutarti a individuarle se mi dici regione e obiettivo.`,
         measureId: measure.id,
       };
     }
+
+    if (n.includes('formazione') || n.includes('formare') || n.includes('corso')) {
+      return {
+        outcome: 'yes_under_conditions',
+        text: `Resto al Sud 2.0 finanzia principalmente beni strumentali, attrezzature e spese di avvio. Per la formazione specifica è possibile in alcuni casi (voucher per servizi specialistici), ma dipende dal testo attuativo aggiornato. Non posso confermare senza verificare il bando vigente.`,
+        measureId: measure.id,
+      };
+    }
+
+    if (faq) {
+      return {
+        outcome: 'yes_under_conditions',
+        text: `${faq.answer} Prima della candidatura, verificare sempre il bando aggiornato sul sito Invitalia.`,
+        measureId: measure.id,
+      };
+    }
+
     return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
   }
 
-  // Beneficiary / legal form
-  if (n.includes('srl') || n.includes('s r l') || n.includes('impresa') || n.includes('pmi') || n.includes('puo accedere') || n.includes('può accedere')) {
-    if (knowledge.beneficiary) {
-      const businessMatch = n.includes('gia attiva') || n.includes('già attiva') || n.includes('attiva');
-      if (businessMatch && measure.id === 'resto-al-sud-20') {
-        return {
-          outcome: 'no',
-          text: `${measure.name} è pensata per l’avvio di nuova attività. Per imprese già operative esistono altre misure; posso aiutarti a individuarle in base a regione e obiettivo.`,
-          measureId: measure.id,
-        };
-      }
+  // --- Autoimpiego Centro-Nord ---
+  if (measure.id === 'autoimpiego-centro-nord') {
+    const faq = getFaqById('autoimpiego');
+
+    if (
+      n.includes('sud') || n.includes('calabria') || n.includes('sicilia') ||
+      n.includes('campania') || n.includes('puglia') || n.includes('basilicata')
+    ) {
       return {
-        outcome: 'yes_under_conditions',
-        text: `${measure.name}: ${knowledge.beneficiary} ${knowledge.business} Per confermare i requisiti sul tuo caso (forma giuridica, regione, tipo attività) serve il bando aggiornato o i tuoi dati per una shortlist.`,
+        outcome: 'no',
+        text: `Autoimpiego Centro-Nord è destinato alle regioni del Centro e Nord Italia. Per le regioni meridionali (Calabria, Sicilia, Campania, Puglia, Basilicata, Sardegna, Molise, Abruzzo) esiste Resto al Sud 2.0 di Invitalia.`,
         measureId: measure.id,
       };
     }
-    return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
-  }
 
-  // Generic measure question: return FAQ-based answer if we have one
-  const faqResto = FINANCE_FAQ.find((x) => x.id === 'resto-sud');
-  const faqAuto = FINANCE_FAQ.find((x) => x.id === 'autoimpiego');
-  if (measure.id === 'resto-al-sud-20' && faqResto) {
-    return {
-      outcome: 'yes_under_conditions',
-      text: `${faqResto.answer} Per sicurezza operativa, prima della candidatura verifico sempre l’aggiornamento ufficiale del bando.`,
-      measureId: measure.id,
-    };
-  }
-  if (measure.id === 'autoimpiego-centro-nord' && faqAuto) {
-    return {
-      outcome: 'yes_under_conditions',
-      text: `${faqAuto.answer} Per confermare sul tuo caso conviene verificare il bando aggiornato.`,
-      measureId: measure.id,
-    };
+    if (faq) {
+      return {
+        outcome: 'yes_under_conditions',
+        text: `${faq.answer} Prima della candidatura verificare il bando aggiornato.`,
+        measureId: measure.id,
+      };
+    }
+
+    return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
   }
 
   return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };

@@ -1,0 +1,30 @@
+{
+  "action": "answer_measure_question",
+  "profile": {
+    "activityType": null,
+    "businessExists": null,
+    "sector": null,
+    "ateco": null,
+    "atecoAnswered": false,
+    "location": {
+      "region": null,
+      "municipality": null
+    },
+    "locationNeedsConfirmation": false,
+    "age": null,
+    "ageBand": null,
+    "employmentStatus": null,
+    "legalForm": null,
+    "employees": null,
+    "revenueOrBudgetEUR": null,
+    "requestedContributionEUR": null,
+    "budgetAnswered": false,
+    "fundingGoal": null,
+    "contributionPreference": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "slotSource": {}
+  },
+  "assistantText": "Certo. Ti rispondo in modo pratico su requisiti, tempistiche e scelta del bando più adatto al tuo caso.",
+  "needsClarification": true
+}

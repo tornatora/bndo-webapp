@@ -168,6 +168,8 @@ export type TurnIntent = {
   measureQuestion: boolean;
 };
 
+import type { ChatAction } from '../ai/ChatDecisionModel';
+
 export function detectTurnIntent(args: {
   message: string;
   sessionQaMode: boolean;
@@ -205,6 +207,14 @@ export function detectTurnIntent(args: {
                   ? 'scan_refine'
                   : 'profiling';
 
+  // Map to the new ChatDecisionModel Action as a deterministic fallback
+  let fallbackAction: ChatAction = 'ask_clarification';
+  if (asksHumanConsultant) fallbackAction = 'handoff_human';
+  else if (smallTalk || greeting) fallbackAction = 'small_talk';
+  else if (measureQuestion || directQuestionOnMeasure) fallbackAction = 'answer_measure_question';
+  else if (qaModeActive || questionLike) fallbackAction = 'answer_general_qa';
+  else if (proceedToMatching) fallbackAction = 'run_scan';
+
   return {
     questionLike,
     smallTalk,
@@ -218,7 +228,8 @@ export function detectTurnIntent(args: {
     eligibilityCheck,
     discovery,
     measureQuestion,
-    modeHint
+    modeHint,
+    fallbackAction
   };
 }
 

@@ -1,0 +1,13 @@
+
+> bndo-bandi-assistant@0.1.0 dev
+> NEXT_DISABLE_WEBPACK_CACHE=1 next dev -p 3300
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3300
+  - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 1852ms
+ ✓ Compiled /api/conversation in 200ms (93 modules)
+ POST /api/conversation 500 in 260ms
+[?25h

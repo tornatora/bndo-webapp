@@ -64,6 +64,14 @@ export type NextBestField = Exclude<Step, 'ready'>;
 
 export type ConversationMode = 'qa' | 'profiling' | 'handoff' | 'scan_ready';
 
+export type ConversationAction =
+  | 'ask_clarification'
+  | 'run_scan'
+  | 'answer_measure_question'
+  | 'answer_general_qa'
+  | 'no_result_explanation'
+  | 'handoff_human';
+
 export type ScanReadinessReason =
   | 'ready'
   | 'missing:fundingGoal'
@@ -78,6 +86,7 @@ export type ConversationResponseMeta = {
   profileCompletenessScore?: number;
   scanReadinessReason?: ScanReadinessReason;
   questionReasonCode?: ScanReadinessReason;
+  action?: ConversationAction;
 };
 
 export type ProfileFieldMemory = {

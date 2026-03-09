@@ -53,11 +53,50 @@ function detectRegionByDemonym(message: string): string | null {
   return null;
 }
 
+/**
+ * Detecting negation patterns: if the user says "non sono in Calabria"
+ * the region should NOT be extracted.
+ */
+function hasRegionNegation(message: string, regionNorm: string): boolean {
+  const norm = normalizeForMatch(message);
+  // Look for negation tokens within ~3 words before the region name
+  const negations = ['non sono in', 'non siamo in', 'non opero in', 'non operiamo in',
+    'non ho sede in', 'non abbiamo sede in', 'non mi trovo in', 'non e in',
+    'non e a', 'fuori da', 'fuori dalla', 'escluso', 'esclusa', 'tranne',
+    'non', // generic: check proximity
+  ];
+  // Simple approach: check if 'non' appears within 4 words of the region token
+  const words = norm.split(/\s+/);
+  const regionIdx = words.findIndex(w => w === regionNorm || regionNorm.startsWith(w));
+  if (regionIdx === -1) return false;
+  
+  // Check for specific negation phrases that involve this region
+  for (const pattern of ['non sono in', 'non siamo in', 'non opero in', 'non operiamo in',
+      'non ho sede in', 'non abbiamo sede in', 'non mi trovo in', 'escluso da',
+      'fuori dalla regione', 'fuori da']) {
+    if (norm.includes(pattern + ' ' + regionNorm) || norm.includes(pattern + ' ' + regionNorm.split(' ')[0])) {
+      return true;
+    }
+  }
+  
+  // Check if 'non' is within 3 words before the region
+  const nonIdx = words.lastIndexOf('non', regionIdx);
+  if (nonIdx !== -1 && regionIdx - nonIdx <= 3) {
+    return true;
+  }
+  
+  return false;
+}
+
 export function detectRegionSignal(message: string): RegionSignal | null {
   const norm = normalizeForMatch(message);
   for (const r of IT_REGIONS) {
     const rn = normalizeForMatch(r);
-    if (` ${norm} `.includes(` ${rn} `)) return { region: r, source: 'explicit' };
+    if (` ${norm} `.includes(` ${rn} `)) {
+      // Check for negation before confirming
+      if (hasRegionNegation(message, rn)) return null;
+      return { region: r, source: 'explicit' };
+    }
   }
   const demonymRegion = detectRegionByDemonym(message);
   if (demonymRegion) return { region: demonymRegion, source: 'demonym' };
@@ -282,7 +321,8 @@ export function extractFundingGoalFromMessage(message: string): string | null {
   if (hit) {
     const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
     const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
-    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+    const isGenericFinancialTerm = /^(bando|bandi|contributo|contributi|fondo perduto|finanziamento|finanziamenti|agevolazione|agevolazioni|incentivo|incentivi|misura|misure)$/i.test(cleaned);
+    if (cleaned.length > 5 && !isGenericFinancialTerm) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
   const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
   if (prefixMatch) {

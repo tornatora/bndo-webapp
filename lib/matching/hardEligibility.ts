@@ -72,15 +72,17 @@ function inferDemographicCompatible(result: ScanResultLike, profile: NormalizedM
   const reasonsNorm = normalizeForMatch((result.matchReasons ?? []).join(' '));
   const combined = `${titleNorm} ${reasonsNorm}`;
   const age = profile.age ?? null;
+  const ageBand = normalizeForMatch(profile.ageBand ?? '');
   const employment = normalizeForMatch(profile.employmentStatus ?? '');
 
-  if (combined.includes('under 35') || combined.includes('18 35')) {
-    if (age === null) return false;
-    if (age < 18 || age > 35) return false;
+  if (combined.includes('under 35') || combined.includes('18 35') || combined.includes('giovani')) {
+    const isYouth = (age !== null && age <= 35) || ageBand.includes('under');
+    if (!isYouth && age !== null) return false;
+    // se non sappiamo l'età, non escludiamo a priori a meno che non ci sia un flag esplicito
   }
 
   if (combined.includes('disoccupat') || combined.includes('inoccupat') || combined.includes('neet')) {
-    if (!employment) return false;
+    if (!employment) return true; // non escludere se non lo sappiamo
     if (!/(disoccupat|inoccupat|neet|non occupat|senza lavoro|working poor)/.test(employment)) return false;
   }
 
@@ -111,7 +113,7 @@ function inferGoalSectorCompatible(result: ScanResultLike, profile: NormalizedMa
   return true; // Rimosso il filtro sui token rigido che svuotava i risultati validi
 }
 
-function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile) {
+function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMatchingProfile, strategicTitle: boolean) {
   const regionNorm = normalizeForMatch(profile.userRegionCanonical ?? profile.region ?? '');
   if (!regionNorm) return true;
 
@@ -133,6 +135,8 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
 
   // If we have explicit mismatch flag or hard excluded status, it's NOT compatible
   if (result.hardStatus === 'not_eligible') return false;
+  
+  if (strategicTitle) return true;
 
   // Be stricter: it must explicitly include the region or be national.
   const isNational =
@@ -142,6 +146,11 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
     combined.includes('tutte le regioni');
 
   if (isNational) return true;
+
+  const isSouth = ['abruzzo', 'basilicata', 'calabria', 'campania', 'molise', 'puglia', 'sardegna', 'sicilia'].includes(regionNorm);
+  if (isSouth && (combined.includes('mezzogiorno') || combined.includes('sud') || combined.includes('meridione'))) {
+    return true;
+  }
 
   // If authority is a specific region (e.g. "Regione Piemonte") and user is in another region, reject.
   if (authorityNorm.includes('regione') && !authorityNorm.includes(regionNorm)) {
@@ -160,9 +169,10 @@ export function evaluateHardEligibility(args: EvaluateArgs): HardEligibilityEval
     .map((entry) => normalizeForMatch(entry))
     .filter(Boolean);
 
-  const trustedAuthority = includesAnyToken(authorityNorm, trustedAuthorityTokens) || includesAnyToken(titleNorm, strategicTitleTokens);
+  const strategicTitle = includesAnyToken(titleNorm, strategicTitleTokens);
+  const trustedAuthority = includesAnyToken(authorityNorm, trustedAuthorityTokens) || strategicTitle;
   const businessTarget = !includesAnyToken(titleNorm, NOT_BUSINESS_TARGET_TOKENS);
-  const territory = inferTerritoryCompatible(result, profile);
+  const territory = inferTerritoryCompatible(result, profile, strategicTitle);
   const businessStage = inferBusinessStageCompatible(result, profile);
   const demographics = inferDemographicCompatible(result, profile);
   const goalSector = inferGoalSectorCompatible(result, profile);

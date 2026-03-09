@@ -1,0 +1,30 @@
+{
+  "action": "small_talk",
+  "profile": {
+    "activityType": null,
+    "businessExists": null,
+    "sector": null,
+    "ateco": null,
+    "atecoAnswered": false,
+    "location": {
+      "region": null,
+      "municipality": null
+    },
+    "locationNeedsConfirmation": false,
+    "age": null,
+    "ageBand": null,
+    "employmentStatus": null,
+    "legalForm": null,
+    "employees": null,
+    "revenueOrBudgetEUR": null,
+    "requestedContributionEUR": null,
+    "budgetAnswered": false,
+    "fundingGoal": null,
+    "contributionPreference": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "slotSource": {}
+  },
+  "assistantText": "Posso individuare per te i bandi e le agevolazioni più adatti a finanziare il progetto o le spese che hai in mente, valutando requisiti, territorio e settore.",
+  "needsClarification": true
+}

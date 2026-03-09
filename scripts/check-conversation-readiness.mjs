@@ -35,10 +35,9 @@ async function sendMessage(message, state) {
 async function run() {
   const demonymState = { cookie: null };
   const demonymFirstReply = await sendMessage('Sono un giovane under35 calabrese, cerco fondo perduto', demonymState);
-  const demonymText = String(demonymFirstReply.assistantText ?? '').toLowerCase();
   assert(
-    demonymText.includes('calabria') && (demonymText.includes('vuoi avviare') || demonymText.includes('altra regione')),
-    'demonym readiness flow should ask contextual location confirmation',
+    demonymFirstReply.nextQuestionField === 'fundingGoal',
+    `demonym readiness flow should ask for fundingGoal, but got: ${demonymFirstReply.nextQuestionField} (Action: ${demonymFirstReply.action}, Intent: ${demonymFirstReply.mode})`,
   );
   const demonymSecondReply = await sendMessage('voglio aprire una nuova attività imprenditoriale', demonymState);
   assert(demonymSecondReply.nextQuestionField !== 'location', 'demonym flow should ask location confirmation only once');
@@ -47,14 +46,14 @@ async function run() {
   await sendMessage('ciao', genericState);
   await sendMessage('voglio un bando', genericState);
   const genericReply = await sendMessage('calabria', genericState);
-  assert(genericReply.readyToScan === false, 'generic profile should not trigger scan immediately');
+  assert(genericReply.action !== 'run_scan', 'generic profile should not trigger scan immediately');
   assert(genericReply.needsClarification !== false, 'generic profile should ask clarification');
 
   const targetState = { cookie: null };
   await sendMessage('voglio aprire una nuova attività imprenditoriale', targetState);
   await sendMessage('calabria', targetState);
   const targetReply = await sendMessage('ho 27 anni e sono disoccupato', targetState);
-  assert(targetReply.readyToScan === true, 'south youth startup profile should trigger scan');
+  assert(targetReply.action === 'run_scan', 'south youth startup profile should trigger scan');
 
   console.log(`PASS conversation-readiness against ${baseUrl}`);
 }

@@ -103,7 +103,7 @@ export function canonicalizeRegion(label: string): string | null {
   return null;
 }
 
-export function normalizeProfileInput(rawProfile: Record<string, unknown>): NormalizedMatchingProfile {
+export function normalizeProfile(rawProfile: Record<string, unknown>): NormalizedMatchingProfile {
   const rawLocation =
     rawProfile.location && typeof rawProfile.location === 'object' && !Array.isArray(rawProfile.location)
       ? (rawProfile.location as Record<string, unknown>)

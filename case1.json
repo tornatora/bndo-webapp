@@ -1,0 +1,32 @@
+{
+  "action": "run_scan",
+  "profile": {
+    "activityType": null,
+    "businessExists": true,
+    "sector": "Ristorazione",
+    "ateco": null,
+    "atecoAnswered": false,
+    "location": {
+      "region": "Sicilia",
+      "municipality": null
+    },
+    "locationNeedsConfirmation": false,
+    "age": null,
+    "ageBand": null,
+    "employmentStatus": null,
+    "legalForm": null,
+    "employees": null,
+    "revenueOrBudgetEUR": null,
+    "requestedContributionEUR": null,
+    "budgetAnswered": false,
+    "fundingGoal": "aprire una seconda sede",
+    "contributionPreference": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "slotSource": {
+      "location": "inferred"
+    }
+  },
+  "assistantText": "Ottimo, ho i dettagli necessari. Ti mostro subito le migliori opportunità che ho individuato per te.",
+  "needsClarification": false
+}

@@ -1,0 +1,32 @@
+{
+  "action": "ask_clarification",
+  "profile": {
+    "activityType": null,
+    "businessExists": true,
+    "sector": "manifatturiero",
+    "ateco": null,
+    "atecoAnswered": false,
+    "location": {
+      "region": "Lombardia",
+      "municipality": null
+    },
+    "locationNeedsConfirmation": false,
+    "age": null,
+    "ageBand": null,
+    "employmentStatus": null,
+    "legalForm": null,
+    "employees": null,
+    "revenueOrBudgetEUR": 300000,
+    "requestedContributionEUR": null,
+    "budgetAnswered": false,
+    "fundingGoal": null,
+    "contributionPreference": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "slotSource": {
+      "location": "inferred"
+    }
+  },
+  "assistantText": "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)",
+  "needsClarification": true
+}

@@ -1,0 +1,32 @@
+{
+  "action": "ask_clarification",
+  "profile": {
+    "activityType": null,
+    "businessExists": false,
+    "sector": "Agricoltura",
+    "ateco": null,
+    "atecoAnswered": false,
+    "location": {
+      "region": "Campania",
+      "municipality": null
+    },
+    "locationNeedsConfirmation": false,
+    "age": null,
+    "ageBand": null,
+    "employmentStatus": null,
+    "legalForm": null,
+    "employees": null,
+    "revenueOrBudgetEUR": null,
+    "requestedContributionEUR": null,
+    "budgetAnswered": false,
+    "fundingGoal": "attivita agricola in campania",
+    "contributionPreference": null,
+    "contactEmail": null,
+    "contactPhone": null,
+    "slotSource": {
+      "location": "inferred"
+    }
+  },
+  "assistantText": "Ho gli elementi necessari. Individuo subito le opportunità migliori per te.",
+  "needsClarification": false
+}

@@ -74,6 +74,15 @@ type ConversationResponse = {
     | 'contactEmail'
     | 'contactPhone'
     | null;
+  action?:
+    | 'ask_clarification'
+    | 'run_scan'
+    | 'refine_after_scan'
+    | 'answer_measure_question'
+    | 'answer_general_qa'
+    | 'no_result_explanation'
+    | 'handoff_human'
+    | 'small_talk';
   assistantConfidence?: number;
   needsClarification?: boolean;
   profileCompletenessScore?: number;
@@ -736,17 +745,22 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
 
       setProfile(json.userProfile);
       setStep(json.step);
-      if (!isEchoLikeReply(trimmed, json.assistantText ?? '')) {
+      if (!isEchoLikeReply(trimmed, json.assistantText ?? '') && json.assistantText) {
         setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: json.assistantText }]);
       }
 
-      if (json.readyToScan) {
+      // Respect the strict decision model
+      if (json.action === 'run_scan' || json.action === 'refine_after_scan') {
         const profileHash = buildScanProfileHash(json.userProfile);
         const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
         const shouldRunFirstScan = lastRenderedScanHashRef.current === null && hasProfileDelta;
         const refineAnswerInformative = isInformativeRefineAnswer(trimmed);
         const shouldRunRefineScan = awaitingRefineAnswerRef.current && hasProfileDelta && refineAnswerInformative;
-        if ((shouldRunFirstScan || shouldRunRefineScan) && !scanInFlightRef.current) {
+        
+        if (
+          (shouldRunFirstScan || shouldRunRefineScan || json.readyToScan) &&
+          !scanInFlightRef.current
+        ) {
           await runScan(json.userProfile, json.step, profileHash, interactionVersion);
         }
       }

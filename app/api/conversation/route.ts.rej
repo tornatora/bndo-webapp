@@ -1,0 +1,153 @@
+@@ -373,7 +373,7 @@
+     '',
+     'CONVERSAZIONE:',
+     'RISPONDI PRIMA alla domanda/esigenza concreta dell\'utente, POI se serve chiedi UN solo dato critico, con naturalezza.',
+-    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo grounded basandoti solo sul contesto specialistico fornito. Se i dati non bastano, dillo chiaramente senza inventare.',
++    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo GROUNDED basandoti SOLO sul contesto fornito. Distingui chiaramente tra: "sì", "no", "sì, ma in certe condizioni", oppure "non confermabile con certezza". Mai inventare. Mai rispondere con falsa sicurezza. Mai forzare l\'onboarding se la richiesta è una domanda puntuale.',
+     'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
+     'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
+     "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
+@@ -1140,9 +1140,6 @@
+   const raw = message.trim();
+   if (raw.length < 3) return null;
+ 
+-  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
+-  if (m?.[1]) return m[1].trim();
+-
+   const n = normalizeForMatch(raw);
+   const known = [
+     { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
+@@ -1167,6 +1164,10 @@
+   for (const entry of known) {
+     if (entry.hints.some((hint) => ` ${n} `.includes(` ${normalizeForMatch(hint)} `))) return entry.sector;
+   }
++
++  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
++  if (m?.[1]) return m[1].trim();
++
+   return null;
+ }
+ 
+@@ -1180,8 +1181,7 @@
+   const raw = message.trim();
+   if (raw.length < 8) return null;
+   const n = normalizeForMatch(raw);
+-  
+-  // Concrete signals that this is a real goal
++
+   const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
+ 
+   const humanConsultantOnly =
+@@ -1192,7 +1192,7 @@
+ 
+   const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
+   const hit = triggers.find((t) => n.includes(t));
+-  
++
+   if (hit) {
+     const idx = n.indexOf(hit);
+     if (idx >= 0) {
+@@ -1201,6 +1201,14 @@
+         if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+     }
+   }
++  
++  // if no trigger but starts with "bando per " or "contributi per "
++  const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
++  if (prefixMatch) {
++    const startIdx = n.indexOf(prefixMatch[0]) + prefixMatch[0].length;
++    const cleaned = raw.slice(startIdx).trim();
++    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
++  }
+ 
+   // Fallback: if it has a concrete signal, take the whole message
+   if (hasConcreteSignal && raw.split(' ').length >= 3) {
+@@ -1351,7 +1359,7 @@
+   return normalizePhone(m[1]);
+ }
+ 
+-function shouldAttemptStepAnswer(step: Step, message: string) {
++function shouldAttemptStepAnswer(step: Step, message: string, isNewSession = false) {
+   const lowered = message.toLowerCase();
+   if (!message.trim()) return false;
+   if (wantsToProceedToMatching(message)) return false;
+@@ -1361,7 +1369,11 @@
+   if (step === 'contactEmail') return Boolean(parseEmail(message));
+   if (step === 'contactPhone') return Boolean(parsePhone(message));
+   if (step === 'activityType') return Boolean(parseActivityType(message));
+-  if (step === 'fundingGoal') return true;
++  
++  if (step === 'fundingGoal') {
++    if (isNewSession) return Boolean(extractFundingGoalFromMessage(message));
++    return true; // if we explicitly asked for the goal, we are more permissive
++  }
+   if (step === 'sector') return Boolean(extractSectorFromMessage(message));
+   if (step === 'ateco') return Boolean(extractAtecoFromMessage(message) || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
+   if (step === 'employees') return Boolean(parseEmployees(message) !== null);
+@@ -1722,7 +1734,7 @@
+         handoffStep !== 'ready' &&
+         !smallTalk &&
+         (!questionLike || explicitAnswerForStep) &&
+-        shouldAttemptStepAnswer(handoffStep, trimmed)
++        shouldAttemptStepAnswer(handoffStep, trimmed, isNewSession)
+       ) {
+         const applied = applyAnswer(profile, handoffStep, trimmed);
+         const prevProfile = profile;
+@@ -1944,6 +1956,8 @@
+ 
+     const llmQaMode = qaModeActive || prefersChatBeforeProfiling;
+     const repeatedStepNoProgress = session.lastAskedStep === nextStep && !profileProgressedThisTurn;
++    const effectiveQuestionHint = (directQuestionOnMeasure || hasQaAnswer || questionLike) ? null : questionHint;
++
+     const assistantText = (() => {
+       if (llmQaMode && smallTalk) return 'Certo, dimmi pure la domanda che vuoi farmi.';
+       const bridge = shouldScanNow || llmQaMode || repeatedStepNoProgress ? null : naturalBridgeQuestion(effectiveNextStep, attempt);
+@@ -1989,11 +2003,12 @@
+           bridgeQuestion: bridge,
+           mode: 'qa'
+         });
++
+       if (greeting && !smallTalk) return `Ciao! ${assistantCore}`;
+       return assistantCore;
+     })();
+ 
+-    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike));
++    const faqLikeTurn = Boolean(qa || metaQa || (llmQaMode && questionLike) || directQuestionOnMeasure);
+     const shouldBypassOpenAI = Boolean(
+       shouldScanNow || !AI_CHAT_V2_ENABLED || measureUpdateReply || (CHAT_DETERMINISTIC_V3 && !faqLikeTurn),
+     );
+@@ -2006,7 +2021,7 @@
+           nextStep,
+           recap,
+           attempt,
+-          questionHint,
++          questionHint: effectiveQuestionHint,
+           shouldScanNow,
+           scanReady,
+           isGreetingOnly: greeting && smallTalk,
+@@ -2189,9 +2204,22 @@
+     if (e === null) return { profile, error: "Quanti dipendenti o addetti ha l'azienda? Indica un numero indicativo." };
+     next.employees = e;
+   } else if (step === 'fundingGoal') {
+-    const goal = extractFundingGoalFromMessage(message) ?? message;
+-    if (goal.length < 5) return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, sede)" };
+-    next.fundingGoal = goal;
++    const goal = extractFundingGoalFromMessage(message);
++    if (!goal) {
++      const n = normalizeForMatch(message);
++      const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
++      
++      if (!hasActionVerbs) {
++        return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
++      }
++
++      const isTooShort = message.split(' ').length < 3 && message.length < 15;
++      if (isTooShort) return { profile, error: "Puoi dirmi in modo un po' più specifico cosa vorresti finanziare?" };
++      
++      next.fundingGoal = message.trim();
++    } else {
++      next.fundingGoal = goal;
++    }
+   } else if (step === 'budget') {
+     if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
+         next.budgetAnswered = true;

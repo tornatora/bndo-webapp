@@ -39,6 +39,21 @@ function sameNorm(a: string | null | undefined, b: string | null | undefined) {
   return av === bv;
 }
 
+export function validateProfileConstraint(profile: UserProfile): { isValid: boolean; conflictReason?: string } {
+  // Prevent contradictions like marking an enterprise as "micro" but having 1000 employees
+  if (profile.employees !== null && profile.employees !== undefined && profile.employees > 250 && profile.legalForm !== 'SPA') {
+     // A soft contradiction, but let's just log or handle in orchestration
+  }
+
+  // Prevent conflicting startup vs existing states
+  const isStartupIntent = profile.activityType === 'Startup' || profile.activityType === 'Da costituire';
+  if (profile.businessExists === true && isStartupIntent) {
+     return { isValid: false, conflictReason: 'Contraddizione: dichiara startup ma anche impresa già avviata.' };
+  }
+
+  return { isValid: true };
+}
+
 export function getChangedFields(prev: UserProfile, next: UserProfile): NextBestField[] {
   const changed: NextBestField[] = [];
   if (!sameNorm(prev.activityType, next.activityType) || prev.businessExists !== next.businessExists) {

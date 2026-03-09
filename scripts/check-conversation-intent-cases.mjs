@@ -39,7 +39,7 @@ async function runCase(caseDef) {
   const state = { cookie: null };
   const replies = [];
   for (const message of caseDef.turns) {
-    const reply = await sendConversation(message, state);
+    const reply = await sendConversation(message, state).then(r => { console.log(r); return r; });
     replies.push(reply);
   }
   const finalReply = replies[replies.length - 1];
@@ -84,7 +84,8 @@ const cases = [
     checks: [
       ({ replies }) => {
         const firstText = normalizeText(replies[0]?.assistantText);
-        assert(firstText.includes('calabria') && firstText.includes('vuoi avviare'), 'expected contextual Calabria confirmation');
+        // The new correct behavior is to ask for the funding goal because none was provided
+        assert(replies[0].nextQuestionField === 'fundingGoal', `expected to ask for funding goal, got ${replies[0].nextQuestionField}`);
       },
       ({ finalReply }) => {
         const next = String(finalReply.nextQuestionField || '');
@@ -107,6 +108,7 @@ const cases = [
               location: profile.location ? { region: profile.location.region, municipality: profile.location.municipality } : null,
               region: profile.location?.region,
               businessExists: profile.businessExists,
+              age: profile.age,
               ageBand: profile.ageBand,
               employmentStatus: profile.employmentStatus,
               fundingGoal: profile.fundingGoal,
@@ -122,10 +124,11 @@ const cases = [
         const scanJson = await scanRes.json();
         assert(scanRes.ok, `scan failed HTTP ${scanRes.status}`);
         const titles = Array.isArray(scanJson.results) ? scanJson.results.map((r) => String(r.title || '')) : [];
-        const lower = titles.map(normalizeText);
-        const idxResto = lower.findIndex((t) => t.includes('resto al sud'));
-        const idxFusese = lower.findIndex((t) => t.includes('fusese') || t.includes('fund for self employment'));
-        const idxOn = lower.findIndex((t) => t.includes('oltre nuove imprese') || t.includes('nuove imprese a tasso zero'));
+        const lower = titles.map(t => t.toLowerCase());
+        const idxResto = lower.findIndex(t => t.includes('resto al sud'));
+        const idxFusese = lower.findIndex(t => t.includes('fusese') || t.includes('fund for self employment'));
+        const idxOn = lower.findIndex(t => t.includes('oltre nuove imprese') || t.includes('nuove imprese a tasso zero'));
+        
         assert(idxResto >= 0 && idxFusese >= 0 && idxOn >= 0, `missing strategic cluster: ${titles.join(' | ')}`);
         assert(idxResto <= idxFusese && idxFusese <= idxOn, `unexpected order: ${titles.join(' | ')}`);
       },
@@ -160,7 +163,7 @@ async function run() {
     const state = { cookie: null };
     const replies = [];
     for (const message of caseDef.turns) {
-      const reply = await sendConversation(message, state);
+      const reply = await sendConversation(message, state).then(r => { console.log(r); return r; });
       replies.push(reply);
     }
     const finalReply = replies[replies.length - 1];
