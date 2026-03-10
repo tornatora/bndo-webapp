@@ -434,6 +434,21 @@ async function generateAssistantTextWithOpenAI(args: {
                           ? 'numero di telefono'
                           : 'nessuno';
 
+    // Build explicit list of already-known fields so the AI never re-asks them
+    const knownFields: string[] = [];
+    if (profile.location?.region) knownFields.push(`regione=${profile.location.region}`);
+    if (profile.businessExists === true) knownFields.push('impresa_attiva=sì');
+    if (profile.businessExists === false) knownFields.push('impresa_da_costituire=sì');
+    if (profile.activityType) knownFields.push(`tipo_attività=${profile.activityType}`);
+    if (profile.fundingGoal) knownFields.push(`obiettivo=${profile.fundingGoal}`);
+    if (profile.sector) knownFields.push(`settore=${profile.sector}`);
+    if (profile.contributionPreference) knownFields.push(`preferenza_contributo=${profile.contributionPreference}`);
+    if (profile.requestedContributionEUR) knownFields.push(`budget=${profile.requestedContributionEUR}`);
+    if (profile.employees) knownFields.push(`dipendenti=${profile.employees}`);
+    if (profile.age) knownFields.push(`età=${profile.age}`);
+    if (profile.ageBand) knownFields.push(`fascia_età=${profile.ageBand}`);
+    if (profile.ateco) knownFields.push(`ateco=${profile.ateco}`);
+
     const user = [
     `Messaggio utente: ${JSON.stringify(userMessage)}`,
     `Greeting-only: ${isGreetingOnly ? 'si' : 'no'}`,
@@ -447,6 +462,7 @@ async function generateAssistantTextWithOpenAI(args: {
     '',
     `Profilo attuale (JSON): ${JSON.stringify(profile)}`,
     profileSummary ? `Profilo sintetico: ${profileSummary}` : null,
+    knownFields.length > 0 ? `CAMPI GIÀ NOTI (NON ri-chiedere MAI): ${knownFields.join(', ')}` : null,
     `Step corrente: ${session.step}`,
     `Prossimo step consigliato: ${nextStep} (manca: ${missingHint})`,
     `Tentativo su questo step: ${attempt}`,

@@ -629,12 +629,14 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     startOverlayProgressLoop();
     timeoutId = window.setTimeout(() => {
       if (activeScanTokenRef.current !== scanToken) return;
+      // Non mostrare messaggi brutti di timeout — lasciamo l'animazione andare.
+      // Se dopo 25 secondi non ha risposto, interrompiamo in silenzio.
       timedOut = true;
       stopOverlayProgressLoop();
       setIsScanning(false);
       scanInFlightRef.current = false;
       awaitingRefineAnswerRef.current = true;
-      setScanOverlayProgress((prev) => Math.max(prev, 92));
+      setScanOverlayProgress(100);
       setMessages((prev) => [
         ...prev,
         {
@@ -642,11 +644,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
           role: 'assistant',
           kind: 'text',
           body:
-            "Per evitare attese lunghe, fammi un ultimo dettaglio (settore o importo indicativo) e rilancio subito la ricerca precisa.",
+            "La ricerca sta richiedendo più tempo del previsto. Sto ancora cercando le opportunità più adatte al tuo profilo.",
           scanToken,
         },
       ]);
-    }, 8000);
+    }, 25000);
 
     const hasSignals = Boolean((nextProfile.fundingGoal?.trim() || nextProfile.sector?.trim()) && nextProfile.location?.region);
     const scanMode = hasSignals ? 'full' : 'fast';
