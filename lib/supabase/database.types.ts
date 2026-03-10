@@ -458,6 +458,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      regional_scraped_grants: {
+        Row: {
+          id: string;
+          source_url: string;
+          authority_name: string;
+          title: string;
+          region: string;
+          status: 'active' | 'closed';
+          doc_json: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          source_url: string;
+          authority_name: string;
+          title: string;
+          region: string;
+          status: 'active' | 'closed';
+          doc_json?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          source_url?: string;
+          authority_name?: string;
+          title?: string;
+          region?: string;
+          status?: 'active' | 'closed';
+          doc_json?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       consultant_threads: {
         Row: {
           id: string;

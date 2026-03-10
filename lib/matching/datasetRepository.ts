@@ -162,6 +162,26 @@ export async function saveActiveDatasetSnapshotToSupabase(args: {
   return snapshot;
 }
 
+export async function loadScrapedRegionalDocs(): Promise<IncentiviDoc[]> {
+  try {
+    const supabase = await getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from('regional_scraped_grants')
+      .select('doc_json')
+      .eq('status', 'active');
+      
+    if (error) {
+      console.warn('[datasetRepository] Non-fatal error loading scraped docs:', error.message);
+      return [];
+    }
+    
+    return (data || []).map(row => row.doc_json as IncentiviDoc);
+  } catch (err) {
+    console.error('[datasetRepository] Failed to load scraped docs:', err);
+    return [];
+  }
+}
+
 export async function loadHybridDatasetDocs(): Promise<{
   docs: IncentiviDoc[];
   source: 'supabase' | 'tmp-cache' | 'bundled-seed';
