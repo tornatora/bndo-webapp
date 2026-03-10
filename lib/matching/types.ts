@@ -60,6 +60,7 @@ export type IncentiviDoc = {
 export type NormalizedMatchingProfile = {
   businessExists: boolean | null;
   region: string | null;
+  investmentRegion?: string | null;
   userRegionCanonical: string | null;
   sector: string | null;
   fundingGoal: string | null;

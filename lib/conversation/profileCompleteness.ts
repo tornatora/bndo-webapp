@@ -72,7 +72,7 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   const missing: string[] = [];
 
   // === PILASTRO 1: Territorio ===
-  const hasRegion = Boolean(profile.location?.region?.trim()) && !profile.locationNeedsConfirmation;
+  const hasRegion = Boolean(profile.location?.region?.trim() || profile.location?.investmentRegion?.trim()) && !profile.locationNeedsConfirmation;
   if (!hasRegion) {
     missing.push(profile.locationNeedsConfirmation ? 'locationConfirmation' : 'location');
   }

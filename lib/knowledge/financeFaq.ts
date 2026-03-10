@@ -55,7 +55,7 @@ export const FINANCE_FAQ: FinanceFaq[] = [
     topic: 'Resto al Sud 2.0',
     keywords: ['resto al sud', 'invitalia sud', 'resto al sud 2.0', 'dl coesione', 'mezzogiorno avvio'],
     answer:
-      "Resto al Sud 2.0 (DL Coesione) sostiene l'avvio di attività nelle regioni del Mezzogiorno (Sicilia, Sardegna, Calabria, Puglia, Basilicata, Campania, Molise, Abruzzo) e aree del sisma. Finanzia investimenti e spese di avvio. Sull'ammissibilità della formazione specifica, la norma privilegia beni strumentali e consulenze; per confermare se un particolare corso è coperto, conviene verificare il testo attuativo aggiornato."
+      "Resto al Sud 2.0 (DL Coesione 2024) è una misura specifica per l'AVVIO di nuove attività (startup, liberi professionisti) da parte di GIOVANI UNDER 35, disoccupati da almeno 6 mesi, inoccupati o lavoratori in condizioni svantaggiate. È attiva nelle regioni del Mezzogiorno (Sicilia, Sardegna, Calabria, Puglia, Basilicata, Campania, Molise, Abruzzo) e aree del sisma (Centro Italia). NON confondere con la precedente misura 'Resto al Sud' che arrivava ai 55 anni. Questa nuova versione è molto più restrittiva sull'età (Under 35). Finanzia investimenti (contributi fino al 75%) e spese di avvio (voucher fino a 50k). Per imprese già attive o soggetti over 35, questa misura NON è applicabile."
   },
   {
     id: 'autoimpiego',

@@ -13,7 +13,7 @@ import { applyTonePolicy } from '@/lib/conversation/tonePolicy';
 import { answerGroundedMeasureQuestion } from '@/lib/knowledge/groundedMeasureAnswerer';
 import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowledge/measureStatus';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
-import { normalizeProfile } from '@/lib/matching/profileNormalizer';
+import { normalizeProfile, canonicalizeRegion } from '@/lib/matching/profileNormalizer';
 import { runTwoPassChat } from '@/lib/ai/conversationOrchestrator';
 import { evaluateScanReadiness, isMinimumProfileReady, isPreScanReady } from '@/lib/conversation/scanReadiness';
 import { evaluateProfileCompleteness } from '@/lib/conversation/profileCompleteness';
@@ -496,7 +496,7 @@ async function generateAssistantTextWithOpenAI(args: {
       }
     ],
     temperature: 0.45,
-    max_output_tokens: 180
+    max_output_tokens: 350
   } as const;
 
   try {
@@ -1063,9 +1063,32 @@ function messageMentionsBudget(message: string) {
   );
 }
 
-function parseRegionAndMunicipality(message: string): { region: string | null; municipality: string | null } {
+function parseRegionAndMunicipality(message: string): { 
+  region: string | null; 
+  municipality: string | null; 
+  investmentRegion?: string | null 
+} {
   const cleaned = message.trim();
   const norm = normalizeForMatch(cleaned);
+  
+  // Advanced detection for "Headquarters in X but investment in Y"
+  const hqKeywords = ['sede', 'uffici', 'operiamo', 'attivi', 'partenza'];
+  const investKeywords = ['investo', 'investiment', 'apro', 'apertura', 'intervento', 'progetto', 'nuova'];
+  
+  if (cleaned.includes('ma') || cleaned.includes('pero') || cleaned.includes('tuttavia') || (hqKeywords.some(k => norm.includes(k)) && investKeywords.some(k => norm.includes(k)))) {
+    // Split attempt
+    const hqMatch = cleaned.match(new RegExp(`(?:${hqKeywords.join('|')})(?:\\s+a|\\s+in)?\\s+([A-Z][a-z]+(?:-[A-Z][a-z]+)?)`, 'i'));
+    const investMatch = cleaned.match(new RegExp(`(?:${investKeywords.join('|')})(?:\\s+a|\\s+in)?\\s+([A-Z][a-z]+(?:-[A-Z][a-z]+)?)`, 'i'));
+    
+    if (hqMatch?.[1] && investMatch?.[1]) {
+      const hqRegion = canonicalizeRegion(hqMatch[1]);
+      const investRegion = canonicalizeRegion(investMatch[1]);
+      if (hqRegion && investRegion && hqRegion !== investRegion) {
+        return { region: hqRegion, municipality: null, investmentRegion: investRegion };
+      }
+    }
+  }
+
   const regionSignal = detectRegionSignal(cleaned);
   const explicitRegionHit =
     IT_REGIONS.find((r) => normalizeForMatch(r) === norm) ??

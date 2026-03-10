@@ -110,7 +110,11 @@ export function normalizeProfile(rawProfile: Record<string, unknown>): Normalize
       : null;
 
   const region = cleanString(rawLocation?.region ?? rawProfile.region, 80);
-  const userRegionCanonical = region ? canonicalizeRegion(region) : null;
+  const investmentRegion = cleanString(rawLocation?.investmentRegion ?? rawProfile.investmentRegion, 80);
+  
+  // Primary region for matching is investmentRegion if present, else headquarters region
+  const effectiveRegionForMatching = investmentRegion || region;
+  const userRegionCanonical = effectiveRegionForMatching ? canonicalizeRegion(effectiveRegionForMatching) : null;
   const sector = cleanString(rawProfile.sector, 120);
   const fundingGoal = cleanString(rawProfile.fundingGoal, 220);
   const ateco = cleanString(rawProfile.ateco, 80);
@@ -147,6 +151,7 @@ export function normalizeProfile(rawProfile: Record<string, unknown>): Normalize
   return {
     businessExists,
     region,
+    investmentRegion,
     userRegionCanonical,
     sector,
     fundingGoal,

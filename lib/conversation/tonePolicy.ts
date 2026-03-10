@@ -65,7 +65,7 @@ export function applyTonePolicy(text: string, style: 'quasi_amichevole' | 'profe
   const maxSentences = style === 'professionale' ? 4 : 2;
   const clipped = ensureMaxSentences(smoothed, maxSentences);
   const dedupedQuestions = keepSingleQuestion(splitSentences(clipped)).join(' ').trim();
-  const compact = clampLength(ensureSingleQuestionMark(dedupedQuestions), style === 'professionale' ? 300 : 190);
+  const compact = clampLength(ensureSingleQuestionMark(dedupedQuestions), style === 'professionale' ? 600 : 450);
   if (style === 'professionale') return compact;
 
   // "Quasi amichevole": warm but concise.

@@ -12,7 +12,7 @@ export type UserProfile = {
   sector: string | null;
   ateco: string | null;
   atecoAnswered: boolean;
-  location: { region: string | null; municipality: string | null };
+  location: { region: string | null; municipality: string | null; investmentRegion?: string | null };
   locationNeedsConfirmation?: boolean;
   age: number | null;
   ageBand?: 'under35' | 'over35' | null;

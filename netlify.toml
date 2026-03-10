@@ -7,3 +7,6 @@
 
 [functions]
   directory = "netlify/functions"
+
+[functions.refresh-bandi]
+  schedule = "0 3 * * *"
