@@ -960,16 +960,57 @@ function evaluateExpenses(profile: NormalizedMatchingProfile, grant: IncentiviDo
 }
 
 /**
- * Evaluate special requirements
+ * Evaluate special requirements (Youth, Female, etc.)
  */
-function evaluateSpecial(_profile: NormalizedMatchingProfile, _grant: IncentiviDoc): DimensionEval {
-  // Reserved for future special requirements evaluation
+function evaluateSpecial(profile: NormalizedMatchingProfile, grant: IncentiviDoc): DimensionEval {
+  const beneficiaries = toStringArray(grant.beneficiaries).map((b) => normalizeForMatch(b));
+  const titleNorm = normalizeForMatch(grant.title || '');
+  const combined = `${titleNorm} ${beneficiaries.join(' ')}`;
+
+  // 1. Youth Check (Under 35)
+  const isYouthBando = combined.includes('giovan') || combined.includes('under 35') || combined.includes('u35');
+  const userIsYouth = profile.age !== null && profile.age <= 35 || profile.ageBand === 'under35';
+
+  if (isYouthBando) {
+      if (userIsYouth) {
+          return {
+              dimension: 'special',
+              compatible: true,
+              score: 100,
+              confidence: 'high',
+              note: 'Bando premiante per la tua fascia d\'età (Giovani/Under 35)',
+          };
+      } else if (profile.age !== null && profile.age > 35) {
+          return {
+              dimension: 'special',
+              compatible: false,
+              score: 0,
+              confidence: 'high',
+              note: 'Bando riservato a soggetti under 35',
+          };
+      }
+  }
+
+  // 2. Female Check (Women)
+  const isFemaleBando = combined.includes('femminil') || combined.includes('donne');
+  const userIsFemale = profile.fundingGoal?.toLowerCase().includes('femminile'); // We infer from goal for now if no gender field
+
+  if (isFemaleBando && userIsFemale) {
+      return {
+          dimension: 'special',
+          compatible: true,
+          score: 100,
+          confidence: 'medium',
+          note: 'Bando premiante per imprenditoria femminile',
+      };
+  }
+
   return {
     dimension: 'special',
     compatible: true,
     score: 50,
     confidence: 'low',
-    note: 'Valutazione requisiti speciali non ancora implementata',
+    note: 'Nessun requisito speciale critico rilevato',
   };
 }
 
@@ -1106,7 +1147,7 @@ function generateWarnings(evals: Map<MatchDimension, DimensionEval>): string[] {
 /**
  * Calculate weighted total score from dimension evaluations
  */
-function calculateTotalScore(evals: Map<MatchDimension, DimensionEval>): number {
+function calculateTotalScore(evals: Map<MatchDimension, DimensionEval>, grant: IncentiviDoc): number {
   let weightedSum = 0;
   let totalWeight = 0;
 
@@ -1117,7 +1158,19 @@ function calculateTotalScore(evals: Map<MatchDimension, DimensionEval>): number 
   }
 
   if (totalWeight === 0) return 0;
-  return Math.round(weightedSum);
+  let score = Math.round(weightedSum);
+
+  // STRATEGIC BOOST: Reward measures with high grant percentage (Fondo Perduto)
+  const coverage = Number(grant.coverageMaxPercent) || 0;
+  if (coverage >= 90) score += 5;
+  if (coverage >= 100) score += 5;
+
+  // STRATEGIC BOOST: Proactively promote "Resto al Sud 2.0" as a gold standard for its target
+  if (grant.id === 'strategic-resto-al-sud-20' && score >= 60) {
+      score += 15; // Ensure it jumps to the top
+  }
+
+  return Math.min(100, score);
 }
 
 /**
@@ -1168,7 +1221,7 @@ export function runUnifiedPipeline(args: {
     const hardExclusion = checkHardExclusions(profile, grant, evals);
 
     // Calculate total score
-    const totalScore = hardExclusion.excluded ? 0 : calculateTotalScore(evals);
+    const totalScore = hardExclusion.excluded ? 0 : calculateTotalScore(evals, grant);
 
     // Generate explanations and warnings
     const whyFit = generateWhyFit(evals);

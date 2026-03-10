@@ -5101,8 +5101,8 @@ export async function POST(req: Request) {
       sector
     });
     const refineQuestionV3 = buildRefineQuestionV3({ missingSignals: [], fallback: refineQuestion ?? null });
-    const resultAwareQuestion = buildResultAwareRefineQuestion(items as unknown as IncentiviDoc[], normalizedProfile);
-    const finalRefineQuestion = resultAwareQuestion || refineQuestionV3 || null;
+    const advice = buildResultAwareRefineQuestion(items as unknown as IncentiviDoc[], normalizedProfile);
+    const finalRefineQuestion = advice.question || refineQuestionV3 || null;
 
     return NextResponse.json({
       phase: mode,
@@ -5122,6 +5122,7 @@ export async function POST(req: Request) {
       nearMisses: [],
       qualityBand,
       refineQuestion: finalRefineQuestion ?? undefined,
+      strategicAdvice: advice.strategicAdvice ?? undefined,
       topPickBandoId,
       bookingUrl,
       diagnostics:

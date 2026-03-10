@@ -115,6 +115,7 @@ type ScanResponse = {
   nearMisses?: BandoResult[];
   qualityBand?: 'high' | 'medium' | 'low';
   refineQuestion?: string;
+  strategicAdvice?: string;
   matchingVersion?: 'v2' | 'v3' | string;
   profilePriorityApplied?: boolean;
   diagnostics?: { rejectedByGate?: Record<string, number>; activeCaseIds?: string[] };
@@ -574,9 +575,18 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       const shouldAskTargetedRefine =
         Boolean(payload.refineQuestion) &&
         (payload.qualityBand === 'low' || payload.results.length === 0 || (payload.nearMisses ?? []).length === 0);
-      const followupText = shouldAskTargetedRefine
-        ? `Questi bandi sono interessanti? Vuoi rispondere ad altre domande così capisco meglio la tua situazione e affino la ricerca?\n\n${payload.refineQuestion}`
-        : 'Questi bandi sono interessanti? Vuoi rispondere ad altre domande così capisco meglio la tua situazione e affino la ricerca?';
+      const genericFollowup = 'Questi bandi sono interessanti? Vuoi rispondere ad altre domande così capisco meglio la tua situazione e affino la ricerca?';
+      
+      let bodyText = '';
+      if (payload.strategicAdvice) {
+        bodyText += `${payload.strategicAdvice}\n\n`;
+      }
+      bodyText += genericFollowup;
+      if (shouldAskTargetedRefine && payload.refineQuestion) {
+        bodyText += `\n\n${payload.refineQuestion}`;
+      }
+
+      const followupText = bodyText;
 
       setMessages((prev) => [
         ...prev,

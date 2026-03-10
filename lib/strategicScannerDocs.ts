@@ -53,7 +53,7 @@ export const STRATEGIC_SCANNER_DOCS = [
       "Nuova misura (DL Coesione 2024) per l'avvio di attività imprenditoriali e libero-professionali. Requisiti rigorosi: età UNDER 35, disoccupati da almeno 6 mesi, inoccupati o working poor. NON confondere con la vecchia misura 'Resto al Sud' (che arrivava a 55 anni). Resto al Sud 2.0 è limitata al Mezzogiorno (Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia) e aree Sisma Centro Italia. Prevede voucher fino a 50k per l'avvio e contributi a fondo perduto fino al 75% per investimenti fino a 200k.",
     authorityName: 'Invitalia',
     openDate: '2024-09-01T00:00:00', // Indicativo avvio operativo
-    closeDate: '2025-12-31T00:00:00',
+    closeDate: '2027-12-31T00:00:00',
     regions: ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia'],
     sectors: ['Turismo', 'Commercio', 'Servizi', 'ICT', 'Digitale', 'Artigianato', 'Cultura', 'Ristorazione', 'Manifattura'],
     beneficiaries: ['Aspiranti imprenditori', 'Libero professionista', 'Startup', 'Nuova impresa', 'Giovani under 35'],
