@@ -1,24 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import Script from 'next/script';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import confetti from 'canvas-confetti';
 import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
 import { getQuizQuestions } from '@/lib/quiz/quiz-map';
 import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
 import './quiz.css';
-
-declare global {
-  interface Window {
-    confetti?: (options: {
-      particleCount: number;
-      angle: number;
-      spread: number;
-      origin: { x: number };
-      colors: string[];
-    }) => void;
-  }
-}
 
 type StepId =
   | 'intro'
@@ -139,14 +127,14 @@ export default function QuizPage() {
       const end = Date.now() + duration;
 
       const burst = () => {
-        window.confetti?.({
+        confetti({
           particleCount: 5,
           angle: 60,
           spread: 55,
           origin: { x: 0 },
           colors: ['#22C55F', '#0B1136', '#FFF']
         });
-        window.confetti?.({
+        confetti({
           particleCount: 5,
           angle: 120,
           spread: 55,
@@ -310,11 +298,6 @@ export default function QuizPage() {
 
   return (
     <main className="quiz-page">
-      <Script
-        src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"
-        strategy="afterInteractive"
-      />
-
       <section className={`container ${step === 'intro' ? 'intro-container' : ''}`}>
         {step !== 'intro' ? (
           <>

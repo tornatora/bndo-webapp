@@ -31,6 +31,7 @@
   "dependencies": {
     "@supabase/ssr": "0.5.2",
     "@supabase/supabase-js": "2.48.1",
+    "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "lucide-react": "^0.473.0",
     "next": "^14.2.18",
@@ -41,6 +42,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^22.10.2",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
