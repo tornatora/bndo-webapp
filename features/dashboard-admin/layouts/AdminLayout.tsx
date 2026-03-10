@@ -26,6 +26,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             </Link>
             <span className="nav-brand-chip">Admin</span>
           </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Link href="/admin" style={{ padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, color: '#0B1136', textDecoration: 'none', background: '#F1F5F9' }}>
+              👥 Clienti
+            </Link>
+            <Link href="/admin/quiz-responses" style={{ padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, color: '#0B1136', textDecoration: 'none', background: '#F1F5F9' }}>
+              🧩 Risposte Quiz
+            </Link>
+          </div>
           <div className="nav-actions">
             <AdminNotificationsBell />
             <span className="nav-user" id="uname">
