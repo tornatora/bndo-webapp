@@ -13,10 +13,12 @@
       "dependencies": [
         "npm:@supabase/ssr@0.5.2",
         "npm:@supabase/supabase-js@2.48.1",
+        "npm:@types/canvas-confetti@^1.9.0",
         "npm:@types/node@^22.10.2",
         "npm:@types/react-dom@^18.2.18",
         "npm:@types/react@^18.2.48",
         "npm:autoprefixer@^10.4.20",
+        "npm:canvas-confetti@^1.9.4",
         "npm:clsx@^2.1.1",
         "npm:eslint-config-next@^14.2.18",
         "npm:eslint@^8.57.1",

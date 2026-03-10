@@ -122,11 +122,26 @@ export default function QuizPage() {
 
     let animationId: number | null = null;
     let cancelled = false;
+    let canvasEl: HTMLCanvasElement | null = null;
 
     const timer = window.setTimeout(async () => {
       const confettiModule = await import('canvas-confetti');
-      const confetti = confettiModule.default;
       if (cancelled) return;
+
+      // Create a dedicated canvas to avoid CSP blob-worker issues
+      canvasEl = document.createElement('canvas');
+      canvasEl.style.position = 'fixed';
+      canvasEl.style.top = '0';
+      canvasEl.style.left = '0';
+      canvasEl.style.width = '100vw';
+      canvasEl.style.height = '100vh';
+      canvasEl.style.pointerEvents = 'none';
+      canvasEl.style.zIndex = '9999';
+      canvasEl.width = window.innerWidth;
+      canvasEl.height = window.innerHeight;
+      document.body.appendChild(canvasEl);
+
+      const confetti = confettiModule.create(canvasEl, { resize: true, useWorker: false });
 
       const duration = 3000;
       const end = Date.now() + duration;
@@ -150,6 +165,13 @@ export default function QuizPage() {
 
         if (Date.now() < end) {
           animationId = window.requestAnimationFrame(burst);
+        } else {
+          // Clean up canvas after animation ends
+          setTimeout(() => {
+            if (canvasEl && canvasEl.parentNode) {
+              canvasEl.parentNode.removeChild(canvasEl);
+            }
+          }, 2000);
         }
       };
 
@@ -161,6 +183,9 @@ export default function QuizPage() {
       window.clearTimeout(timer);
       if (animationId !== null) {
         window.cancelAnimationFrame(animationId);
+      }
+      if (canvasEl && canvasEl.parentNode) {
+        canvasEl.parentNode.removeChild(canvasEl);
       }
     };
   }, [step]);

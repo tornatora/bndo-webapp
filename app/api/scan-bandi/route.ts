@@ -2048,9 +2048,11 @@ function buildRefineQuestion(args: {
   resultsCount: number;
 }) {
   const { region, sector, fundingGoal, ateco, budget, requestedContribution, topScore, resultsCount } = args;
+  // Skip refine when we have decent results
+  if (resultsCount >= 3 && topScore !== null && topScore >= 0.5) return null;
   if (resultsCount > 0 && topScore !== null && topScore >= 0.56) return null;
   if (!region) return 'Per restringere davvero il match, indicami la Regione in cui operi.';
-  if (!fundingGoal || fundingGoal.trim().length < 10) {
+  if (!fundingGoal || fundingGoal.trim().length < 5) {
     return 'Dimmi in modo concreto cosa vuoi finanziare (es. macchinari, sito e-commerce, assunzioni, impianto).';
   }
   if (!sector || sector.trim().length < 3) return 'Indicami anche il settore (es. turismo, manifattura, ICT) per aumentare la precisione.';
@@ -2058,7 +2060,7 @@ function buildRefineQuestion(args: {
   if (budget === null && requestedContribution === null) {
     return 'Indicami investimento totale e contributo desiderato (anche stima) per filtrare solo bandi realistici.';
   }
-  return 'Posso affinare ancora: confermami tipo contributo preferito e importo target da ottenere.';
+  return null; // Don't ask generic follow-ups if profile is complete enough
 }
 
 function normalizeForMatch(value: string) {
