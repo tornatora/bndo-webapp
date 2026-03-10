@@ -81,7 +81,7 @@ console.log('--- Caso A: Calabria + macchinari + attiva (settore mancante) ---')
   assert(nextIsUseful, `Caso A: nextPriorityField utile (${result.nextPriorityField})`);
   
   // Il sistema non deve lanciare lo scan se manca il settore E il budget
-  // (weak_ready al massimo)
+  // (soft_scan_ready al massimo)
   const readiness = evaluateScanReadiness(profileA);
   console.log(`  scanReady: ${readiness.ready}, level: ${result.level}`);
 }
@@ -101,7 +101,7 @@ console.log('\n--- Caso A2: solo macchinari + Calabria (businessExists null) ---
     `Caso A2: nextPriorityField corretto (${result.nextPriorityField})`);
 }
 
-// ─── CASO B: + "azienda manifatturiera" → pre_scan_ready (manca solo 5° pilastro) ───
+// ─── CASO B: + "azienda manifatturiera" → hard_scan_ready (manca solo 5° pilastro) ───
 console.log('\n--- Caso B: Calabria + macchinari + attiva + manifattura ---');
 {
   const profileB = makeProfile({
@@ -113,19 +113,19 @@ console.log('\n--- Caso B: Calabria + macchinari + attiva + manifattura ---');
   });
   const result = evaluateProfileCompleteness(profileB);
   // Con i 4 pilastri presenti ma senza budget/contributionPreference:
-  // → pre_scan_ready (chiederà "c'è altro da specificare?")
+  // → hard_scan_ready (chiederà "c'è altro da specificare?")
   assert(
-    result.level === 'pre_scan_ready' || result.level === 'strong_ready',
-    `Caso B: almeno pre_scan_ready con tutti i dati (level=${result.level})`
+    result.level === 'hard_scan_ready' || result.level === 'strong_ready',
+    `Caso B: almeno hard_scan_ready con tutti i dati (level=${result.level})`
   );
   
-  // scanReadiness.ready è false (perché non strong_ready), ma preScanReady è true
+  // scanReadiness.ready è false (perché non strong_ready), ma hardScanReady è true
   const readiness = evaluateScanReadiness(profileB);
   assert(
-    readiness.preScanReady === true,
-    `Caso B: preScanReady = true quando abbiamo 4 pilastri (${readiness.preScanReady})`
+    readiness.hardScanReady === true,
+    `Caso B: hardScanReady = true quando abbiamo 4 pilastri (${readiness.hardScanReady})`
   );
-  console.log(`  level=${result.level}, preScanReady=${readiness.preScanReady}, nextPriority=${result.nextPriorityField}`);
+  console.log(`  level=${result.level}, hardScanReady=${readiness.hardScanReady}, nextPriority=${result.nextPriorityField}`);
 }
 
 // ─── CASO C: "Sto aprendo un'attività agricola in Campania" ───────────────────
@@ -149,7 +149,7 @@ console.log('\n--- Caso C: avvio agricolo in Campania ---');
   const result = evaluateProfileCompleteness(profileC);
   console.log(`  level: ${result.level}, missing: [${result.missingSignals.join(', ')}]`);
   // Per nuova attività: serve anche dato fondatore (età/occupazione)
-  // Quindi sarà weak_ready o strong_ready dipende da cosa abbiamo
+  // Quindi sarà soft_scan_ready o strong_ready dipende da cosa abbiamo
 }
 
 // ─── CASO D: "Come funziona la Nuova Sabatini?" → measure question, no scan ──

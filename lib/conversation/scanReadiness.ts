@@ -13,16 +13,14 @@
 import type { UserProfile } from '@/lib/conversation/types';
 import type { ScanMissingSignal } from '@/lib/matching/types';
 import { type ScanReadinessReason } from '@/lib/conversation/types';
-import {
-  evaluateProfileCompleteness,
-  isStrongReady,
-  isPreScanReady,
-  type ProfileCompletenessResult
-} from '@/lib/conversation/profileCompleteness';
-
+import { 
+  evaluateProfileCompleteness, 
+  type ProfileCompletenessResult 
+} from './profileCompleteness';
 export type ScanReadinessResult = {
   ready: boolean;
-  preScanReady: boolean;
+  hardScanReady: boolean;
+  softScanReady: boolean;
   reason: ScanReadinessReason;
   missingSignals: ScanMissingSignal[];
   completeness: ProfileCompletenessResult;
@@ -32,7 +30,7 @@ export type ScanReadinessResult = {
  * Valutazione deterministica completa della scan readiness.
  *
  * ready=true SOLO se il profilo è strong_ready.
- * preScanReady=true se il profilo è pre_scan_ready O strong_ready.
+ * hardScanReady=true se il profilo è hard_scan_ready O strong_ready.
  */
 export function evaluateScanReadiness(profile: UserProfile): ScanReadinessResult {
   const completeness = evaluateProfileCompleteness(profile);
@@ -50,7 +48,8 @@ export function evaluateScanReadiness(profile: UserProfile): ScanReadinessResult
   }
 
   const ready = completeness.level === 'strong_ready';
-  const preScanReady = completeness.level === 'pre_scan_ready' || completeness.level === 'strong_ready';
+  const hardScanReady = completeness.level === 'hard_scan_ready' || completeness.level === 'strong_ready';
+  const softScanReady = completeness.level === 'soft_scan_ready' || hardScanReady;
 
   const reason: ScanReadinessReason = ready
     ? 'ready'
@@ -68,25 +67,11 @@ export function evaluateScanReadiness(profile: UserProfile): ScanReadinessResult
         return 'missing:unknown';
       })();
 
-  return { ready, preScanReady, reason, missingSignals, completeness };
-}
-
-/**
- * Check rapido: il profilo ha i 3 pilastri minimi
- * (usato per fast path / early scan requests)
- * NOTA: non basta per lanciare lo scan – serve strong_ready.
- */
-export function isMinimumProfileReady(profile: UserProfile): boolean {
-  const hasRegion = Boolean(profile.location?.region?.trim());
-  const hasGoal =
-    (Boolean(profile.fundingGoal?.trim()) && profile.fundingGoal!.trim().length >= 5) ||
-    Boolean(profile.sector?.trim());
-  const hasBusinessStatus =
-    profile.businessExists !== null || Boolean(profile.activityType?.trim());
-  return hasRegion && hasGoal && hasBusinessStatus;
+  return { ready, hardScanReady, softScanReady, reason, missingSignals, completeness };
 }
 
 /**
  * Shorthand per lo scanner: profilo abbastanza completo da produrre risultati affidabili.
  */
-export { isStrongReady, isPreScanReady };
+import { isHardScanReady, isStrongReady, isSoftScanReady } from '@/lib/conversation/profileCompleteness';
+export { isHardScanReady, isStrongReady, isSoftScanReady };

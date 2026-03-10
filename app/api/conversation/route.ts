@@ -15,7 +15,12 @@ import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowle
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
 import { normalizeProfile, canonicalizeRegion } from '@/lib/matching/profileNormalizer';
 import { runTwoPassChat } from '@/lib/ai/conversationOrchestrator';
-import { evaluateScanReadiness, isMinimumProfileReady, isPreScanReady } from '@/lib/conversation/scanReadiness';
+import {
+  evaluateScanReadiness,
+  isStrongReady,
+  isHardScanReady,
+  isSoftScanReady
+} from '@/lib/conversation/scanReadiness';
 import { evaluateProfileCompleteness } from '@/lib/conversation/profileCompleteness';
 import type { ChatAction } from '@/lib/ai/ChatDecisionModel';
 import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
@@ -775,8 +780,8 @@ function getNextStep(profile: UserProfile): Step {
   // Se è strong_ready: scan può partire subito (step ready)
   if (completeness.level === 'strong_ready') return 'ready';
 
-  // Se è pre_scan_ready: chiediamo la domanda di conferma
-  if (completeness.level === 'pre_scan_ready') return 'preScanConfirm';
+  // Se è hard_scan_ready: chiediamo la domanda di conferma
+  if (completeness.level === 'hard_scan_ready') return 'preScanConfirm';
 
   // Altrimenti: chiediamo il prossimo campo mancante in ordine di priorità
   const nextField = completeness.nextPriorityField;
@@ -1642,10 +1647,11 @@ export async function POST(request: Request) {
     // Usa il nuovo Profile Completeness Engine V2
     const scanReadiness = evaluateScanReadiness(profile as UserProfile);
     const scanReady = scanReadiness.ready; // strong_ready only
-    const preScanReady = scanReadiness.preScanReady; // pre_scan_ready or strong_ready
-    // CRITICAL: compute scanHash for BOTH strong_ready AND pre_scan_ready
-    // Otherwise scanHash=null when preScanReady but not strongReady, and null!==null is false
-    const scanHash = (scanReady || preScanReady) ? computeScanHash(profile) : null;
+    const hardScanReady = scanReadiness.hardScanReady; // hard_scan_ready or strong_ready
+    const softScanReady = scanReadiness.softScanReady;
+    
+    // CRITICAL: compute scanHash for both hard and soft scans
+    const scanHash = (hardScanReady || softScanReady) ? computeScanHash(profile) : null;
     const lastScanHash = session.lastScanHash ?? null;
 
     // Finer-grained intent flags
@@ -1684,7 +1690,7 @@ export async function POST(request: Request) {
         // Caso A: strong_ready + hash diverso da ultimo scan
         (scanReady && isNewScan) ||
         // Caso B: confermato da preScanConfirm + profilo almeno pre_scan_ready
-        (confirmedFromPreScan && preScanReady)
+        (confirmedFromPreScan && hardScanReady)
       )
     );
 

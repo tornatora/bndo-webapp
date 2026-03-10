@@ -80,10 +80,10 @@ pubblici disponibili e restituisce risultati filtrati e classificati per compati
 ### Livelli di readiness
 
 ```
-not_ready      → Mancano 1+ pilastri tra regione/stato/obiettivo → Continua profiling
-weak_ready     → Manca il settore (pilastri 1-3 presenti) → Chiedi settore
-pre_scan_ready → Pilastri 1-4 presenti, manca solo il 5° → Chiedi conferma preScanConfirm
-strong_ready   → Tutti e 5 i pilastri → Scan automatico
+not_ready       → Mancano 1+ pilastri tra regione/stato/obiettivo → Continua profiling
+soft_scan_ready → Pilastri 1-3 presenti → Matching esplorativo possibile
+hard_scan_ready → Pilastri 1-4 presenti, pronti per matching di precisione → Chiedi conferma preScanConfirm
+strong_ready    → Tutti e 5 i pilastri (con dati economici/fondatore) → Scan automatico di precisione
 ```
 
 ### Flusso decisionale
@@ -92,8 +92,8 @@ strong_ready   → Tutti e 5 i pilastri → Scan automatico
 Utente scrive → Estrazione profilo → evaluateProfileCompleteness()
                                       │
                                       ├── not_ready → chiedi il prossimo campo mancante
-                                      ├── weak_ready → chiedi settore
-                                      ├── pre_scan_ready → preScanConfirm ("c'è altro?")
+                                      ├── soft_scan_ready → chiedi settore (o altro mancante)
+                                      ├── hard_scan_ready → preScanConfirm ("c'è altro?")
                                       │                     │
                                       │                     ├── utente conferma → SCAN
                                       │                     └── utente aggiunge info → ricalcola
@@ -343,3 +343,4 @@ Quando `OPENAI_API_KEY` non è configurata:
 | Data | Versione | Modifica |
 |---|---|---|
 | 2026-03-10 | 2.0.0 | Creazione documento, Profile Completeness Engine V2, preScanConfirm, fix scanner |
+| 2026-03-10 | 2.1.0 | Hardening Architettura: Soft/Hard Scan, Hard Eligibility Engine, Strategic Advice |

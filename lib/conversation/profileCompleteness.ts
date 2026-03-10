@@ -6,11 +6,11 @@
  *
  * Classifica il profilo come:
  *   - not_ready:        dati fondamentali mancanti, impossibile procedere
- *   - weak_ready:       i pilastri base ci sono ma servono ancora info chiave
- *   - pre_scan_ready:   il profilo ha tutto il necessario → chiedi conferma pre-scan
+ *   - soft_scan_ready:   i pilastri base ci sono ma servono ancora info chiave
+ *   - hard_scan_ready:   il profilo ha tutto il necessario → chiedi conferma pre-scan
  *   - strong_ready:     confermato, lancia lo scanner
  *
- * Criteri OBBLIGATORI per pre_scan_ready / strong_ready:
+ * Criteri OBBLIGATORI per hard_scan_ready / strong_ready:
  *   1. Regione chiara (non negata, non ambigua)
  *   2. Stato impresa esplicito (attiva / da costituire / startup)
  *   3. Obiettivo specifico (fundingGoal con termine concreto)
@@ -27,7 +27,7 @@
  */
 import type { UserProfile } from '@/lib/conversation/types';
 
-export type ProfileReadinessLevel = 'not_ready' | 'weak_ready' | 'pre_scan_ready' | 'strong_ready';
+export type ProfileReadinessLevel = 'not_ready' | 'soft_scan_ready' | 'hard_scan_ready' | 'strong_ready';
 
 export type ProfileCompletenessResult = {
   level: ProfileReadinessLevel;
@@ -135,34 +135,18 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   // === DETERMINAZIONE LEVEL ===
   let level: ProfileReadinessLevel;
 
-  const hasCriticalMissing = missing.some(s =>
-    ['location', 'locationConfirmation', 'businessContext', 'fundingGoal'].includes(s)
-  );
+  const hasSoftCriterias = hasRegion && hasSpecificGoal && hasBusinessStatus;
+  const hasHardCriterias = hasSoftCriterias && hasSpecificSector && (profile.employees !== null || profile.revenueOrBudgetEUR !== null || profile.budgetAnswered);
 
-  // I 4 pilastri OBBLIGATORI:
-  const hasAllMandatoryPillars = hasRegion && hasBusinessStatus && hasSpecificGoal && hasSpecificSector;
-
-  if (missing.includes('location') || missing.includes('businessContext')) {
-    // Mancano pilastri fondamentali assoluti
+  if (!hasSoftCriterias) {
     level = 'not_ready';
-  } else if (!hasSpecificGoal) {
-    // Senza obiettivo specifico non sappiamo cosa cercare
-    level = 'not_ready';
-  } else if (!hasSpecificSector) {
-    // Senza settore il matching è troppo impreciso
-    level = 'weak_ready';
+  } else if (!hasHardCriterias) {
+    // Abbiamo le info base ma non quelle per il matching preciso (Hard Scan)
+    level = 'soft_scan_ready';
   } else if (missing.length === 0) {
-    // Tutti e 5 i pilastri presenti: strong_ready (scan automatico appena confermato)
     level = 'strong_ready';
-  } else if (hasAllMandatoryPillars && missing.length === 1 && (missing[0] === 'budgetOrPreference' || missing[0] === 'founderData')) {
-    // I 4 pilastri obbligatori ci sono, manca solo il 5° (opzionale ma utile):
-    // → pre_scan_ready: chiediamo "c'è altro da specificare?" poi lanciamo
-    level = 'pre_scan_ready';
-  } else if (!hasCriticalMissing && missing.length <= 2) {
-    // Alcuni campi mancanti ma nessuno critico
-    level = 'weak_ready';
   } else {
-    level = 'weak_ready';
+    level = 'hard_scan_ready';
   }
 
 
@@ -177,13 +161,9 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   return { level, nextPriorityField, missingSignals: missing, score };
 }
 
-/** 
- * Shorthand: true se il profilo è pronto per mostrare la domanda pre-scan
- * o per procedere direttamente allo scan (strong_ready).
- */
-export function isPreScanReady(profile: UserProfile): boolean {
+export function isHardScanReady(profile: UserProfile): boolean {
   const level = evaluateProfileCompleteness(profile).level;
-  return level === 'pre_scan_ready' || level === 'strong_ready';
+  return level === 'hard_scan_ready' || level === 'strong_ready';
 }
 
 /** Shorthand: true se e solo se il profilo è strong_ready (scan già confermato) */
@@ -191,8 +171,8 @@ export function isStrongReady(profile: UserProfile): boolean {
   return evaluateProfileCompleteness(profile).level === 'strong_ready';
 }
 
-/** Shorthand: true se il profilo ha i pilastri base (anche senza campo aggiuntivo) */
-export function isWeakReady(profile: UserProfile): boolean {
+/** Shorthand: true se il profilo ha i pilastri base (Soft Scan) */
+export function isSoftScanReady(profile: UserProfile): boolean {
   const r = evaluateProfileCompleteness(profile);
   return r.level !== 'not_ready';
 }

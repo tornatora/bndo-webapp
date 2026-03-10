@@ -4221,7 +4221,7 @@ export async function POST(req: Request) {
           };
         })();
     const parsedLimit = typeof parsed.limit === 'string' ? Number(parsed.limit) : parsed.limit;
-    const limit: number = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit ?? 10, 1), 50) : 10;
+    const limit: number = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit ?? 8, 1), 50) : 8;
     const mode = parsed.mode === 'fast' ? 'fast' : 'full';
     const channel: ScanChannel = parsed.channel === 'chat' ? 'chat' : 'scanner';
     const strictness: ScanStrictness = parsed.strictness === 'high' ? 'high' : 'standard';

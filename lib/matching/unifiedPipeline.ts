@@ -1,5 +1,6 @@
 import type { NormalizedMatchingProfile, IncentiviDoc } from '@/lib/matching/types';
 import { normalizeForMatch, canonicalizeRegion } from '@/lib/matching/profileNormalizer';
+import { evaluateHardEligibility } from '@/lib/matching/eligibilityEngine';
 
 /**
  * Dimensioni di matching utilizzate nella valutazione dei bandi
@@ -201,13 +202,14 @@ function evaluateTerritory(profile: NormalizedMatchingProfile, grant: IncentiviD
   // e NON è l'autorità dell'utente, blocca subito, ignorando la lista regioni (che potrebbe essere sporca).
   if (authorityNorm.includes('regione')) {
       const detectedAuthorityRegions = detectRegionsFromText(authorityNorm);
+      // Se l'autorità è di una regione specifica, e non è quella dell'utente (HQ o Investimento), escludi.
       if (detectedAuthorityRegions.length > 0 && !detectedAuthorityRegions.includes(userRegion)) {
           return {
             dimension: 'territory',
             compatible: false,
             score: 0,
             confidence: 'high',
-            note: `Bando riservato a ${detectedAuthorityRegions.join(', ')} (emesso da ${authorityName})`,
+            note: `Bando territoriale riservato a ${detectedAuthorityRegions.join(', ')}`,
           };
       }
   }
@@ -1206,6 +1208,24 @@ export function runUnifiedPipeline(args: {
     const grantId = String(grant.id ?? '');
     const title = grant.title ?? 'Unknown Grant';
 
+    // 0. Hard Eligibility Engine Check (Strict Rules)
+    const eligibility = evaluateHardEligibility(profile, grant);
+    if (!eligibility.eligible) {
+        evaluations.push({
+            grantId,
+            title,
+            totalScore: 0,
+            band: 'excluded',
+            hardExcluded: true,
+            hardExclusionReason: eligibility.reason,
+            dimensions: [],
+            whyFit: [],
+            warnings: [],
+            availabilityStatus: determineAvailabilityStatus(grant),
+        });
+        continue;
+    }
+
     // Run all dimension evaluations
     const evals = new Map<MatchDimension, DimensionEval>();
     evals.set('subject', evaluateSubject(profile, grant));
@@ -1248,8 +1268,8 @@ export function runUnifiedPipeline(args: {
   evaluations.sort((a, b) => b.totalScore - a.totalScore);
 
   // Categorize results
-  const primary = evaluations.filter((e) => e.totalScore >= 70);
-  const borderline = evaluations.filter((e) => e.totalScore >= 60 && e.totalScore < 70);
+  const primary = evaluations.filter((e) => e.totalScore >= 70).slice(0, 8); // Limit strictly to top 8
+  const borderline = evaluations.filter((e) => e.totalScore >= 60 && e.totalScore < 70).slice(0, 3);
   const excluded = evaluations.filter((e) => e.totalScore < 60);
 
   // Apply maxResults limit if specified

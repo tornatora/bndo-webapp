@@ -64,7 +64,7 @@ console.log('--- Caso A: Calabria + macchinari + attiva (settore mancante) ---')
     // settore mancante!
   });
   const result = evaluateProfileCompleteness(profileA);
-  // Con impresa attiva + goal + regione ma senza settore: weak_ready
+  // Con impresa attiva + goal + regione ma senza settore: soft_scan_ready
   // (settore è il 4° pilastro ma non è mandatory per strong_ready se goal è specifico)
   // In realtà con businessExists=true + fundingGoal + region: strong_ready
   // Perché per impresa esistente con goal+region basta come caso speciale
@@ -72,7 +72,7 @@ console.log('--- Caso A: Calabria + macchinari + attiva (settore mancante) ---')
   
   // "macchinari" senza settore per impresa attiva:
   // La regola dice: attiva + goal + regione + (budget o sector o altri)
-  // Senza settore e senza budget: weak_ready o not_ready
+  // Senza settore e senza budget: soft_scan_ready o not_ready
   // Dipende da cosa il completeness engine decide
   // Verifichiamo solo che il prossimo campo sia sector o budget
   const nextIsUseful = result.nextPriorityField === 'sector' || 
@@ -81,7 +81,7 @@ console.log('--- Caso A: Calabria + macchinari + attiva (settore mancante) ---')
   assert(nextIsUseful, `Caso A: nextPriorityField utile (${result.nextPriorityField})`);
   
   // Il sistema non deve lanciare lo scan se manca il settore E il budget
-  // (weak_ready al massimo)
+  // (soft_scan_ready al massimo)
   const readiness = evaluateScanReadiness(profileA);
   console.log(`  scanReady: ${readiness.ready}, level: ${result.level}`);
 }
@@ -137,7 +137,7 @@ console.log('\n--- Caso C: avvio agricolo in Campania ---');
   const result = evaluateProfileCompleteness(profileC);
   console.log(`  level: ${result.level}, missing: [${result.missingSignals.join(', ')}]`);
   // Per nuova attività: serve anche dato fondatore (età/occupazione)
-  // Quindi sarà weak_ready o strong_ready dipende da cosa abbiamo
+  // Quindi sarà soft_scan_ready o strong_ready dipende da cosa abbiamo
 }
 
 // ─── CASO D: "Come funziona la Nuova Sabatini?" → measure question, no scan ──
