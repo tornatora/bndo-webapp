@@ -4314,7 +4314,30 @@ export async function POST(req: Request) {
           strictness,
           strictContext,
         });
-        const scannerResults = scanner.items.map((entry) => entry.result);
+        const scannerResultsRaw = scanner.items.map((entry) => entry.result);
+        // ── HARD TERRITORY FILTER on scanner API results ──────────
+        // The external scanner API may return results from wrong regions.
+        // Apply the same detectRegions logic to hard-exclude mismatches.
+        const scannerResults = userRegionCanonical
+          ? scannerResultsRaw.filter((item) => {
+              const titleNorm = normalizeForMatch(item.title || '');
+              const authorityNorm = normalizeForMatch(item.authorityName ?? item.authority ?? '');
+              const combined = `${titleNorm} ${authorityNorm}`;
+
+              // Detect if the grant is specific to a region
+              const grantRegions = detectRegions(combined);
+              if (grantRegions.length === 0) return true; // Unknown territory — keep it
+              // National grants pass
+              if (combined.includes('nazionale') || combined.includes('italia') || combined.includes('tutte le regioni')) return true;
+              // Check if user region matches
+              if (grantRegions.includes(userRegionCanonical)) return true;
+              // South macro-region check
+              const isSouth = ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia'].includes(userRegionCanonical);
+              if (isSouth && (combined.includes('mezzogiorno') || combined.includes('sud italia') || combined.includes('meridione'))) return true;
+              // Grant is for a different region → hard exclude
+              return false;
+            })
+          : scannerResultsRaw;
         const scannerNearMisses = scanner.nearMisses.map((entry) => entry.result);
         const scannerTopScore = scannerResults[0]?.matchScore ?? null;
         const scannerQualityBand = qualityBandFromScore(scannerTopScore);
