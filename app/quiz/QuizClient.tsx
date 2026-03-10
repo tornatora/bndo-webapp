@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import confetti from 'canvas-confetti';
 import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
 import { getQuizQuestions } from '@/lib/quiz/quiz-map';
 import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
@@ -122,11 +121,18 @@ export default function QuizPage() {
     if (step !== 'success') return;
 
     let animationId: number | null = null;
-    const timer = window.setTimeout(() => {
+    let cancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      const confettiModule = await import('canvas-confetti');
+      const confetti = confettiModule.default;
+      if (cancelled) return;
+
       const duration = 3000;
       const end = Date.now() + duration;
 
       const burst = () => {
+        if (cancelled) return;
         confetti({
           particleCount: 5,
           angle: 60,
@@ -151,6 +157,7 @@ export default function QuizPage() {
     }, 300);
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timer);
       if (animationId !== null) {
         window.cancelAnimationFrame(animationId);

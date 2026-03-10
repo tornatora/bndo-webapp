@@ -570,13 +570,24 @@ function evaluatePurpose(profile: NormalizedMatchingProfile, grant: IncentiviDoc
   // LOGICA DI RIGORE MASSIMO
   if (!goalIsGeneric) {
       // Se non c'è match sui termini pesanti o il ratio è troppo basso, escludi
-      if (!heavyMatch || matchRatio < 0.5) {
+      if (!heavyMatch || matchRatio < 0.3) {
           return {
             dimension: 'purpose',
             compatible: false,
             score: 0,
             confidence: 'high',
             note: `Incompatibile con l'obiettivo specifico: ${fundingGoal}`,
+          };
+      }
+  } else {
+      // Goal generico: se il match ratio è estremamente basso, escludi comunque
+      if (matchRatio < 0.15 && heavyKeywords.length > 0 && !heavyMatch) {
+          return {
+            dimension: 'purpose',
+            compatible: false,
+            score: 0,
+            confidence: 'medium',
+            note: `Finalità del bando non coerente con la richiesta`,
           };
       }
   }
@@ -691,34 +702,52 @@ function evaluateSector(profile: NormalizedMatchingProfile, grant: IncentiviDoc)
   // Check sector keywords
   const combinedGrantSectors = grantSectors.join(' ');
 
-  if (userSector && combinedGrantSectors.includes(userSector)) {
-    return {
-      dimension: 'sector',
-      compatible: true,
-      score: 85,
-      confidence: 'high',
-      note: 'Settore compatibile',
-    };
-  }
+  // If grant specifies sectors AND user specifies sector, check for clear mismatch
+  if (grantSectors.length > 0 && userSector) {
+    // Check if user sector words appear anywhere in grant sectors
+    const combinedGrantSectors = grantSectors.join(' ');
+    const sectorKeywords = userSector.split(/\s+/).filter((w) => w.length >= 4);
+    let sectorMatches = 0;
 
-  // Partial match with sector keywords
-  const sectorKeywords = userSector?.split(/\s+/).filter((w) => w.length >= 4) || [];
-  let sectorMatches = 0;
+    for (const keyword of sectorKeywords) {
+      if (combinedGrantSectors.includes(keyword)) {
+        sectorMatches++;
+      }
+    }
 
-  for (const keyword of sectorKeywords) {
-    if (combinedGrantSectors.includes(keyword)) {
-      sectorMatches++;
+    if (sectorKeywords.length > 0 && sectorMatches > 0) {
+      return {
+        dimension: 'sector',
+        compatible: true,
+        score: 60 + Math.round((sectorMatches / sectorKeywords.length) * 35),
+        confidence: 'medium',
+        note: `Settore parzialmente compatibile: ${sectorMatches}/${sectorKeywords.length}`,
+      };
+    }
+
+    // No keyword overlap at all — hard mismatch
+    if (sectorKeywords.length >= 2 && sectorMatches === 0) {
+      return {
+        dimension: 'sector',
+        compatible: false,
+        score: 0,
+        confidence: 'high',
+        note: `Settore non compatibile: "${userSector}" non trovato nei requisiti del bando`,
+      };
     }
   }
 
-  if (sectorKeywords.length > 0 && sectorMatches > 0) {
-    return {
-      dimension: 'sector',
-      compatible: true,
-      score: 60,
-      confidence: 'medium',
-      note: `Settore parzialmente compatibile: ${sectorMatches}/${sectorKeywords.length}`,
-    };
+  if (userSector && grantSectors.length > 0) {
+    const combinedGrantSectors = grantSectors.join(' ');
+    if (combinedGrantSectors.includes(userSector)) {
+      return {
+        dimension: 'sector',
+        compatible: true,
+        score: 85,
+        confidence: 'high',
+        note: 'Settore compatibile',
+      };
+    }
   }
 
   return {
@@ -1065,11 +1094,10 @@ function checkHardExclusions(
     return { excluded: true, reason: purposeEval.note || 'Finalità non compatibile' };
   }
 
-  // Rule 4: Sector explicitly excluded
+  // Rule 4: Sector explicitly excluded (now hard)
   const sectorEval = evals.get('sector');
   if (sectorEval && !sectorEval.compatible) {
-    // Note: sector eval returns compatible=true with low score, not hard exclude
-    // This is intentional - sector mismatch is soft, not hard
+    return { excluded: true, reason: sectorEval.note || 'Settore non compatibile' };
   }
 
   // Rule 5: Stage/phase incompatible
@@ -1082,6 +1110,12 @@ function checkHardExclusions(
   const statusEval = evals.get('status');
   if (statusEval && !statusEval.compatible) {
     return { excluded: true, reason: statusEval.note || 'Bando scaduto o non disponibile' };
+  }
+
+  // Rule 7: Budget clearly incompatible
+  const expensesEval = evals.get('expenses');
+  if (expensesEval && !expensesEval.compatible) {
+    return { excluded: true, reason: expensesEval.note || 'Budget non compatibile' };
   }
 
   return { excluded: false, reason: null };
@@ -1268,9 +1302,9 @@ export function runUnifiedPipeline(args: {
   evaluations.sort((a, b) => b.totalScore - a.totalScore);
 
   // Categorize results
-  const primary = evaluations.filter((e) => e.totalScore >= 70).slice(0, 8); // Limit strictly to top 8
-  const borderline = evaluations.filter((e) => e.totalScore >= 60 && e.totalScore < 70).slice(0, 3);
-  const excluded = evaluations.filter((e) => e.totalScore < 60);
+  const primary = evaluations.filter((e) => e.totalScore >= 75).slice(0, 8);
+  const borderline = evaluations.filter((e) => e.totalScore >= 65 && e.totalScore < 75).slice(0, 3);
+  const excluded = evaluations.filter((e) => e.totalScore < 65);
 
   // Apply maxResults limit if specified
   const maxResults = options.maxResults;

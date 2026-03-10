@@ -136,7 +136,8 @@ function inferTerritoryCompatible(result: ScanResultLike, profile: NormalizedMat
   // If we have explicit mismatch flag or hard excluded status, it's NOT compatible
   if (result.hardStatus === 'not_eligible') return false;
   
-  if (strategicTitle) return true;
+  // Strategic titles still need to pass territory checks — only national-level gets a pass.
+  // Removed: if (strategicTitle) return true;
 
   // Be stricter: it must explicitly include the region or be national.
   const isNational =

@@ -18,6 +18,7 @@ import { runUnifiedPipeline } from '@/lib/matching/unifiedPipeline';
 import type { GrantEvaluation } from '@/lib/matching/unifiedPipeline';
 import { filterClosedCalls } from '@/lib/matching/scannerFilters';
 import { buildResultAwareRefineQuestion } from '@/lib/matching/resultAwareRefine';
+import { composeActionPlan } from '@/lib/matching/actionPlanComposer';
 import type { IncentiviDoc, NormalizedMatchingProfile } from '@/lib/matching/types';
 
 export const runtime = 'nodejs';
@@ -5104,6 +5105,14 @@ export async function POST(req: Request) {
     const advice = buildResultAwareRefineQuestion(items as unknown as IncentiviDoc[], normalizedProfile);
     const finalRefineQuestion = advice.question || refineQuestionV3 || null;
 
+    // ── BNDO Fit Engine: Action Plan ─────────────────────────────────
+    const fitEngineResult = runUnifiedPipeline({
+      profile: normalizedProfile,
+      grants: items as unknown as IncentiviDoc[],
+      options: { channel: 'chat', strictness: 'high', maxResults: 8 },
+    });
+    const actionPlan = composeActionPlan(fitEngineResult, normalizedProfile);
+
     return NextResponse.json({
       phase: mode,
       matchingVersion,
@@ -5126,6 +5135,13 @@ export async function POST(req: Request) {
       strategicReasoning: advice.reasoning ?? undefined,
       topPickBandoId,
       bookingUrl,
+      actionPlan: {
+        strongFits: actionPlan.strongFits.map(f => ({ title: f.title, strengths: f.explanation.strengths })),
+        possibleFits: actionPlan.possibleFits.map(f => ({ title: f.title, caveats: f.explanation.caveats })),
+        excluded: actionPlan.excluded.map(f => ({ title: f.title, reason: f.exclusionReason })),
+        nextActions: actionPlan.nextActions,
+        profileCompleteness: actionPlan.gapAnalysis.completenessScore,
+      },
       diagnostics:
         process.env.MATCHING_DIAGNOSTICS === 'true'
           ? {
