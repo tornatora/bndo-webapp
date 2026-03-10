@@ -116,6 +116,7 @@ type ScanResponse = {
   qualityBand?: 'high' | 'medium' | 'low';
   refineQuestion?: string;
   strategicAdvice?: string;
+  strategicReasoning?: string;
   matchingVersion?: 'v2' | 'v3' | string;
   profilePriorityApplied?: boolean;
   diagnostics?: { rejectedByGate?: Record<string, number>; activeCaseIds?: string[] };
@@ -579,7 +580,10 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       
       let bodyText = '';
       if (payload.strategicAdvice) {
-        bodyText += `${payload.strategicAdvice}\n\n`;
+        bodyText += `**Consiglio del Consulente:** ${payload.strategicAdvice}\n\n`;
+        if (payload.strategicReasoning) {
+            bodyText += `*Perché ti consiglio questo:* ${payload.strategicReasoning}\n\n`;
+        }
       }
       bodyText += genericFollowup;
       if (shouldAskTargetedRefine && payload.refineQuestion) {
@@ -690,6 +694,10 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       stopOverlayProgressLoop();
       setScanOverlayProgress(100);
       setScanOverlayStepIndex(4);
+      
+      // Wait for progress bar animation to reach 100% visually
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
       if ((scanJson.results?.length ?? 0) === 0) {
         handleNoResults(scanJson);
       } else {
@@ -702,13 +710,12 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       if ((scanJson.results?.length ?? 0) > 0) {
         awaitingRefineAnswerRef.current = true;
       }
-      await new Promise((resolve) => setTimeout(resolve, 90));
     } catch (e) {
       if (activeScanTokenRef.current !== scanToken) return;
       stopOverlayProgressLoop();
       setScanOverlayProgress(100);
       setScanOverlayStepIndex(4);
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await new Promise((resolve) => setTimeout(resolve, 800));
       setMessages((prev) => {
         return [
           ...prev,

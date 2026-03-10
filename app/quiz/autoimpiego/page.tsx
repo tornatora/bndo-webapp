@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import QuizClient from '../QuizClient';
 
 export default function AutoimpiegoQuizPage() {
-  redirect('/quiz');
+  return <QuizClient />;
 }

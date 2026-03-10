@@ -25,6 +25,23 @@ export function isQuestionLike(message: string) {
   );
 }
 
+/**
+ * Detects if the user wants to compare different funding measures.
+ */
+export function isComparisonIntent(message: string) {
+  const n = normalizeForMatch(message);
+  if (!n) return false;
+  return (
+    n.includes('differenza tra') ||
+    n.includes('meglio tra') ||
+    n.includes('confronto') ||
+    n.includes('confronta') ||
+    n.includes('quale scelgo') ||
+    n.includes('quale conviene') ||
+    n.includes('differenze')
+  );
+}
+
 export function isSmallTalkOnly(message: string) {
   const n = normalizeForMatch(message);
   if (!n) return false;
@@ -162,10 +179,9 @@ export type TurnIntent = {
   proceedToMatching: boolean;
   asksHumanConsultant: boolean;
   qaModeActive: boolean;
-  directQuestionOnMeasure: boolean;
-  eligibilityCheck: boolean;
   discovery: boolean;
   measureQuestion: boolean;
+  comparison: boolean;
 };
 
 import type { ChatAction } from '../ai/ChatDecisionModel';
@@ -185,6 +201,7 @@ export function detectTurnIntent(args: {
   const directQuestionOnMeasure = isDirectQuestionOnMeasure(message);
   const eligibilityCheck = isEligibilityCheck(message);
   const discovery = isDiscoveryIntent(message);
+  const comparison = isComparisonIntent(message);
   
   const qaModeActive = Boolean((sessionQaMode || questionsFirst || directQuestionOnMeasure || eligibilityCheck) && !proceedToMatching);
   
@@ -195,23 +212,25 @@ export function detectTurnIntent(args: {
       ? 'handoff_human'
       : measureQuestion
         ? 'measure_question'
-        : directQuestionOnMeasure || eligibilityCheck
-          ? 'qa'
-          : discovery
-            ? 'discovery'
-            : qaModeActive || questionLike || conversationalIntent
-              ? 'qa'
-              : smallTalk
-                ? 'small_talk'
-                : proceedToMatching
-                  ? 'scan_refine'
-                  : 'profiling';
+        : comparison
+          ? 'measure_question'
+          : directQuestionOnMeasure || eligibilityCheck
+            ? 'qa'
+            : discovery
+              ? 'discovery'
+              : qaModeActive || questionLike || conversationalIntent
+                ? 'qa'
+                : smallTalk
+                  ? 'small_talk'
+                  : proceedToMatching
+                    ? 'scan_refine'
+                    : 'profiling';
 
   // Map to the new ChatDecisionModel Action as a deterministic fallback
   let fallbackAction: ChatAction = 'ask_clarification';
   if (asksHumanConsultant) fallbackAction = 'handoff_human';
   else if (smallTalk || greeting) fallbackAction = 'small_talk';
-  else if (measureQuestion || directQuestionOnMeasure) fallbackAction = 'answer_measure_question';
+  else if (measureQuestion || directQuestionOnMeasure || comparison) fallbackAction = 'answer_measure_question';
   else if (qaModeActive || questionLike) fallbackAction = 'answer_general_qa';
   else if (proceedToMatching) fallbackAction = 'run_scan';
 
@@ -224,12 +243,10 @@ export function detectTurnIntent(args: {
     proceedToMatching,
     asksHumanConsultant,
     qaModeActive,
-    directQuestionOnMeasure,
-    eligibilityCheck,
     discovery,
     measureQuestion,
+    comparison,
     modeHint,
     fallbackAction
   };
 }
-

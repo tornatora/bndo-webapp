@@ -3,6 +3,7 @@ import { NormalizedMatchingProfile, IncentiviDoc } from '@/lib/matching/types';
 export type RefineAdvice = {
   question: string | null;
   strategicAdvice: string | null;
+  reasoning: string | null;
 };
 
 /**
@@ -16,8 +17,9 @@ export function buildResultAwareRefineQuestion(
 ): RefineAdvice {
   let question: string | null = null;
   let strategicAdvice: string | null = null;
+  let reasoning: string | null = null;
 
-  if (results.length === 0) return { question, strategicAdvice };
+  if (results.length === 0) return { question, strategicAdvice, reasoning };
 
   // --- STRATEGIC ADVICE: Proactive paths (The "Consultant" brain) ---
   
@@ -26,12 +28,14 @@ export function buildResultAwareRefineQuestion(
   const isTargetForRestoSud = !profile.businessExists && (profile.age === null || profile.age <= 35) && profile.userRegionCanonical === 'Calabria' || profile.userRegionCanonical === 'Sicilia' || profile.userRegionCanonical === 'Puglia' || profile.userRegionCanonical === 'Campania';
 
   if (hasRestoSud && isTargetForRestoSud) {
-    strategicAdvice = "Dato il tuo profilo, la strada più vantaggiosa per te è certamente **Resto al Sud 2.0**. Sai che se apri una nuova impresa nel Mezzogiorno puoi usufruire di questa misura? Può darti fino al **100% di fondo perduto** combinando voucher di avvio e contributi sugli investimenti.";
+    strategicAdvice = "Dato il tuo profilo, la strada più vantaggiosa per te è certamente **Resto al Sud 2.0**.";
+    reasoning = "Questa misura è specifica per giovani imprenditori nel Mezzogiorno e offre una copertura fino al **100% dell'investimento**, combinando un voucher di avvio (fino a 50.000€) con contributi a fondo perduto sugli investimenti. È attualmente l'agevolazione più potente per chi parte da zero.";
   } else {
     // 2. Generic High Grant Advice
     const highGrantResults = results.filter(r => (Number(r.coverageMaxPercent) || 0) >= 80);
     if (highGrantResults.length >= 1 && !profile.fundingGoal?.toLowerCase().includes('fondo perduto')) {
-        strategicAdvice = "Ho individuato diverse misure con alta percentuale di fondo perduto (oltre l'80%). Ti consiglio di concentrarti su queste per massimizzare l'agevolazione.";
+        strategicAdvice = "Ti consiglio di concentrarti sulle misure con alta percentuale di finanziamento che ho individuato.";
+        reasoning = "Ho trovato opportunità con copertura superiore all'80%. Queste misure riducono drasticamente l'esposizione finanziaria iniziale della tua impresa.";
     }
   }
 
@@ -67,5 +71,5 @@ export function buildResultAwareRefineQuestion(
     }
   }
 
-  return { question, strategicAdvice };
+  return { question, strategicAdvice, reasoning };
 }

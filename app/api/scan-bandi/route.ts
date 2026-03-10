@@ -5123,6 +5123,7 @@ export async function POST(req: Request) {
       qualityBand,
       refineQuestion: finalRefineQuestion ?? undefined,
       strategicAdvice: advice.strategicAdvice ?? undefined,
+      strategicReasoning: advice.reasoning ?? undefined,
       topPickBandoId,
       bookingUrl,
       diagnostics:

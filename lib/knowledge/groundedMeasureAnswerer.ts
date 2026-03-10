@@ -28,11 +28,22 @@ const MEASURE_ALIASES: Array<{ id: string; name: string; aliases: string[] }> = 
 ];
 
 function detectMeasureId(message: string): { id: string; name: string } | null {
+  const ids = detectMeasureIds(message);
+  return ids.length > 0 ? ids[0] : null;
+}
+
+/**
+ * Detects all measure IDs mentioned in a message.
+ */
+export function detectMeasureIds(message: string): Array<{ id: string; name: string }> {
   const n = normalizeForMatch(message);
+  const found: Array<{ id: string; name: string }> = [];
   for (const m of MEASURE_ALIASES) {
-    if (m.aliases.some((a) => n.includes(normalizeForMatch(a)))) return { id: m.id, name: m.name };
+    if (m.aliases.some((a) => n.includes(normalizeForMatch(a)))) {
+      found.push({ id: m.id, name: m.name });
+    }
   }
-  return null;
+  return found;
 }
 
 function isMeasureQuestion(message: string): boolean {
@@ -184,6 +195,36 @@ export function answerGroundedMeasureQuestion(message: string): GroundedMeasureR
   }
 
   return { outcome: 'not_confirmable', text: buildPrudentReply(measure.name), measureId: measure.id };
+}
+
+import { STRATEGIC_SCANNER_DOCS } from '@/lib/strategicScannerDocs';
+import { compareMeasures, formatComparisonMessage } from './measureComparer';
+import { IncentiviDoc } from '@/lib/matching/types';
+
+/**
+ * Answers a comparison question between two measures.
+ */
+export function answerMeasureComparison(message: string): GroundedMeasureResult | null {
+  const measures = detectMeasureIds(message);
+  if (measures.length < 2) return null;
+
+  const idA = measures[0].id;
+  const idB = measures[1].id;
+
+  // Trova i doc completi
+  const docA = STRATEGIC_SCANNER_DOCS.find(d => d.id.includes(idA)) as unknown as IncentiviDoc;
+  const docB = STRATEGIC_SCANNER_DOCS.find(d => d.id.includes(idB)) as unknown as IncentiviDoc;
+
+  if (!docA || !docB) return null;
+
+  const comparison = compareMeasures(docA, docB);
+  const text = formatComparisonMessage(comparison);
+
+  return {
+    outcome: 'yes_under_conditions',
+    text,
+    measureId: `${idA}-vs-${idB}`
+  };
 }
 
 /** Returns true if the message is a direct measure question (for routing). */

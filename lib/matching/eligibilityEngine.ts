@@ -69,5 +69,17 @@ export function evaluateHardEligibility(
       return { eligible: false, reason: 'Il bando esclude esplicitamente il settore agricolo' };
   }
 
+  // 5. NICCHIE ESTREME (es. Audiovisivo, Cinema) vs Intento Generale (es. Turismo, Bar)
+  const isAudiovisivo = combinedText.includes('audiovisiv') || combinedText.includes('cinematografic') || title.includes(' film ') || title.includes('produzioni televisive');
+  if (isAudiovisivo) {
+      const g = profile.fundingGoal?.toLowerCase() || '';
+      const s = sector;
+      const userWantsAudioVisual = g.includes('audiovisiv') || s.includes('audiovisiv') || g.includes('cinema') || s.includes('cinema') || g.includes('film') || s.includes('film');
+      // Se è un bando audiovisivo ma l'utente *ha specificato* qualcosa che non c'entra nulla (es. turismo, bar, etc.)
+      if (!userWantsAudioVisual && (g.length > 5 || s.length > 5)) {
+          return { eligible: false, reason: 'Bando di nicchia (Audiovisivo/Cinema) incompatibile con il settore richiesto' };
+      }
+  }
+
   return { eligible: true, reason: null };
 }
