@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readBandiCache, readBundledBandiSeed, writeBandiCache } from '@/lib/bandiCache';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { getStrategicDatasetDocs } from '@/lib/matching/datasetStrategic';
+import { getRegionalGrantsDocs } from '@/lib/matching/regionalGrants';
 import type { DatasetSnapshot, IncentiviDoc } from '@/lib/matching/types';
 
 const SNAPSHOT_SOURCE_INCENTIVI = 'incentivi.gov.it';
@@ -167,10 +168,12 @@ export async function loadHybridDatasetDocs(): Promise<{
   fetchedAt: string | null;
 }> {
   const strategic = getStrategicDatasetDocs();
+  const regional = getRegionalGrantsDocs();
+  const curated = [...strategic, ...regional];
   const activeSnapshot = await loadActiveDatasetSnapshotFromSupabase();
   if (activeSnapshot && activeSnapshot.docs.length > 0) {
     return {
-      docs: [...activeSnapshot.docs, ...strategic],
+      docs: [...activeSnapshot.docs, ...curated],
       source: 'supabase',
       fetchedAt: activeSnapshot.fetchedAt,
     };
@@ -179,7 +182,7 @@ export async function loadHybridDatasetDocs(): Promise<{
   const cached = await readBandiCache<IncentiviDoc>();
   if ((cached?.docs?.length ?? 0) > 0) {
     return {
-      docs: [...(cached?.docs ?? []), ...strategic],
+      docs: [...(cached?.docs ?? []), ...curated],
       source: 'tmp-cache',
       fetchedAt: cached?.fetchedAt ?? null,
     };
@@ -187,7 +190,7 @@ export async function loadHybridDatasetDocs(): Promise<{
 
   const bundled = await readBundledBandiSeed<IncentiviDoc>();
   return {
-    docs: [...(bundled?.docs ?? []), ...strategic],
+    docs: [...(bundled?.docs ?? []), ...curated],
     source: 'bundled-seed',
     fetchedAt: bundled?.fetchedAt ?? null,
   };

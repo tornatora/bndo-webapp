@@ -11,6 +11,7 @@ import {
   sanitizeUnreliableEconomicLabels,
 } from '@/lib/matching/economicReliability';
 import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { buildAtecoSearchQueries, matchAtecoStructured } from '@/lib/matching/atecoTaxonomy';
 import { buildRefineQuestionV3 } from '@/lib/matching/refineQuestion';
 import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
 import { evaluateHardEligibility } from '@/lib/matching/hardEligibility';
@@ -3985,11 +3986,17 @@ function matchAteco(userAtecoDigits: string[], doc: IncentiviDoc) {
     return { ok: true, score: 0 };
   }
 
-  const matched = userAtecoDigits.some((u) => docDigits.some((d) => d.startsWith(u) || u.startsWith(d)));
-  if (!matched) return { ok: false, score: 0 };
+  const match = matchAtecoStructured(userAtecoDigits, docDigits);
+  if (!match.compatible) return { ok: false, score: 0 };
 
-  const maxUserLen = userAtecoDigits.reduce((acc, v) => Math.max(acc, v.length), 0);
-  return { ok: true, score: maxUserLen >= 4 ? 0.12 : 0.08 };
+  // Adjust score boost based on the match level
+  const scoreBoost = match.matchLevel === 'exact6' ? 0.15
+                   : match.matchLevel === 'prefix4' ? 0.12
+                   : match.matchLevel === 'division2' ? 0.08
+                   : match.matchLevel === 'section' ? 0.04
+                   : 0;
+
+  return { ok: true, score: scoreBoost, detail: match.matchLevel };
 }
 
 function computeScore(args: {
@@ -4238,8 +4245,10 @@ export async function POST(req: Request) {
     const fundingGoal = cleanString(rawProfile.fundingGoal, 220);
     const ateco = cleanString(rawProfile.ateco, 80);
     const userAtecoDigits = typeof ateco === 'string' ? extractAtecoDigitsFromText(ateco) : [];
-    // Include ATECO in the query even when numeric: it improves recall vs fetching "latest N" and then filtering.
-    const atecoQuery = typeof ateco === 'string' && ateco.trim() ? ateco.trim() : null;
+    // Build an ATECO query string using the new taxonomy to get richer text matches
+    const atecoQueryList = userAtecoDigits.length > 0 ? buildAtecoSearchQueries(userAtecoDigits[0]) : [];
+    const atecoQueryString = atecoQueryList.join(' ');
+    const atecoQuery = atecoQueryString.trim() ? atecoQueryString : null;
     const fundingGoalQuery = [fundingGoal, atecoQuery].filter(Boolean).join(' ').trim() || null;
     const keyword = [sector, fundingGoalQuery].filter(Boolean).join(' ').trim() || null;
     const activityType = cleanString(rawProfile.activityType, 120);
