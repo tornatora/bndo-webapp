@@ -1604,7 +1604,9 @@ export async function POST(request: Request) {
     const scanReadiness = evaluateScanReadiness(profile as UserProfile);
     const scanReady = scanReadiness.ready; // strong_ready only
     const preScanReady = scanReadiness.preScanReady; // pre_scan_ready or strong_ready
-    const scanHash = scanReady ? computeScanHash(profile) : null;
+    // CRITICAL: compute scanHash for BOTH strong_ready AND pre_scan_ready
+    // Otherwise scanHash=null when preScanReady but not strongReady, and null!==null is false
+    const scanHash = (scanReady || preScanReady) ? computeScanHash(profile) : null;
     const lastScanHash = session.lastScanHash ?? null;
 
     // Finer-grained intent flags
@@ -1621,7 +1623,7 @@ export async function POST(request: Request) {
     // viene trattata come conferma di procedere allo scan.
     const wasInPreScanConfirm = session.lastAskedStep === 'preScanConfirm';
     const userAddsMore = wasInPreScanConfirm && (
-      // L'utente ha fornito dati aggiuntivi
+      // L'utente ha fornito dati aggiuntivi che cambiano il profilo
       profileProgressedThisTurn ||
       // O ha detto esplicitamente che vuol aggiungere qualcosa
       /\b(ho altro|voglio aggiungere|anche|in più|specifico|specific|aggiungo|preciso)\b/i.test(trimmed)
@@ -1632,16 +1634,18 @@ export async function POST(request: Request) {
     const confirmedFromPreScan = wasInPreScanConfirm && !userAddsMore;
 
     // Determine if we should trigger the scanner in the frontend
-    // REGOLA: scan parte SOLO se:
-    //   A) il profilo è strong_ready (dopo conferma) O
-    //   B) l'utente ha confermato dal preScanConfirm
+    // REGOLA DEFINITIVA:
+    //   Caso A: il profilo è strong_ready (5 pilastri completi) → scan automatico
+    //   Caso B: l'utente ha confermato dal preScanConfirm → scan anche se solo pre_scan_ready
+    // In entrambi i casi, evitiamo re-scan se l'hash del profilo non è cambiato.
+    const isNewScan = !lastScanHash || scanHash !== lastScanHash;
     const shouldScanNow = Boolean(
       !smallTalk &&
       (
-        // Caso A: il completeness engine dice strong_ready
-        (scanReady && scanHash !== lastScanHash) ||
-        // Caso B: l'utente ha confermato dal preScanConfirm
-        (confirmedFromPreScan && preScanReady && scanHash !== lastScanHash)
+        // Caso A: strong_ready + hash diverso da ultimo scan
+        (scanReady && isNewScan) ||
+        // Caso B: confermato da preScanConfirm + profilo almeno pre_scan_ready
+        (confirmedFromPreScan && preScanReady)
       )
     );
 
@@ -1700,6 +1704,11 @@ export async function POST(request: Request) {
       qaModeActive: intent === 'general_qa' || intent === 'measure_question'
     });
 
+    // CRITICAL: quando shouldScanNow=true, la action DEVE essere 'run_scan'
+    // indipendentemente da cosa dice l'orchestrator LLM.
+    // Il frontend controlla json.action === 'run_scan' per avviare lo scanner.
+    const effectiveAction = shouldScanNow ? 'run_scan' : finalAction;
+
     return NextResponse.json(
       withConversationMeta({
         userProfile: nextSession.userProfile,
@@ -1707,9 +1716,9 @@ export async function POST(request: Request) {
         assistantText: finalAssistantText,
         readyToScan: shouldScanNow,
         mode,
-        action: finalAction,
+        action: effectiveAction,
         aiSource: openAiResult.source,
-        needsClarification: !shouldScanNow && finalAction === 'ask_clarification',
+        needsClarification: !shouldScanNow && effectiveAction === 'ask_clarification',
         nextQuestionField: nextBestFieldFromStep(effectiveNextStep as Step),
         profileCompletenessScore: profileCompletenessScore(normalizeProfile(profile), scanReadiness.missingSignals),
         scanReadinessReason: scanReadinessReasonForStep(effectiveNextStep as Step, profile),
