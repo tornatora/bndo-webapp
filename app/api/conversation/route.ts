@@ -15,7 +15,8 @@ import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowle
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
 import { normalizeProfile } from '@/lib/matching/profileNormalizer';
 import { runTwoPassChat } from '@/lib/ai/conversationOrchestrator';
-import { evaluateScanReadiness, isMinimumProfileReady } from '@/lib/conversation/scanReadiness';
+import { evaluateScanReadiness, isMinimumProfileReady, isPreScanReady } from '@/lib/conversation/scanReadiness';
+import { evaluateProfileCompleteness } from '@/lib/conversation/profileCompleteness';
 import type { ChatAction } from '@/lib/ai/ChatDecisionModel';
 import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
 import { checkRateLimit } from '@/lib/security/rateLimit';
@@ -418,18 +419,20 @@ async function generateAssistantTextWithOpenAI(args: {
           : nextStep === 'ateco'
             ? 'codice ATECO (anche 2 cifre) o descrizione attivita'
             : nextStep === 'sector'
-              ? 'settore'
+              ? 'settore principale di attivita'
               : nextStep === 'employees'
                 ? 'numero addetti'
                 : nextStep === 'budget'
                   ? 'budget/investimento indicativo'
                   : nextStep === 'contributionPreference'
-                    ? 'preferenza forma contributo'
-                    : nextStep === 'contactEmail'
-                      ? 'email di contatto'
-                      : nextStep === 'contactPhone'
-                        ? 'numero di telefono'
-                    : 'nessuno';
+                    ? 'preferenza forma contributo (fondo perduto, finanziamento, indifferente)'
+                    : nextStep === 'preScanConfirm'
+                      ? 'CONFERMA PRE-SCAN: chiedi se c\u2019\u00e8 altro da specificare (budget, forma contributo, dimensione) prima di avviare la ricerca bandi'
+                      : nextStep === 'contactEmail'
+                        ? 'email di contatto'
+                        : nextStep === 'contactPhone'
+                          ? 'numero di telefono'
+                          : 'nessuno';
 
     const user = [
     `Messaggio utente: ${JSON.stringify(userMessage)}`,
@@ -739,31 +742,50 @@ function questionForStepWithProfile(step: Step, profile: UserProfile, seed: stri
   return questionFor(step, seed, attempt);
 }
 
+/**
+ * getNextStep V2: usa il Profile Completeness Engine V2 (5 pilastri rigorosi).
+ * Restituisce il prossimo step che deve chiedere il bot.
+ *
+ * Sequenza tipica:
+ *   fundingGoal → activityType → location → sector → (budget|contributionPreference|founderData)
+ *   → preScanConfirm → (utente risponde) → ready
+ */
 function getNextStep(profile: UserProfile): Step {
+  // Priorità massima: location ambigua da confermare
   if (profile.locationNeedsConfirmation && profile.location?.region) return 'location';
-  const readiness = isScanReadyAdaptive(profile);
-  const hasStrongCoreSignals = Boolean(
-    profile.fundingGoal?.trim() &&
-      hasBusinessContext(profile) &&
-      profile.location?.region &&
-      (profile.businessExists !== false || !needsFounderEligibilityData(profile)),
-  );
-  if (readiness.missingSignals.includes('fundingGoal')) return 'fundingGoal';
-  if (readiness.missingSignals.includes('businessContext')) return 'activityType';
-  if (readiness.missingSignals.includes('location')) return 'location';
-  if (readiness.missingSignals.includes('founderEligibility')) return 'activityType';
-  if (readiness.missingSignals.includes('topicPrecision')) {
-    if (hasStrongCoreSignals && (profile.sector?.trim() || profile.budgetAnswered || profile.requestedContributionEUR !== null)) {
-      return 'ready';
-    }
-    if (!profile.sector?.trim()) return 'sector';
-    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
-    if (hasStrongCoreSignals) return 'ready';
-    if (!profile.contributionPreference?.trim()) return 'contributionPreference';
-    if (!profile.atecoAnswered) return 'ateco';
-    return 'ready';
+
+  const completeness = evaluateProfileCompleteness(profile as unknown as import('@/lib/conversation/types').UserProfile);
+
+  // Se è strong_ready: scan può partire subito (step ready)
+  if (completeness.level === 'strong_ready') return 'ready';
+
+  // Se è pre_scan_ready: chiediamo la domanda di conferma
+  if (completeness.level === 'pre_scan_ready') return 'preScanConfirm';
+
+  // Altrimenti: chiediamo il prossimo campo mancante in ordine di priorità
+  const nextField = completeness.nextPriorityField;
+  if (!nextField) return 'ready'; // fallback estremo
+
+  switch (nextField) {
+    case 'location':
+    case 'locationConfirmation':
+      return 'location';
+    case 'businessContext':
+      return 'activityType';
+    case 'fundingGoal':
+      return 'fundingGoal';
+    case 'sector':
+      return 'sector';
+    case 'founderData':
+      return 'activityType'; // chiediamo età/occupazione nello stesso step
+    case 'budgetOrPreference':
+      // Chiediamo prima la preferenza contributo (fondo perduto vs finanziamento)
+      // poi il budget se non risponde a quella
+      if (!profile.contributionPreference) return 'contributionPreference';
+      return 'budget';
+    default:
+      return 'budget';
   }
-  return 'ready';
 }
 
 function fallbackStepAfterStall(step: Step, profile: UserProfile): Step {
@@ -1578,37 +1600,59 @@ export async function POST(request: Request) {
     }
 
     const isNewSession = isProfileEmpty(profile);
-    // Usa il nuovo Profile Completeness Engine (strong_ready = scan attivo)
+    // Usa il nuovo Profile Completeness Engine V2
     const scanReadiness = evaluateScanReadiness(profile as UserProfile);
-    const scanReady = scanReadiness.ready;
+    const scanReady = scanReadiness.ready; // strong_ready only
+    const preScanReady = scanReadiness.preScanReady; // pre_scan_ready or strong_ready
     const scanHash = scanReady ? computeScanHash(profile) : null;
     const lastScanHash = session.lastScanHash ?? null;
 
-    // Finer-grained intent flags for backward compatibility with generateAssistantTextWithOpenAI
+    // Finer-grained intent flags
     const smallTalk = intent === 'small_talk';
     const greeting = /\b(ciao|buongiorno|buonasera|salve|hey|hi|hello)\b/i.test(trimmed);
     const questionLike = isQuestionLike(trimmed) || intent === 'measure_question' || intent === 'general_qa';
 
-    // Determine if we should trigger the scanner in the frontend
-    const shouldScanNow = Boolean(
-      (finalAction === 'run_scan' || finalAction === 'refine_after_scan') &&
-      scanReady &&
-      scanHash !== lastScanHash &&
-      !smallTalk
-    );
-
     const askedCounts = session.askedCounts ?? {};
     let nextStep = getNextStep(profile as UserProfile);
-    
-    // Anti-repetition: if we didn't extract anything new and we're repeating the exact same step,
-    // force a fallback to a different question if possible to avoid stuck loops.
-    if (!profileProgressedThisTurn && nextStep === session.lastAskedStep) {
+
+    // ── LOGICA PRE-SCAN CONFIRM ──────────────────────────────────────────────
+    // Se nel turno PRECEDENTE avevamo chiesto la domanda di conferma pre-scan,
+    // qualsiasi risposta dell'utente (tranne un "sì ho altro da aggiungere")
+    // viene trattata come conferma di procedere allo scan.
+    const wasInPreScanConfirm = session.lastAskedStep === 'preScanConfirm';
+    const userAddsMore = wasInPreScanConfirm && (
+      // L'utente ha fornito dati aggiuntivi
+      profileProgressedThisTurn ||
+      // O ha detto esplicitamente che vuol aggiungere qualcosa
+      /\b(ho altro|voglio aggiungere|anche|in più|specifico|specific|aggiungo|preciso)\b/i.test(trimmed)
+    );
+
+    // Se eravamo in preScanConfirm e l'utente NON ha aggiunto dati utili,
+    // andiamo direttamente allo scan
+    const confirmedFromPreScan = wasInPreScanConfirm && !userAddsMore;
+
+    // Determine if we should trigger the scanner in the frontend
+    // REGOLA: scan parte SOLO se:
+    //   A) il profilo è strong_ready (dopo conferma) O
+    //   B) l'utente ha confermato dal preScanConfirm
+    const shouldScanNow = Boolean(
+      !smallTalk &&
+      (
+        // Caso A: il completeness engine dice strong_ready
+        (scanReady && scanHash !== lastScanHash) ||
+        // Caso B: l'utente ha confermato dal preScanConfirm
+        (confirmedFromPreScan && preScanReady && scanHash !== lastScanHash)
+      )
+    );
+
+    // Anti-repetition su step normale
+    if (!profileProgressedThisTurn && nextStep === session.lastAskedStep && nextStep !== 'preScanConfirm') {
       nextStep = fallbackStepAfterStall(nextStep, profile as UserProfile);
     }
 
-    const effectiveNextStep = (shouldScanNow || finalAction === 'run_scan') ? 'ready' : nextStep;
+    const effectiveNextStep: Step = shouldScanNow ? 'ready' : nextStep;
     const attempt = (askedCounts[effectiveNextStep] ?? 0) + 1;
-    
+
     // Grounded Question Hint (Deterministic)
     const questionHint = shouldScanNow ? null : questionForStepWithProfile(effectiveNextStep, profile, trimmed, attempt);
 

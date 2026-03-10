@@ -58,6 +58,7 @@ export type Step =
   | 'contributionPreference'
   | 'contactEmail'
   | 'contactPhone'
+  | 'preScanConfirm'
   | 'ready';
 
 export type NextBestField = Exclude<Step, 'ready'>;

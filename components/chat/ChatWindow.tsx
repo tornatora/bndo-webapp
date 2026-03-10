@@ -46,6 +46,7 @@ type ConversationResponse = {
     | 'contributionPreference'
     | 'contactEmail'
     | 'contactPhone'
+    | 'preScanConfirm'
     | 'ready';
   assistantText: string;
   readyToScan: boolean;
@@ -89,6 +90,7 @@ type ConversationResponse = {
   scanReadinessReason?: string;
   error?: string;
 };
+
 
 type ScanResponse = {
   phase?: 'fast' | 'full';

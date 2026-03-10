@@ -6,7 +6,8 @@ function pickOne(seed: string, variants: string[]) {
 }
 
 export function nextBestFieldFromStep(step: Step): NextBestField | null {
-  return step === 'ready' ? null : step;
+  if (step === 'ready' || step === 'preScanConfirm') return null;
+  return step;
 }
 
 export function questionForFounderEligibility(seed: string, attempt: number): string {
@@ -16,6 +17,11 @@ export function questionForFounderEligibility(seed: string, attempt: number): st
     "Mi serve età e stato occupazionale per i bandi: sei under 35? Lavori già o sei disoccupato/inoccupato?",
     "Per filtrare i bandi adatti: hai meno di 35 anni? Qual è la tua situazione lavorativa attuale?",
   ]);
+}
+
+/** La domanda pre-scan di conferma: posta una sola volta appena il profilo è pre_scan_ready */
+export function questionForPreScanConfirm(): string {
+  return "Prima di avviare la ricerca: c'è altro che vuoi specificare o chiarire? (es. budget, forma di contributo preferita, dimensione azienda) Altrimenti procedo subito.";
 }
 
 export function questionFor(step: Step, seed: string, attempt: number) {
@@ -30,8 +36,8 @@ export function questionFor(step: Step, seed: string, attempt: number) {
 
   if (step === 'sector') {
     return pickOne(turnSeed, [
-      "In quale settore operi principalmente?",
-      "Qual è l'ambito di attività dell'impresa?",
+      "In quale settore operi principalmente? (es. manifattura, agricoltura, servizi, ICT, commercio)",
+      "Qual è il settore di attività dell'impresa? Una parola basta.",
       "Di cosa si occupa nello specifico la tua attività?"
     ]);
   }
@@ -62,26 +68,30 @@ export function questionFor(step: Step, seed: string, attempt: number) {
 
   if (step === 'fundingGoal') {
     return pickOne(turnSeed, [
-      "Cosa vuoi finanziare in concreto? (es. macchinari, software, sede)",
-      "Qual è l'obiettivo principale dell'investimento?",
+      "Cosa vuoi finanziare in concreto? (es. macchinari, software, sede, assunzioni)",
+      "Qual è l'obiettivo principale dell'investimento? Cosa acquisti o realizzi?",
       "Su cosa si concentra il progetto che vuoi agevolare?"
     ]);
   }
 
   if (step === 'budget') {
     return pickOne(turnSeed, [
-      "A quanto ammonta indicativamente l'investimento totale?",
+      "A quanto ammonta indicativamente l'investimento totale? (ordine di grandezza va benissimo)",
       "Che budget hai ipotizzato per questo progetto?",
-      "Qual è la spesa complessiva che prevedi?"
+      "Qual è l'entità della spesa complessiva che prevedi?"
     ]);
   }
 
   if (step === 'contributionPreference') {
     return pickOne(turnSeed, [
       "Cerchi fondo perduto, finanziamento agevolato o ti interessano entrambi?",
-      "Valuti ogni forma di agevolazione o ne cerchi una specifica?",
-      "Ti interessa soprattutto il fondo perduto o anche il credito d'imposta?"
+      "Quale forma di agevolazione preferisci: fondo perduto, finanziamento a tasso agevolato, o valuti tutto?",
+      "Ti interessa soprattutto il fondo perduto o anche il credito d'imposta o finanziamenti?"
     ]);
+  }
+
+  if (step === 'preScanConfirm') {
+    return questionForPreScanConfirm();
   }
 
   if (step === 'contactEmail') {
@@ -92,17 +102,20 @@ export function questionFor(step: Step, seed: string, attempt: number) {
     return "A quale numero può chiamarti il consulente per un approfondimento?";
   }
 
-  return 'Ho gli elementi necessari. Individuo subito le opportunità migliori per te.';
+  // step === 'ready' → mai deve arrivare qui come testo mostrato all'utente
+  // il frontend gestisce autonomamente l'avvio dello scanner
+  return '';
 }
 
 export function naturalBridgeQuestion(step: Step, attempt: number) {
   if (attempt > 2) return null;
-  // Make bridges less robotic and more contextual
   if (step === 'fundingGoal') return 'Per iniziare, dimmi cosa vuoi finanziare.';
-  if (step === 'activityType') return 'Un dettaglio: l\'impresa esiste già?';
+  if (step === 'activityType') return "Un dettaglio: l'impresa esiste già?";
   if (step === 'location') return 'Per i filtri regionali, mi serve sapere dove operi.';
   if (step === 'budget') return 'Con un importo indicativo posso essere più preciso.';
   if (step === 'ateco') return 'Se hai il codice ATECO restringiamo subito il campo.';
   if (step === 'sector') return 'In quale settore di attività ti muovi?';
+  if (step === 'contributionPreference') return 'Cerchi fondo perduto o vai bene anche con finanziamento agevolato?';
+  if (step === 'preScanConfirm') return questionForPreScanConfirm();
   return null;
 }

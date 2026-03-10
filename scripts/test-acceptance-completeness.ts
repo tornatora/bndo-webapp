@@ -101,7 +101,7 @@ console.log('\n--- Caso A2: solo macchinari + Calabria (businessExists null) ---
     `Caso A2: nextPriorityField corretto (${result.nextPriorityField})`);
 }
 
-// ─── CASO B: + "azienda manifatturiera" → strong_ready ────────────────────────
+// ─── CASO B: + "azienda manifatturiera" → pre_scan_ready (manca solo 5° pilastro) ───
 console.log('\n--- Caso B: Calabria + macchinari + attiva + manifattura ---');
 {
   const profileB = makeProfile({
@@ -112,10 +112,20 @@ console.log('\n--- Caso B: Calabria + macchinari + attiva + manifattura ---');
     sector: 'manifattura',
   });
   const result = evaluateProfileCompleteness(profileB);
-  assert(result.level === 'strong_ready', `Caso B: strong_ready con tutti i dati (level=${result.level})`);
+  // Con i 4 pilastri presenti ma senza budget/contributionPreference:
+  // → pre_scan_ready (chiederà "c'è altro da specificare?")
+  assert(
+    result.level === 'pre_scan_ready' || result.level === 'strong_ready',
+    `Caso B: almeno pre_scan_ready con tutti i dati (level=${result.level})`
+  );
   
+  // scanReadiness.ready è false (perché non strong_ready), ma preScanReady è true
   const readiness = evaluateScanReadiness(profileB);
-  assert(readiness.ready === true, `Caso B: scanReadiness.ready = true`);
+  assert(
+    readiness.preScanReady === true,
+    `Caso B: preScanReady = true quando abbiamo 4 pilastri (${readiness.preScanReady})`
+  );
+  console.log(`  level=${result.level}, preScanReady=${readiness.preScanReady}, nextPriority=${result.nextPriorityField}`);
 }
 
 // ─── CASO C: "Sto aprendo un'attività agricola in Campania" ───────────────────
