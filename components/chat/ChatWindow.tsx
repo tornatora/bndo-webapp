@@ -12,6 +12,7 @@ import { Sidebar } from '@/components/chat/Sidebar';
 import { BndiHomeView } from '@/components/views/BndiHomeView';
 import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
+import { OnboardingChoiceView } from '@/components/views/OnboardingChoiceView';
 import { PraticheView } from '@/components/views/PraticheView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
 import './ThinkingBubble.css';
@@ -212,7 +213,7 @@ function friendlyChatError(error: unknown, fallback: string) {
 }
 
 type ChatWindowProps = {
-  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail';
+  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice';
   initialGrantId?: string | null;
   embedded?: boolean;
   practiceLaunchMode?: boolean;
@@ -287,8 +288,8 @@ export function ChatWindow({
 }: ChatWindowProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' =
-    initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail'
+  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' =
+    initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail' || initialView === 'choice'
       ? initialView
       : 'chat';
 
@@ -310,12 +311,13 @@ export function ChatWindow({
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
-  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail'>(resolvedInitialView);
-  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail', boolean>>({
+  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice'>(resolvedInitialView);
+  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice', boolean>>({
     home: resolvedInitialView === 'home',
     form: resolvedInitialView === 'form',
     pratiche: resolvedInitialView === 'pratiche',
-    grantDetail: resolvedInitialView === 'grantDetail'
+    grantDetail: resolvedInitialView === 'grantDetail',
+    choice: resolvedInitialView === 'choice'
   });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -1048,6 +1050,12 @@ export function ChatWindow({
             <button type="button" className="topbar-logo topbar-logo-btn" onClick={goHome} aria-label="BNDO Home">
               <Image src="/Logo-BNDO-header.png" alt="BNDO" width={98} height={26} priority />
             </button>
+          </div>
+        ) : null}
+
+        {view === 'choice' || viewLoaded.choice ? (
+          <div className={view === 'choice' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'choice'}>
+            <OnboardingChoiceView onStartChat={goChat} onOpenScanner={goScanner} />
           </div>
         ) : null}
 

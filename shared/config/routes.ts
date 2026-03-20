@@ -124,14 +124,15 @@ export function isPublicDashboardShellPath(pathname: string) {
 }
 
 export function resolveDashboardInitialView(
-  slug: string[] | undefined
-): 'home' | 'chat' | 'form' | 'pratiche' {
-  const first = String(slug?.[0] || '').toLowerCase();
-  if (first === 'home' || first === 'new-practice') return 'home';
-  if (first === 'chat') return 'chat';
-  if (first === 'scanner' || first === 'scanner-bandi' || first === 'bandi') return 'form';
-  if (first === 'pratiche' || first === 'practices') return 'pratiche';
-  
-  // Default for /dashboard is now practices
+  slugs: string[] | undefined
+): 'chat' | 'home' | 'scanner' | 'pratiche' | 'choice' {
+  if (!slugs || slugs.length === 0) {
+    return 'pratiche';
+  }
+  const main = slugs[0];
+  if (main === 'chat') return 'chat';
+  if (main === 'scanner') return 'scanner';
+  if (main === 'pratiche') return 'pratiche';
+  if (main === 'new-practice') return 'choice';
   return 'pratiche';
 }

@@ -25,6 +25,19 @@
   --composer-h: 116px;
 }
 
+/* Hide Netlify Deploy Preview Drawer/Toolbar to avoid 'grey box' errors */
+[data-netlify-deploy-id],
+.netlify-drawer,
+#netlify-drawer,
+iframe[src*="netlify.com"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+}
+
 @supports (height: 100svh) {
   :root {
     --app-height: 100svh;
