@@ -1,0 +1,31 @@
+.thinking-row {
+  margin: 12px 0;
+  display: flex;
+  justify-content: flex-start;
+  animation: fadeInThinking 0.3s ease-out;
+}
+
+.thinking-text-only {
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 500;
+  color: var(--navy);
+  padding: 0 4px;
+  opacity: 0.7;
+  animation: thinkingPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinkingPulse {
+  0% { opacity: 0.4; transform: translateX(0); }
+  50% { opacity: 0.9; transform: translateX(2px); }
+  100% { opacity: 0.4; transform: translateX(0); }
+}
+
+@keyframes fadeInThinking {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 0.7; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-text-only { animation: none; }
+}
