@@ -6,7 +6,10 @@ export default function DashboardCatchAllPage({ params }: { params: { slug?: str
   return (
     <main className="page-shell">
       <Suspense fallback={<div className="loading-shell">Caricamento…</div>}>
-        <ChatWindow initialView={resolveDashboardInitialView(params.slug)} />
+        <ChatWindow 
+          initialView={resolveDashboardInitialView(params.slug)} 
+          embedded={true}
+        />
       </Suspense>
     </main>
   );

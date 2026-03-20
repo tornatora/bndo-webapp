@@ -1053,7 +1053,7 @@ export function ChatWindow({
 
         {view === 'home' || viewLoaded.home ? (
           <div className={view === 'home' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'home'}>
-            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} />
+            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} embedded={embedded} />
           </div>
         ) : null}
 

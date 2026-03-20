@@ -8,9 +8,10 @@ import styles from './BndiHomeView.module.css';
 type Props = {
   onStart: () => void;
   onOpenScanner: () => void;
+  embedded?: boolean;
 };
 
-export function BndiHomeView({ onOpenScanner: _onOpenScanner }: Props) {
+export function BndiHomeView({ onOpenScanner: _onOpenScanner, embedded }: Props) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [scrolled, setScrolled] = useState(false);
 
@@ -32,37 +33,39 @@ export function BndiHomeView({ onOpenScanner: _onOpenScanner }: Props) {
   }, []);
 
   return (
-    <section className={styles.host}>
-      <div ref={frameRef} className={styles.frame}>
-        <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ''}`}>
-          <nav className={styles.nav}>
-            <div className={styles.logo}>
-              <Image src="/Logo-BNDO-header.png" alt="BNDO" width={220} height={64} priority />
-            </div>
-            <ul className={styles.navMenu}>
-              <li>
-                <button type="button" onClick={() => scrollTo('bandi')}>
-                  Bandi
-                </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => scrollTo('servizi')}>
-                  Servizi
-                </button>
-              </li>
-              <li>
-                <button type="button" onClick={() => scrollTo('processo')}>
-                  Processo
-                </button>
-              </li>
-              <li>
-                <a href={quizUrl} className={styles.btnNav}>
-                  <span>Inizia ora</span>
-                </a>
-              </li>
-            </ul>
-          </nav>
-        </header>
+    <section className={embedded ? styles.hostEmbedded : styles.host}>
+      <div ref={frameRef} className={embedded ? styles.frameEmbedded : styles.frame}>
+        {!embedded && (
+          <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ''}`}>
+            <nav className={styles.nav}>
+              <div className={styles.logo}>
+                <Image src="/Logo-BNDO-header.png" alt="BNDO" width={220} height={64} priority />
+              </div>
+              <ul className={styles.navMenu}>
+                <li>
+                  <button type="button" onClick={() => scrollTo('bandi')}>
+                    Bandi
+                  </button>
+                </li>
+                <li>
+                  <button type="button" onClick={() => scrollTo('servizi')}>
+                    Servizi
+                  </button>
+                </li>
+                <li>
+                  <button type="button" onClick={() => scrollTo('processo')}>
+                    Processo
+                  </button>
+                </li>
+                <li>
+                  <a href={quizUrl} className={styles.btnNav}>
+                    <span>Inizia ora</span>
+                  </a>
+                </li>
+              </ul>
+            </nav>
+          </header>
+        )}
 
         <main className={styles.main}>
           <section className={styles.hero}>
