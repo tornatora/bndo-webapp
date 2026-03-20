@@ -17,10 +17,15 @@ export const viewport: Viewport = {
   ]
 };
 
+import { CookieBanner } from '@/components/ui/CookieBanner';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="it">
-      <body>{children}</body>
+      <body className="antialiased">
+        {children}
+        <CookieBanner />
+      </body>
     </html>
   );
 }

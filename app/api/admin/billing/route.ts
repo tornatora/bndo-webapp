@@ -17,7 +17,20 @@ const BillingSchema = z.object({
       createdAt: z.string(),
       url: z.string().nullable()
     })
-  )
+  ),
+  paymentRecords: z
+    .array(
+      z.object({
+        id: z.string(),
+        applicationId: z.string().uuid().nullable(),
+        grantTitle: z.string(),
+        amount: z.number(),
+        currency: z.string(),
+        status: z.enum(['pending', 'paid', 'failed', 'canceled', 'refunded']),
+        paidAt: z.string().nullable(),
+      }),
+    )
+    .optional()
 });
 
 const BodySchema = z.object({
@@ -50,7 +63,31 @@ export async function GET(request: Request) {
 
   const adminFields = (data?.admin_fields ?? {}) as Record<string, unknown>;
   const billing = extractBilling(adminFields);
-  return NextResponse.json({ data: billing ?? null });
+  const { data: paymentRows, error: paymentError } = await supabaseAdmin
+    .from('practice_payments')
+    .select('id, application_id, grant_title, amount_cents, currency, status, paid_at')
+    .eq('company_id', parsed.data.companyId)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 500 });
+
+  const paymentRecords = (paymentRows ?? []).map((row) => ({
+    id: row.id,
+    applicationId: row.application_id,
+    grantTitle: row.grant_title,
+    amount: Number(row.amount_cents) / 100,
+    currency: row.currency || 'eur',
+    status: row.status,
+    paidAt: row.paid_at,
+  }));
+
+  return NextResponse.json({
+    data: {
+      ...(billing ?? { payments: {}, invoices: [] }),
+      paymentRecords,
+    },
+  });
 }
 
 export async function POST(request: Request) {
@@ -83,4 +120,3 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }
-

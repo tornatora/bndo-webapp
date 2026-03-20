@@ -90,6 +90,8 @@ export function composeActionPlan(
         caveats: [evaluation.hardExclusionReason || 'Non compatibile con il profilo'],
         missingData: [],
         confidence: 'alta',
+        alerts: [],
+        feasibilityScore: 0,
       },
       exclusionReason: evaluation.hardExclusionReason,
     });

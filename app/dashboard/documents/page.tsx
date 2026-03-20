@@ -4,13 +4,14 @@ import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import { DocumentsPracticeCard } from '@/components/dashboard/DocumentsPracticeCard';
 
 type DocumentRow = {
   id: string;
   application_id: string;
   file_name: string;
+  requirement_key: string | null;
   storage_path: string;
   file_size: number;
   mime_type: string;
@@ -45,11 +46,26 @@ export default async function DashboardDocumentsPage() {
   const { data: documents } = applicationIds.length
     ? await supabase
         .from('application_documents')
-        .select('id, application_id, file_name, storage_path, file_size, mime_type, created_at')
+        .select('id, application_id, file_name, requirement_key, storage_path, file_size, mime_type, created_at')
         .in('application_id', applicationIds)
         .order('created_at', { ascending: false })
         .limit(120)
     : { data: [] as DocumentRow[] };
+
+  const { data: dynamicRequirements } = applicationIds.length
+    ? await supabase
+        .from('practice_document_requirements')
+        .select('application_id, requirement_key, label, description, is_required')
+        .in('application_id', applicationIds)
+    : {
+        data: [] as Array<{
+          application_id: string;
+          requirement_key: string;
+          label: string;
+          description: string | null;
+          is_required: boolean;
+        }>
+      };
 
   const tenderIds = [...new Set((applications ?? []).map((item) => item.tender_id))];
   // Note: client RLS may block reading tenders. In that case, we fallback to admin client server-side
@@ -82,18 +98,48 @@ export default async function DashboardDocumentsPage() {
     prev.push(doc);
     documentsByApplicationId.set(doc.application_id, prev);
   }
+  const requirementsByApplicationId = new Map<
+    string,
+    Array<{
+      application_id: string;
+      requirement_key: string;
+      label: string;
+      description: string | null;
+      is_required: boolean;
+    }>
+  >();
+  for (const requirement of dynamicRequirements ?? []) {
+    const prev = requirementsByApplicationId.get(requirement.application_id) ?? [];
+    prev.push(requirement);
+    requirementsByApplicationId.set(requirement.application_id, prev);
+  }
 
   const applicationsWithContext = await Promise.all(
     (applications ?? []).map(async (application) => {
       const tender = tenderMap.get(application.tender_id) ?? null;
       const practiceTitle = tender?.title ?? application.tender_id ?? 'Pratica';
       const docsInApp = documentsByApplicationId.get(application.id) ?? [];
-
-      const checklist = computeDocumentChecklist(
-        application.id,
-        practiceTitle,
-        docsInApp.map((d) => ({ application_id: application.id, file_name: d.file_name }))
-      );
+      const appRequirements = requirementsByApplicationId.get(application.id) ?? [];
+      const checklist =
+        appRequirements.length > 0
+          ? computeDocumentChecklistFromRequirements(
+              application.id,
+              appRequirements,
+              docsInApp.map((d) => ({
+                application_id: application.id,
+                file_name: d.file_name,
+                requirement_key: d.requirement_key
+              }))
+            )
+          : computeDocumentChecklist(
+              application.id,
+              practiceTitle,
+              docsInApp.map((d) => ({
+                application_id: application.id,
+                file_name: d.file_name,
+                requirement_key: d.requirement_key
+              }))
+            );
       const missing = checklist.filter((c) => !c.uploaded);
 
       return {

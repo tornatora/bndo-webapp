@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { practiceKeyFromTitle, practiceStartFeeEUR } from '@/lib/bandi';
 
 type PracticeRef = { id: string; tender_id: string; tender_title: string | null };
 
@@ -13,6 +14,15 @@ type BillingState = {
     createdAt: string;
     url: string | null;
   }>;
+  paymentRecords?: Array<{
+    id: string;
+    applicationId: string | null;
+    grantTitle: string;
+    amount: number;
+    currency: string;
+    status: 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
+    paidAt: string | null;
+  }>;
 };
 
 function practiceLabel(practice: PracticeRef | null) {
@@ -24,14 +34,18 @@ function practiceLabel(practice: PracticeRef | null) {
   return tenderId || 'N/D';
 }
 
+function practiceTotal(practice: PracticeRef | null) {
+  const practiceType = practiceKeyFromTitle(practice?.tender_title ?? practice?.tender_id ?? null);
+  if (!practiceType) return 50;
+  return practiceStartFeeEUR(practiceType);
+}
+
 function defaultBilling(practices: PracticeRef[]): BillingState {
   const payments: BillingState['payments'] = {};
   for (const p of practices) {
-    payments[p.id] = { total: 500, paid: 0 };
+    payments[p.id] = { total: practiceTotal(p), paid: 0 };
   }
-  // Demo: first practice has paid 100.
-  if (practices[0]) payments[practices[0].id] = { total: 500, paid: 100 };
-  return { payments, invoices: [] };
+  return { payments, invoices: [], paymentRecords: [] };
 }
 
 function pct(paid: number, total: number) {
@@ -61,6 +75,8 @@ export function AdminBillingPanel({
   const [amountPaid, setAmountPaid] = useState<string>('');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState<string | null>(null);
+  const [paymentLink, setPaymentLink] = useState<{ url: string; practiceId: string } | null>(null);
 
   const selectedPractice = useMemo(
     () => (selectedAppId === 'all' ? null : practices.find((p) => p.id === selectedAppId) ?? null),
@@ -111,7 +127,7 @@ export function AdminBillingPanel({
     await fetch('/api/admin/billing', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ companyId, billing: next })
+      body: JSON.stringify({ companyId, billing: { payments: next.payments, invoices: next.invoices } })
     });
   }
 
@@ -126,7 +142,7 @@ export function AdminBillingPanel({
       return;
     }
     setError(null);
-    const current = state.payments[selectedAppId] ?? { total: 500, paid: 0 };
+    const current = state.payments[selectedAppId] ?? { total: practiceTotal(selectedPractice), paid: 0 };
     const nextPaid = Math.max(0, Math.min(current.total, current.paid + amount));
     const next: BillingState = {
       ...state,
@@ -198,10 +214,44 @@ export function AdminBillingPanel({
     }
   }
 
+  async function generateStripeLink(practiceId: string) {
+    setGeneratingLink(practiceId);
+    setError(null);
+    setPaymentLink(null);
+    try {
+      const current = practices.find((entry) => entry.id === practiceId) ?? null;
+      const currentTotal = state.payments[practiceId]?.total ?? practiceTotal(current);
+      const currentPaid = state.payments[practiceId]?.paid ?? 0;
+      const remaining = Math.max(0, Number((currentTotal - currentPaid).toFixed(2)));
+      if (remaining <= 0) {
+        setError('Questa pratica risulta già saldata.');
+        return;
+      }
+
+      const resp = await fetch('/api/admin/billing/payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId, applicationId: practiceId, amount: remaining })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Errore generazione link Stripe.');
+      setPaymentLink({ url: data.url, practiceId });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Errore Stripe.');
+    } finally {
+      setGeneratingLink(null);
+    }
+  }
+
   const practicesRows = practices.map((p) => {
-    const pay = state.payments[p.id] ?? { total: 500, paid: 0 };
+    const pay = state.payments[p.id] ?? { total: practiceTotal(p), paid: 0 };
     const percent = pct(pay.paid, pay.total);
-    return { practice: p, pay, percent };
+    const remaining = Math.max(0, Number((pay.total - pay.paid).toFixed(2)));
+    const latestPayment =
+      state.paymentRecords?.find((record) => record.applicationId === p.id && record.status === 'paid') ??
+      state.paymentRecords?.find((record) => record.applicationId === p.id) ??
+      null;
+    return { practice: p, pay, percent, remaining, latestPayment };
   });
 
   const filteredInvoices = state.invoices.filter((i) => (selectedAppId === 'all' ? true : i.applicationId === selectedAppId));
@@ -265,14 +315,49 @@ export function AdminBillingPanel({
                     <div className="admin-table-meta">
                       Pagato: {row.pay.paid} / {row.pay.total} EUR
                     </div>
+                    {row.latestPayment ? (
+                      <div className="admin-table-meta">
+                        Stripe: {row.latestPayment.status} · {row.latestPayment.amount} {row.latestPayment.currency.toUpperCase()}
+                        {row.latestPayment.paidAt
+                          ? ` · ${new Date(row.latestPayment.paidAt).toLocaleString('it-IT')}`
+                          : ''}
+                      </div>
+                    ) : null}
                     <div className="admin-billing-bar" aria-label="Avanzamento pagamento">
                       <div className="admin-billing-bar-fill" style={{ width: `${row.percent}%` }} />
                     </div>
                   </div>
-                  <span className="meta-tag">{row.percent}%</span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="meta-tag">{row.percent}%</span>
+                    <button
+                      type="button"
+                      className="btn-action secondary small"
+                      disabled={generatingLink === row.practice.id || row.remaining <= 0}
+                      onClick={() => generateStripeLink(row.practice.id)}
+                    >
+                      {generatingLink === row.practice.id ? '...' : row.remaining > 0 ? `Richiedi saldo ${row.remaining}€` : 'Saldo completo'}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
+            {paymentLink && (
+              <div className="mt-4 rounded-xl border border-brand.mint bg-brand.mint/5 p-4">
+                <div className="text-sm font-semibold text-brand.navy mb-2">Link Stripe Generato:</div>
+                <div className="flex gap-2">
+                  <input readOnly className="modal-input flex-1 text-xs" value={paymentLink.url} />
+                  <button
+                    className="btn-action primary small"
+                    onClick={() => {
+                      navigator.clipboard.writeText(paymentLink.url);
+                      alert('Copiato!');
+                    }}
+                  >
+                    Copia
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="admin-billing-col">

@@ -5,11 +5,11 @@ import { createClient } from '@/lib/supabase/server';
 import { ADMIN_URL, APP_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
 import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
-function resolveSafeRedirect(target: string | null, fallback: URL, allowedHosts: Set<string>) {
+function resolveSafeRedirect(target: string | null, fallback: URL, allowedHosts: Set<string>, baseUrl: string) {
   if (!target) return fallback;
 
   try {
-    const resolved = new URL(target, `${APP_URL}/`);
+    const resolved = new URL(target, `${baseUrl}/`);
     if (!allowedHosts.has(resolved.host.toLowerCase())) {
       return fallback;
     }
@@ -20,8 +20,15 @@ function resolveSafeRedirect(target: string | null, fallback: URL, allowedHosts:
   }
 }
 
-function redirectWithError(error: string, mode: 'admin' | 'user' = 'user', next: string | null = null) {
-  const url = buildAbsoluteUrl(mode === 'admin' ? ADMIN_URL : APP_URL, '/login');
+function redirectWithError(
+  error: string,
+  mode: 'admin' | 'user' = 'user',
+  next: string | null = null,
+  baseUrls?: { appBaseUrl: string; adminBaseUrl: string }
+) {
+  const appBaseUrl = baseUrls?.appBaseUrl ?? APP_URL;
+  const adminBaseUrl = baseUrls?.adminBaseUrl ?? ADMIN_URL;
+  const url = buildAbsoluteUrl(mode === 'admin' ? adminBaseUrl : appBaseUrl, '/login');
   url.searchParams.set('error', error);
   if (mode === 'admin') {
     url.searchParams.set('mode', 'admin');
@@ -36,16 +43,37 @@ export async function POST(request: NextRequest) {
   const crossSite = rejectCrossSiteMutation(request);
   if (crossSite) return crossSite;
 
+  const requestHost = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  const requestOrigin = request.nextUrl.origin;
+  const isPreviewOrLocalHost =
+    requestHost.endsWith('.netlify.app') ||
+    requestHost.startsWith('localhost') ||
+    requestHost.startsWith('127.0.0.1');
+  const appBaseUrl = isPreviewOrLocalHost ? requestOrigin : APP_URL;
+  const adminBaseUrl = isPreviewOrLocalHost ? requestOrigin : ADMIN_URL;
+
   const formData = await request.formData();
   const identifier = String(formData.get('identifier') ?? '').trim();
   const password = String(formData.get('password') ?? '');
   const mode = String(formData.get('mode') ?? '').trim().toLowerCase() === 'admin' ? 'admin' : 'user';
   const nextParam = String(formData.get('next') ?? '').trim() || null;
-  const adminDefault = buildAbsoluteUrl(ADMIN_URL, '/admin');
-  const allowedHosts = new Set([hostFromBaseUrl(APP_URL), hostFromBaseUrl(ADMIN_URL)]);
+  const adminDefault = buildAbsoluteUrl(adminBaseUrl, '/admin');
+  const allowedHosts = new Set([
+    hostFromBaseUrl(APP_URL),
+    hostFromBaseUrl(ADMIN_URL),
+    requestHost
+  ]);
+  const baseUrls = { appBaseUrl, adminBaseUrl };
 
   if (!identifier || !password) {
-    return redirectWithError('Credenziali obbligatorie', mode, nextParam);
+    return redirectWithError('Credenziali obbligatorie', mode, nextParam, baseUrls);
   }
 
   const rateLimit = enforceRateLimit({
@@ -54,7 +82,7 @@ export async function POST(request: NextRequest) {
     limit: 15,
     windowMs: 60_000,
     message: 'Troppi tentativi di login. Riprova tra poco.'
-  });
+    });
   if (rateLimit) return rateLimit;
 
   const supabaseAdmin = hasRealServiceRoleKey() ? getSupabaseAdmin() : null;
@@ -63,7 +91,7 @@ export async function POST(request: NextRequest) {
   if (!identifier.includes('@')) {
     if (!supabaseAdmin) {
       // Without a real service-role key we cannot safely map username -> email.
-      return redirectWithError('Inserisci la tua email (non username)', mode, nextParam);
+      return redirectWithError('Inserisci la tua email (non username)', mode, nextParam, baseUrls);
     }
 
     const { data: profile } = await supabaseAdmin
@@ -73,7 +101,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (!profile?.email) {
-      return redirectWithError('Username non trovato', mode, nextParam);
+      return redirectWithError('Username non trovato', mode, nextParam, baseUrls);
     }
 
     email = profile.email;
@@ -83,7 +111,7 @@ export async function POST(request: NextRequest) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return redirectWithError('Credenziali non valide', mode, nextParam);
+    return redirectWithError('Credenziali non valide', mode, nextParam, baseUrls);
   }
 
   const {
@@ -99,12 +127,12 @@ export async function POST(request: NextRequest) {
 
     if (mode === 'admin') {
       if (isOps) {
-        const safeTarget = resolveSafeRedirect(nextParam, adminDefault, allowedHosts);
+        const safeTarget = resolveSafeRedirect(nextParam, adminDefault, allowedHosts, adminBaseUrl);
         return NextResponse.redirect(safeTarget, { status: 303 });
       }
 
       await supabase.auth.signOut();
-      return redirectWithError('Questo account non ha accesso admin', 'admin', adminDefault.toString());
+      return redirectWithError('Questo account non ha accesso admin', 'admin', adminDefault.toString(), baseUrls);
     }
 
     if (isOps) {
@@ -112,5 +140,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(buildAbsoluteUrl(APP_URL, '/dashboard'), { status: 303 });
+  const userDefault = buildAbsoluteUrl(appBaseUrl, '/dashboard');
+  const safeUserTarget = resolveSafeRedirect(nextParam, userDefault, allowedHosts, appBaseUrl);
+  return NextResponse.redirect(safeUserTarget, { status: 303 });
 }

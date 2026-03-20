@@ -18,6 +18,9 @@ export interface MatchCardItem {
   whyFit?: string[];
   satisfiedRequirements?: string[];
   missingRequirements?: string[];
+  isClickDay?: boolean;
+  isSpecialArea?: boolean;
+  specialAreaType?: 'zes' | 'sisma' | 'montana' | null;
 }
 
 const statusText: Record<MatchCardItem['hardStatus'], string> = {
@@ -283,11 +286,13 @@ const economicOffer = (
 export function GrantCardPro({
   item,
   requestedAid,
-  onOpenDetail
+  onOpenDetail,
+  onVerifyRequirements
 }: {
   item: MatchCardItem;
   requestedAid?: string;
   onOpenDetail?: (grantId: string) => void;
+  onVerifyRequirements?: (grantId: string) => void;
 }) {
   const availabilityLabel = item.availabilityStatus === 'incoming' ? 'In arrivo' : 'Aperto';
   const probability = Math.max(0, Math.min(100, Math.round(item.probabilityScore)));
@@ -316,8 +321,22 @@ export function GrantCardPro({
             {availabilityLabel}
           </span>
           {mismatch ? <span className="result-tag result-tag--warn">Alternativa al fondo perduto</span> : null}
+          {item.isSpecialArea ? (
+            <span className="result-tag result-tag--live" style={{ background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)', color: '#000' }}>
+              Premium: {item.specialAreaType === 'zes' ? 'ZES' : item.specialAreaType === 'sisma' ? 'Sisma' : 'Area Speciale'}
+            </span>
+          ) : null}
         </div>
       </header>
+
+      {item.isClickDay ? (
+        <div className="result-alert-box" style={{ background: '#FFF3CD', border: '1px solid #FFEBAA', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+            <div style={{ color: '#856404', fontSize: '0.9rem', fontWeight: 600 }}>
+                URGENTE: Bando a sportello (Click Day). I fondi sono limitati, agisci subito!
+            </div>
+        </div>
+      ) : null}
 
       <div className="result-info-line">
         <span>Apertura: {openingLabel}</span>
@@ -344,21 +363,31 @@ export function GrantCardPro({
         <div className="result-actions">
           {onOpenDetail ? (
             <button type="button" className="result-btn result-btn--primary" onClick={() => onOpenDetail(item.grantId)}>
-              Dettagli e requisiti
+              Dettagli Bando
             </button>
           ) : (
             <Link href={`/grants/${item.grantId}`} className="result-btn result-btn--primary">
-              Dettagli e requisiti
+              Dettagli Bando
             </Link>
           )}
-          <a
-            href={consultingLink}
-            target="_blank"
-            rel="noreferrer"
-            className="result-btn result-btn--primary result-btn--consult"
-          >
-            Prenota una consulenza con un consulente BNDO
-          </a>
+          {onVerifyRequirements ? (
+            <button
+              type="button"
+              className="result-btn result-btn--primary result-btn--consult"
+              onClick={() => onVerifyRequirements(item.grantId)}
+            >
+              Verifica requisiti
+            </button>
+          ) : (
+            <a
+              href={consultingLink}
+              target="_blank"
+              rel="noreferrer"
+              className="result-btn result-btn--primary result-btn--consult"
+            >
+              Prenota una consulenza con un consulente BNDO
+            </a>
+          )}
         </div>
         <div className="result-links-inline">
           {item.officialUrl ? (

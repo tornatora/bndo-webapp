@@ -3,12 +3,25 @@ import { z } from 'zod';
 import { getStripeClient } from '@/lib/stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { provisionAccountFromCheckout } from '@/lib/services/provisioning';
-import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/bandi';
+import {
+  ensureBandoApplication,
+  getPracticeConfig,
+  practiceTitle,
+  practiceTypeFromQuizBandoType,
+  type PracticeType,
+} from '@/lib/bandi';
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import type { Json } from '@/lib/supabase/database.types';
 import { randomUUID } from 'crypto';
 import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
+import {
+  getPracticePaymentBySession,
+  markPaymentOnboardingCompleted,
+  resolvePracticeTypeFromAny,
+  upsertPracticePaymentFromIntent,
+  upsertPracticePaymentFromSession,
+} from '@/lib/services/practicePayments';
 import {
   enforceRateLimit,
   getClientIp,
@@ -21,7 +34,8 @@ export const runtime = 'nodejs';
 
 const TextSchema = z.object({
   sessionId: z.string().trim().min(8).optional().nullable(),
-  practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord']).optional().nullable(),
+  quizSubmissionId: z.string().uuid().optional().nullable(),
+  practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord', 'generic']).optional().nullable(),
   email: z.string().trim().email().optional().nullable(),
   pec: z.string().trim().min(3).max(160),
   digitalSignature: z.enum(['yes', 'no']),
@@ -29,8 +43,21 @@ const TextSchema = z.object({
   projectSummary: z.string().trim().max(2000).optional().nullable(),
   acceptPrivacy: z.enum(['yes']),
   acceptTerms: z.enum(['yes']),
-  consentStorage: z.enum(['yes'])
+  consentStorage: z.enum(['yes']),
+  paymentDeferred: z.enum(['yes', 'no']).optional().nullable(),
+  username: z.string().trim().min(3).max(50).optional().nullable(),
+  password: z.string().trim().min(8).max(100).optional().nullable()
 });
+
+type QuizSubmissionLite = {
+  id: string;
+  full_name: string;
+  phone: string;
+  region: string | null;
+  bando_type: string | null;
+  eligibility: 'eligible' | 'not_eligible';
+  created_at: string;
+};
 
 function safeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -72,13 +99,6 @@ async function ensureOpsAutoReply(threadId: string) {
   });
 }
 
-function practiceTypeFromQuiz(bandoType: string | null | undefined): PracticeType | null {
-  const t = (bandoType ?? '').toLowerCase();
-  if (t === 'sud') return 'resto_sud_2_0';
-  if (t === 'centro_nord') return 'autoimpiego_centro_nord';
-  return null;
-}
-
 export async function POST(request: Request) {
   try {
     const crossSite = rejectCrossSiteMutation(request);
@@ -101,6 +121,7 @@ export async function POST(request: Request) {
 
     const parsed = TextSchema.safeParse({
       sessionId: formData.get('sessionId'),
+      quizSubmissionId: formData.get('quizSubmissionId'),
       practiceType: formData.get('practiceType'),
       email: formData.get('email'),
       pec: formData.get('pec'),
@@ -109,15 +130,23 @@ export async function POST(request: Request) {
       projectSummary: formData.get('projectSummary'),
       acceptPrivacy: formData.get('acceptPrivacy'),
       acceptTerms: formData.get('acceptTerms'),
-      consentStorage: formData.get('consentStorage')
+      consentStorage: formData.get('consentStorage'),
+      username: formData.get('username'),
+      password: formData.get('password')
     });
 
     if (!parsed.success) {
       return NextResponse.json({ error: 'Dati non validi.' }, { status: 422 });
     }
 
+    const manualOnboardingEnabled = process.env.ALLOW_MANUAL_ONBOARDING === 'true';
+    const paymentDeferred = parsed.data.paymentDeferred === 'yes';
     const providedSessionId = safeSessionId(parsed.data.sessionId ?? null) ?? '';
     const providedEmail = (parsed.data.email ?? '').trim();
+
+    if (!providedSessionId && !manualOnboardingEnabled && !paymentDeferred) {
+      return NextResponse.json({ error: 'Pagamento non verificato. Completa prima il pagamento Stripe.' }, { status: 403 });
+    }
     if (!providedSessionId && !providedEmail) {
       return NextResponse.json({ error: 'Inserisci la tua email.' }, { status: 422 });
     }
@@ -131,7 +160,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Carica documento identita e codice fiscale.' }, { status: 422 });
     }
 
-    if (!(didDocument instanceof File)) {
+    // Determine practice type early for conditional validation.
+    const requestedPracticeType = (parsed.data.practiceType as PracticeType | null | undefined) ?? null;
+    let paymentRecord = providedSessionId ? await getPracticePaymentBySession(providedSessionId) : null;
+    const paymentPracticeType = resolvePracticeTypeFromAny(paymentRecord?.practice_type ?? null);
+
+    // Initial practice type guess for DID validation.
+    const practiceCandidate: PracticeType = requestedPracticeType ?? paymentPracticeType ?? 'resto_sud_2_0';
+    const config = getPracticeConfig(practiceCandidate);
+
+    if (config.didRequired && !(didDocument instanceof File)) {
       return NextResponse.json({ error: 'Carica la certificazione DID.' }, { status: 422 });
     }
 
@@ -139,7 +177,7 @@ export async function POST(request: Request) {
     const filesToValidate = [
       idDocument,
       taxCodeDocument,
-      didDocument,
+      ...(config.didRequired && didDocument instanceof File ? [didDocument] : []),
       ...quotes.filter((q) => q instanceof File)
     ] as File[];
 
@@ -156,57 +194,141 @@ export async function POST(request: Request) {
       }
     }
 
-    // Determine email and Stripe metadata (best effort).
+    // Determine email and payment metadata.
     let normalizedEmail = providedEmail ? providedEmail.toLowerCase() : '';
-    let checkoutSessionId: string | null = null;
+    let checkoutSessionId: string | null = providedSessionId || null;
     let stripeCustomerId: string | null = null;
     let stripePaymentIntentId: string | null = null;
     let currency: string | null = null;
     let amountPaid = 0;
+    // paymentRecord is already fetched above.
+
+    if (requestedPracticeType && paymentPracticeType && requestedPracticeType !== paymentPracticeType) {
+      return NextResponse.json({ error: 'La sessione di pagamento non corrisponde alla pratica selezionata.' }, { status: 409 });
+    }
+
 
     if (providedSessionId) {
-      try {
-        const stripe = getStripeClient();
-        const session = await stripe.checkout.sessions.retrieve(providedSessionId);
-        if (session.payment_status && session.payment_status !== 'paid') {
-          return NextResponse.json({ error: 'Pagamento non completato.' }, { status: 403 });
+      if (paymentRecord?.status === 'paid') {
+        amountPaid = Math.max(amountPaid, paymentRecord.amount_cents / 100);
+        currency = paymentRecord.currency ?? currency;
+        if (!normalizedEmail && paymentRecord.customer_email) {
+          normalizedEmail = paymentRecord.customer_email.toLowerCase();
         }
-        checkoutSessionId = session.id;
-        stripeCustomerId = typeof session.customer === 'string' ? session.customer : null;
-        stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
-        currency = session.currency ?? null;
-        amountPaid = moneyFromStripe(session.amount_total, session.currency) ?? 0;
+      } else {
+        try {
+          const stripe = getStripeClient();
+          if (providedSessionId.startsWith('pi_')) {
+            const intent = await stripe.paymentIntents.retrieve(providedSessionId);
+            if (intent.status !== 'succeeded') {
+              return NextResponse.json({ error: 'Pagamento non completato.' }, { status: 403 });
+            }
 
-        const stripeEmail = session.customer_details?.email ?? session.customer_email ?? null;
-        if (stripeEmail) normalizedEmail = stripeEmail.toLowerCase();
-      } catch {
-        // Ignore Stripe errors and proceed with manual flow.
+            checkoutSessionId = intent.id;
+            stripeCustomerId = typeof intent.customer === 'string' ? intent.customer : null;
+            stripePaymentIntentId = intent.id;
+            currency = intent.currency ?? null;
+            amountPaid = moneyFromStripe(intent.amount, intent.currency) ?? 0;
+
+            if (intent.receipt_email) {
+              normalizedEmail = intent.receipt_email.toLowerCase();
+            }
+
+            paymentRecord = await upsertPracticePaymentFromIntent({
+              intent,
+              fallbackPracticeType: requestedPracticeType ?? paymentPracticeType,
+              fallbackQuizSubmissionId: parsed.data.quizSubmissionId ?? paymentRecord?.quiz_submission_id ?? null,
+              forceStatus: 'paid',
+            });
+          } else {
+            const session = await stripe.checkout.sessions.retrieve(providedSessionId);
+            if (session.payment_status && session.payment_status !== 'paid') {
+              return NextResponse.json({ error: 'Pagamento non completato.' }, { status: 403 });
+            }
+            checkoutSessionId = session.id;
+            stripeCustomerId = typeof session.customer === 'string' ? session.customer : null;
+            stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+            currency = session.currency ?? null;
+            amountPaid = moneyFromStripe(session.amount_total, session.currency) ?? 0;
+
+            const stripeEmail = session.customer_details?.email ?? session.customer_email ?? null;
+            if (stripeEmail) normalizedEmail = stripeEmail.toLowerCase();
+
+            paymentRecord = await upsertPracticePaymentFromSession({
+              session,
+              fallbackPracticeType: requestedPracticeType ?? paymentPracticeType,
+              fallbackQuizSubmissionId: parsed.data.quizSubmissionId ?? paymentRecord?.quiz_submission_id ?? null,
+              forceStatus: 'paid',
+            });
+          }
+
+          if (paymentRecord) {
+            amountPaid = Math.max(amountPaid, paymentRecord.amount_cents / 100);
+            currency = paymentRecord.currency ?? currency;
+            if (!normalizedEmail && paymentRecord.customer_email) {
+              normalizedEmail = paymentRecord.customer_email.toLowerCase();
+            }
+          }
+        } catch {
+          if (!paymentRecord || paymentRecord.status !== 'paid') {
+            return NextResponse.json(
+              { error: 'Pagamento non ancora verificato. Attendi qualche secondo e riprova.' },
+              { status: 503 }
+            );
+          }
+        }
       }
+    }
+
+    if (!manualOnboardingEnabled && !paymentDeferred && (!paymentRecord || paymentRecord.status !== 'paid')) {
+      return NextResponse.json({ error: 'Pagamento non verificato. Completa prima il pagamento Stripe.' }, { status: 403 });
     }
 
     if (!normalizedEmail) {
       return NextResponse.json({ error: 'Inserisci una email valida.' }, { status: 422 });
     }
-    const { data: quiz } = await supabaseAdmin
-      .from('quiz_submissions')
-      .select('id, full_name, phone, region, bando_type, eligibility, created_at')
-      .eq('email', normalizedEmail)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const preferredQuizSubmissionId = parsed.data.quizSubmissionId ?? paymentRecord?.quiz_submission_id ?? null;
+    let quiz: QuizSubmissionLite | null = null;
 
-    // Quiz is optional: onboarding can be used as a manual link to collect documents and create access.
-    // If present, use it to infer practice; otherwise use practiceType from URL/form if provided, else default.
+    if (preferredQuizSubmissionId) {
+      const { data: quizById } = await supabaseAdmin
+        .from('quiz_submissions')
+        .select('id, full_name, phone, region, bando_type, eligibility, created_at')
+        .eq('id', preferredQuizSubmissionId)
+        .maybeSingle();
+      quiz = (quizById as QuizSubmissionLite | null) ?? null;
+    }
+
+    if (!quiz) {
+      const { data: latestQuiz } = await supabaseAdmin
+        .from('quiz_submissions')
+        .select('id, full_name, phone, region, bando_type, eligibility, created_at')
+        .eq('email', normalizedEmail)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      quiz = (latestQuiz as QuizSubmissionLite | null) ?? null;
+    }
+
+    const practiceTypeFromPayment = resolvePracticeTypeFromAny(paymentRecord?.practice_type ?? null);
     const practiceType: PracticeType =
-      (parsed.data.practiceType as PracticeType | null | undefined) ??
-      practiceTypeFromQuiz(quiz?.bando_type) ??
+      requestedPracticeType ??
+      practiceTypeFromPayment ??
+      practiceTypeFromQuizBandoType(quiz?.bando_type) ??
       'resto_sud_2_0';
+    if (practiceTypeFromPayment && practiceType !== practiceTypeFromPayment) {
+      return NextResponse.json({ error: 'La sessione di pagamento non appartiene a questa pratica.' }, { status: 409 });
+    }
     const displayName =
       quiz?.full_name?.trim() ||
       normalizedEmail.split('@')[0]?.replace(/[._-]+/g, ' ')?.trim() ||
       'Cliente BNDO';
 
-    const effectiveCheckoutSessionId = checkoutSessionId ?? `manual_${randomUUID()}`;
+    const effectiveCheckoutSessionId =
+      checkoutSessionId ?? (manualOnboardingEnabled || paymentDeferred ? `manual_${randomUUID()}` : null);
+    if (!effectiveCheckoutSessionId) {
+      return NextResponse.json({ error: 'Pagamento non verificato. Completa prima il pagamento Stripe.' }, { status: 403 });
+    }
 
     const quoteFiles = quotes.filter((q) => q instanceof File) as File[];
     const quotesText = parsed.data.quotesText?.trim() ?? '';
@@ -223,7 +345,9 @@ export async function POST(request: Request) {
       companyName: displayName,
       contactName: displayName,
       stripeCustomerId,
-      stripePaymentIntentId
+      stripePaymentIntentId,
+      desiredUsername: parsed.data.username,
+      desiredPassword: parsed.data.password
     });
 
     const companyId = provision.companyId;
@@ -318,7 +442,7 @@ export async function POST(request: Request) {
           : parsed.data.digitalSignature === 'no'
             ? 'no'
             : (currentFields.firma_digitale as string | undefined) || '',
-      certificazione_did: 'si',
+      certificazione_did: config.didRequired ? 'si' : 'no',
       preventivi_testo: quotesText || (currentFields.preventivi_testo as string | undefined) || '',
       onboarding_completed_at: new Date().toISOString(),
       legal_consents: nextLegalConsents,
@@ -328,7 +452,10 @@ export async function POST(request: Request) {
       }
     };
 
-    // Initialize billing state for this practice (500 total, paid = Stripe amount).
+    const startFeeEur = getPracticeConfig(practiceType).startFeeCents / 100;
+    const normalizedPaidAmount = Number.isFinite(amountPaid) && amountPaid > 0 ? amountPaid : startFeeEur;
+
+    // Initialize billing state for this practice (totale = start fee pratica).
     const currentBilling = (nextFields.billing as Record<string, unknown> | undefined) ?? null;
     const currentPayments =
       currentBilling && typeof currentBilling === 'object' && !Array.isArray(currentBilling)
@@ -342,8 +469,8 @@ export async function POST(request: Request) {
     const nextPayments = {
       ...currentPayments,
       [applicationId]: {
-        total: 500,
-        paid: Math.max(0, Math.min(500, Number.isFinite(amountPaid) ? amountPaid : 0))
+        total: startFeeEur,
+        paid: Math.max(0, Math.min(startFeeEur, normalizedPaidAmount))
       }
     };
 
@@ -374,8 +501,10 @@ export async function POST(request: Request) {
     const baseDocs: Array<{ label: string; file: File }> = [
       { label: 'Documento di riconoscimento', file: idDocument },
       { label: 'Codice fiscale', file: taxCodeDocument },
-      { label: 'Certificazione DID', file: didDocument }
+      ...(config.didRequired && didDocument instanceof File ? [{ label: 'Certificazione DID', file: didDocument }] : [])
     ];
+
+
 
     for (const doc of baseDocs) {
       const timestamp = Date.now();
@@ -466,8 +595,10 @@ export async function POST(request: Request) {
         '[AVVIO PRATICA]',
         `Pratica: ${practiceLabel}`,
         `Pagamento anticipo: ${amountPaid ? `${amountPaid} ${String(currency ?? '').toUpperCase()}` : 'OK'}`,
-        `Documenti caricati: Documento di riconoscimento, Codice fiscale, Certificazione DID${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
+        `Documenti caricati: Documento di riconoscimento, Codice fiscale${config.didRequired ? ', Certificazione DID' : ''}${quoteFiles.length ? `, Preventivi (${quoteFiles.length})` : ''}`,
         `PEC: ${parsed.data.pec}`,
+
+
         `Firma digitale: ${parsed.data.digitalSignature === 'yes' ? 'Si' : 'No'}`,
         quotesText ? `Preventivi (testo):\n${quotesText}` : null,
         parsed.data.projectSummary ? `Sintesi progetto: ${parsed.data.projectSummary}` : null
@@ -494,6 +625,15 @@ export async function POST(request: Request) {
     const nextNotes = upsertProgressIntoNotes([appRow?.notes ?? '', baseNote].filter(Boolean).join('\n'), 'contract_active');
 
     await supabaseAdmin.from('tender_applications').update({ notes: nextNotes }).eq('id', applicationId);
+
+    if (providedSessionId) {
+      await markPaymentOnboardingCompleted({
+        sessionId: providedSessionId,
+        companyId,
+        userId,
+        applicationId,
+      });
+    }
 
     // Store a lead entry (useful for ops tracking).
     await supabaseAdmin.from('leads').insert({

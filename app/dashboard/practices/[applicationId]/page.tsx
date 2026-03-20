@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import {
   PROGRESS_STEPS,
   computeDerivedProgressKey,
@@ -26,6 +26,7 @@ const SearchSchema = z.object({
 type DocRow = {
   id: string;
   file_name: string;
+  requirement_key: string | null;
   created_at: string;
   storage_path: string;
 };
@@ -70,17 +71,43 @@ export default async function ClientPracticePage({
 
   const { data: docs } = await supabase
     .from('application_documents')
-    .select('id, file_name, created_at, storage_path')
+    .select('id, file_name, requirement_key, created_at, storage_path')
     .eq('application_id', application.id)
     .order('created_at', { ascending: false })
     .limit(120);
 
   const typedDocs = (docs ?? []) as DocRow[];
-  const checklist = computeDocumentChecklist(
-    application.id,
-    practiceTitle,
-    typedDocs.map((d) => ({ application_id: application.id, file_name: d.file_name }))
-  );
+  const { data: dynamicRequirements } = await supabase
+    .from('practice_document_requirements')
+    .select('application_id, requirement_key, label, description, is_required')
+    .eq('application_id', application.id)
+    .order('created_at', { ascending: true });
+  const checklist =
+    (dynamicRequirements ?? []).length > 0
+      ? computeDocumentChecklistFromRequirements(
+          application.id,
+          (dynamicRequirements ?? []).map((requirement) => ({
+            application_id: requirement.application_id,
+            requirement_key: requirement.requirement_key,
+            label: requirement.label,
+            description: requirement.description,
+            is_required: requirement.is_required
+          })),
+          typedDocs.map((doc) => ({
+            application_id: application.id,
+            file_name: doc.file_name,
+            requirement_key: doc.requirement_key
+          }))
+        )
+      : computeDocumentChecklist(
+          application.id,
+          practiceTitle,
+          typedDocs.map((doc) => ({
+            application_id: application.id,
+            file_name: doc.file_name,
+            requirement_key: doc.requirement_key
+          }))
+        );
 
   const missing = checklist.filter((c) => !c.uploaded);
   const missingCount = missing.length;
@@ -190,7 +217,11 @@ export default async function ClientPracticePage({
                       <li key={req.key} className="admin-checklist-item is-missing">
                         <span className="admin-check is-missing" aria-hidden="true" />
                         <span style={{ flex: 1 }}>{req.label}</span>
-                        <ClientUploadDocButton applicationId={application.id} documentLabel={req.label} />
+                        <ClientUploadDocButton
+                          applicationId={application.id}
+                          requirementKey={req.key}
+                          documentLabel={req.label}
+                        />
                       </li>
                     ))}
                   </ul>

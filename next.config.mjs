@@ -29,6 +29,10 @@ const frameOrigins = Array.from(
       'https://bndo.it',
       'https://app.bndo.it',
       'https://admin.bndo.it',
+      'https://checkout.stripe.com',
+      'https://hooks.stripe.com',
+      'https://buy.stripe.com',
+      'https://js.stripe.com',
       normalizeOrigin(process.env.NEXT_PUBLIC_MARKETING_URL),
       normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
       normalizeOrigin(process.env.NEXT_PUBLIC_ADMIN_URL)

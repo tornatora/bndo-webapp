@@ -1,13 +1,13 @@
-import Link from 'next/link';
 import { OnboardingWelcomeClient } from '@/components/landing/OnboardingWelcomeClient';
-import { MARKETING_URL } from '@/lib/site-urls';
-import type { PracticeType } from '@/lib/bandi';
+import { practiceTypeFromGrantSlug, type PracticeType } from '@/lib/bandi';
 
 export const dynamic = 'force-dynamic';
 
 function parsePracticeType(value: string | undefined): PracticeType | undefined {
   const v = (value ?? '').trim().toLowerCase();
   if (!v) return undefined;
+  const bySlug = practiceTypeFromGrantSlug(v);
+  if (bySlug) return bySlug;
   if (v === 'resto_sud_2_0') return 'resto_sud_2_0';
   if (v === 'autoimpiego_centro_nord') return 'autoimpiego_centro_nord';
   return undefined;
@@ -16,20 +16,32 @@ function parsePracticeType(value: string | undefined): PracticeType | undefined 
 export default function OnboardingPage({
   searchParams
 }: {
-  searchParams: { session_id?: string; bando?: string; practice?: string; pratica?: string };
+  searchParams: {
+    session_id?: string;
+    bando?: string;
+    practice?: string;
+    pratica?: string;
+    quiz?: string;
+    preview_step?: string;
+    skip_payment?: string;
+  };
 }) {
   const sessionId = searchParams.session_id;
   const practiceType = parsePracticeType(searchParams.bando ?? searchParams.practice ?? searchParams.pratica);
+  const quizSubmissionId = searchParams.quiz?.trim() || undefined;
+  const parsedPreviewStep = Number(searchParams.preview_step);
+  const previewStep = Number.isInteger(parsedPreviewStep) && parsedPreviewStep >= 1 && parsedPreviewStep <= 7
+    ? (parsedPreviewStep as 1 | 2 | 3 | 4 | 5 | 6 | 7)
+    : undefined;
+  const skipPayment = searchParams.skip_payment === '1';
 
   return (
-    <>
-      <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 50 }}>
-        <Link href={MARKETING_URL} className="onboarding2030-back">
-          Torna al sito
-        </Link>
-      </div>
-      <OnboardingWelcomeClient sessionId={sessionId} practiceType={practiceType} />
-    </>
+    <OnboardingWelcomeClient
+      sessionId={sessionId}
+      practiceType={practiceType}
+      quizSubmissionId={quizSubmissionId}
+      previewStep={previewStep}
+      skipPayment={skipPayment}
+    />
   );
 }
-

@@ -19,7 +19,10 @@ export function isQuestionLike(message: string) {
     n.includes('differenza tra') ||
     n.includes('che cos') ||
     n.includes('requisiti') ||
-    n.includes('spese ammiss') ||
+    n.includes('regime') ||
+    n.includes('rientra') ||
+    n.includes('ammissibil') ||
+    n.includes('finanzia') ||
     n.includes('a sportello') ||
     n.includes('de minimis')
   );

@@ -8,7 +8,7 @@ import { requireOpsProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { getClientSummary } from '@/lib/admin/client-summary';
 import { getMockClientDetail } from '@/lib/mock/data';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import { DocReminderButton } from '@/components/admin/DocReminderButton';
 import { AdminUploadDocButton } from '@/components/admin/AdminUploadDocButton';
 import { AdminPracticeProgress } from '@/components/admin/AdminPracticeProgress';
@@ -307,6 +307,7 @@ export default async function AdminClientDetailPage({
                                                 applicationId={selectedPractice.id}
                                                 companyId={client.companyId}
                                                 documentLabel={req.label}
+                                                requirementKey={req.key}
                                                 disabledReason="Upload admin (mock) non attivo"
                                               />
                                             </div>
@@ -324,21 +325,33 @@ export default async function AdminClientDetailPage({
                                   ) : (
                                     <div className="admin-table">
                                       {docsFiltered.map((doc) => (
-                                        <div key={doc.id} className="admin-table-row">
-                                          <div className="admin-table-main">
-                                            <div className="admin-table-name">{doc.file_name}</div>
-                                            <div className="admin-table-meta">{new Date(doc.created_at).toLocaleString('it-IT')}</div>
-                                          </div>
-                                          <a
-                                            className="btn-doc"
-                                            href={buildMockDocPreviewUrl(doc, client.companyName)}
-                                            target="_blank"
-                                            rel="noreferrer"
+                                          <div
+                                            key={doc.id}
+                                            className={`admin-table-row ${
+                                              doc.file_name.includes('Documento_di_riconoscimento') ||
+                                              doc.file_name.includes('Codice_fiscale') ||
+                                              doc.file_name.includes('Certificazione_DID') ||
+                                              doc.file_name.includes('Preventivo_spesa')
+                                                ? 'is-onboarding'
+                                                : ''
+                                            }`}
                                           >
-                                            <span>👁</span>
-                                            <span>Apri</span>
-                                          </a>
-                                        </div>
+                                            <div className="admin-table-main">
+                                              <div className="admin-table-name">{doc.file_name}</div>
+                                              <div className="admin-table-meta">
+                                                {new Date(doc.created_at).toLocaleString('it-IT')}
+                                              </div>
+                                            </div>
+                                            <a
+                                              className="btn-doc"
+                                              href={buildMockDocPreviewUrl(doc, client.companyName)}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                            >
+                                              <span>👁</span>
+                                              <span>Apri</span>
+                                            </a>
+                                          </div>
                                       ))}
                                     </div>
                                   )}
@@ -536,11 +549,17 @@ export default async function AdminClientDetailPage({
           selectedPractice ? (
             (() => {
               const appDocs = summary.documents.filter((d) => d.application_id === selectedPractice.id);
-              const checklist = computeDocumentChecklist(
-                selectedPractice.id,
-                selectedPractice.tender_title ?? selectedPractice.tender_id,
-                appDocs
+              const dynamicRequirements = summary.practiceRequirements.filter(
+                (requirement) => requirement.application_id === selectedPractice.id
               );
+              const checklist =
+                dynamicRequirements.length > 0
+                  ? computeDocumentChecklistFromRequirements(selectedPractice.id, dynamicRequirements, appDocs)
+                  : computeDocumentChecklist(
+                      selectedPractice.id,
+                      selectedPractice.tender_title ?? selectedPractice.tender_id,
+                      appDocs
+                    );
               const missingCount = checklist.filter((item) => !item.uploaded).length;
               const initialStep = extractProgressFromNotes(selectedPractice.notes) ?? computeDerivedProgressKey(selectedPractice.status, missingCount);
               const title = displayPracticeTitle(selectedPractice);
@@ -654,7 +673,12 @@ export default async function AdminClientDetailPage({
                                               practiceTitle={title}
                                               documentLabel={req.label}
                                             />
-                                            <AdminUploadDocButton applicationId={selectedPractice.id} companyId={companyId} documentLabel={req.label} />
+                                            <AdminUploadDocButton
+                                              applicationId={selectedPractice.id}
+                                              companyId={companyId}
+                                              documentLabel={req.label}
+                                              requirementKey={req.key}
+                                            />
                                           </div>
                                         </div>
                                       </li>
@@ -670,12 +694,23 @@ export default async function AdminClientDetailPage({
                                 ) : (
                                   <div className="admin-table">
                                     {docsFiltered.map((doc) => (
-                                      <div key={doc.id} className="admin-table-row">
+                                      <div
+                                        key={doc.id}
+                                        className={`admin-table-row ${
+                                          doc.file_name.includes('Documento_di_riconoscimento') ||
+                                          doc.file_name.includes('Codice_fiscale') ||
+                                          doc.file_name.includes('Certificazione_DID') ||
+                                          doc.file_name.includes('Preventivo_spesa')
+                                            ? 'is-onboarding'
+                                            : ''
+                                        }`}
+                                      >
                                         <div className="admin-table-main">
                                           <div className="admin-table-name">{doc.file_name}</div>
-                                          <div className="admin-table-meta">{new Date(doc.created_at).toLocaleString('it-IT')}</div>
+                                          <div className="admin-table-meta">
+                                            {new Date(doc.created_at).toLocaleString('it-IT')}
+                                          </div>
                                         </div>
-
                                         {doc.downloadUrl ? (
                                           <a className="btn-doc" href={doc.downloadUrl} target="_blank" rel="noreferrer">
                                             <span>👁</span>

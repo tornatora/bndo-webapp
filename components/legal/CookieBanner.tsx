@@ -22,8 +22,8 @@ export function CookieBanner() {
   const isMarketingHost = useMemo(() => {
     if (typeof window === 'undefined') return false;
     const host = window.location.host.toLowerCase();
-    // Local: bndo.lvh.me. Prod: bndo.it
-    return host === 'bndo.it' || host.startsWith('bndo.');
+    // Local: bndo.lvh.me. Prod: bndo.it. Netlify: *.netlify.app
+    return host === 'bndo.it' || host.startsWith('bndo.') || host.endsWith('.netlify.app');
   }, []);
 
   useEffect(() => {

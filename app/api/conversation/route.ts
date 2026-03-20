@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { fetchIncentiviDocs, mergeIncentiviDocs, INCENTIVI_SOLR_ENDPOINT } from '@/lib/matching/fetchIncentiviShared';
+import { runStreamingChat } from '@/lib/ai/conversationOrchestrator';
 import { z } from 'zod';
 import { addAIFallbackUsage, addPaidAIUsage, canUsePaidAI } from '@/lib/aiBudget';
 import { detectTurnIntent, normalizeForMatch } from '@/lib/conversation/intentRouter';
@@ -27,7 +29,7 @@ import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import type { ContributionPreference, ConversationMode, NextBestField, Session, Step, UserProfile } from '@/lib/conversation/types';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const AI_CHAT_V2_ENABLED = process.env.AI_CHAT_V2?.trim() !== 'false';
@@ -37,8 +39,22 @@ const COOKIE_NAME = 'bndo_assistant_session';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
 
 const payloadSchema = z.object({
-  message: z.string().min(1).max(1200)
+  message: z.string().min(1).max(1200),
+  interactionId: z.string().min(6).max(64).optional()
 });
+
+const commitSchema = z.object({
+  interactionId: z.string().min(6).max(64),
+  assistantText: z.string().min(1).max(2400),
+  userProfile: z.unknown(),
+  step: z.unknown(),
+  lastScanHash: z.string().max(600).nullable().optional()
+});
+
+function safeSliceTurns(turns: Array<{ role: 'user' | 'assistant'; text: string }>, maxTurns: number) {
+  if (turns.length <= maxTurns) return turns;
+  return turns.slice(Math.max(0, turns.length - maxTurns));
+}
 
 function inferMode(args: {
   handoffRequested: boolean;
@@ -64,7 +80,9 @@ function withConversationMeta(args: {
   nextQuestionField?: NextBestField | null;
   profileCompletenessScore?: number;
   scanReadinessReason?: string;
+  scanHash?: string | null;
   questionReasonCode?: string;
+  strategicFeedback?: string;
 }) {
   const nextBestField: NextBestField | null =
     typeof args.nextQuestionField !== 'undefined' ? args.nextQuestionField : nextBestFieldFromStep(args.step);
@@ -86,7 +104,9 @@ function withConversationMeta(args: {
     needsClarification: args.needsClarification,
     profileCompletenessScore: args.profileCompletenessScore,
     scanReadinessReason: args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
+    scanHash: typeof args.scanHash === 'undefined' ? undefined : args.scanHash,
     questionReasonCode: args.questionReasonCode ?? args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
+    strategicFeedback: args.strategicFeedback
   };
 }
 
@@ -311,10 +331,11 @@ function enforceConsultantDirectness(
   const joined = finalSentences.join(' ').trim();
   if (!joined && questionHint) return questionHint;
   if (!joined) return 'Dammi un dettaglio in più per restringere il campo e individuare i match migliori.';
-  if (joined.length > 170) {
-    const short = joined.slice(0, 170);
+  // No more aggressive truncation. Let the LLM be expressive within reasonable bounds.
+  if (joined.length > 400) {
+    const short = joined.slice(0, 400);
     const end = Math.max(short.lastIndexOf('.'), short.lastIndexOf('?'), short.lastIndexOf('!'));
-    return end >= 70 ? short.slice(0, end + 1).trim() : `${short.replace(/[.,;:\s]+$/g, '').trim()}.`;
+    return end >= 150 ? short.slice(0, end + 1).trim() : `${short.replace(/[.,;:\s]+$/g, '').trim()}.`;
   }
   return joined;
 }
@@ -339,13 +360,27 @@ async function generateAssistantTextWithOpenAI(args: {
   qaMode: boolean;
   questionLike: boolean;
   smallTalk: boolean;
+  isOffTopic?: boolean;
+  ambiguities?: string[];
   avoidReply?: string | null;
-}): Promise<AiGenerationResult> {
+  groundedContext?: string | null;
+  strategicFeedback?: string;
+   mental_model?: string | null;
+   strategic_note?: string | null;
+   hypotheses?: string[] | null;
+   risk_assessment?: string | null;
+   success_probability?: number | null;
+   strategic_synthesis?: string | null;
+   commercial_pulse?: string | null;
+   expert_nugget?: string | null;
+   execution_roadmap?: string[] | null;
+   normative_deep_dive?: string | null;
+ }): Promise<AiGenerationResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { text: null, source: 'disabled' };
   if (!(await canUsePaidAI())) return { text: null, source: 'budget' };
 
-  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
 
   const {
     userMessage,
@@ -362,54 +397,48 @@ async function generateAssistantTextWithOpenAI(args: {
     qaMode,
     questionLike,
     smallTalk,
-    avoidReply
-  } = args;
+    isOffTopic,
+    ambiguities,
+    avoidReply,
+     groundedContext,
+     strategicFeedback,
+     mental_model,
+     strategic_note,
+     hypotheses,
+     risk_assessment,
+     success_probability,
+     strategic_synthesis,
+     commercial_pulse,
+     expert_nugget,
+     execution_roadmap,
+     normative_deep_dive
+   } = args;
   const knowledgeContext = buildKnowledgeContextFromRules(userMessage, profile);
   const profileSummary = summarizeProfileForPrompt(profile);
   const lastAssistant = [...(session.recentTurns ?? [])].reverse().find((t) => t.role === 'assistant')?.text ?? null;
 
   const system = [
-    'Sei BNDO: consulente senior di finanza agevolata italiana. Umano con anni di esperienza. Mai AI, mai chatbot, mai assistente virtuale.',
+    'BNDO Architect V7. Singolarità Finanza Agevolata (Italia).',
+    'Sei un advisor senior (commi, leggi, DL 19/2024, DNSH).',
+    '⚠️ CONCISIONE ESTREMA (max 25 parole). Niente preamboli. Vai al punto.',
     '',
-    'IDENTITA E COMPETENZA:',
-    "Conosci finanza agevolata, bandi pubblici, contributi a fondo perduto, finanziamenti agevolati, crediti d'imposta, voucher, Resto al Sud, FUSESE, Nuova Sabatini, ON, Smart&Start Italia.",
-    'Quando un dettaglio non conosci o cambia, dici che lo verificherai con i dati sui bandi.',
-    'Non inventi mai scadenze, percentuali o condizioni specifiche di bandi.',
+    args.groundedContext ? `🎯 FONTE: ${args.groundedContext}` : null,
+    strategicFeedback ? `🔍 MERCATO: ${strategicFeedback}` : null,
+    mental_model ? `🧠 MODELLO: ${mental_model}` : null,
+    strategic_note ? `💡 NOTA: ${strategic_note}` : null,
+    hypotheses && hypotheses.length > 0 ? `🕵️ IPOTESI: ${hypotheses.join(', ')}` : null,
+    risk_assessment ? `⚠️ RISCHI: ${risk_assessment}` : null,
+    success_probability !== undefined && success_probability !== null ? `📈 SUCCESS: ${success_probability}%` : null,
+    strategic_synthesis ? `🔮 SINTESI PROGETTUALE: "${strategic_synthesis}".` : null,
+    execution_roadmap && execution_roadmap.length > 0 ? `🏗️ ROADMAP ESECUTIVA: ${execution_roadmap.join(' → ')}.` : null,
+    normative_deep_dive ? `⚖️ DETTAGLIO NORMATIVO (ONNISCIENZA): "${normative_deep_dive}".` : null,
+    commercial_pulse ? `🎭 MENTOR PULSE: L'utente è "${commercial_pulse}".` : null,
+    expert_nugget ? `💎 EXPERT NUGGET: "${expert_nugget}".` : null,
     '',
-    'TONO E STILE:',
-    'Lucido, concreto, veloce a capire. Autorevole ma caldo, mai burocratico. Varia struttura delle frasi e lessico naturalmente.',
-    'Niente frasi fisse: no "Come posso aiutarti?", no "Perfetto!", no "Capisco!", no "Fammi sapere...", no "Se vuoi posso...".',
-    "Non ripetere quello che ha detto l'utente. Non fare domande a raffica tipo interrogatorio.",
-    'Massimo 1-2 frasi per risposta, dirette e operative. Zero markdown, liste, bullet points.',
-    '',
-    'CONVERSAZIONE:',
-    'RISPONDI PRIMA alla domanda/esigenza concreta dell\'utente, POI se serve chiedi UN solo dato critico, con naturalezza.',
-    'Se l\'utente fa una domanda puntuale su una misura o bando (es. Resto al Sud), rispondi in modo GROUNDED basandoti SOLO sul contesto fornito. Distingui chiaramente tra: "sì", "no", "sì, ma in certe condizioni", oppure "non confermabile con certezza". Mai inventare. Mai rispondere con falsa sicurezza. Mai forzare l\'onboarding se la richiesta è una domanda puntuale.',
-    'Se i dati sono sufficienti for il matching, dì chiaramente che procedi alla ricerca nei bandi e NON fare più domande.',
-    'Se manca UN solo dato critico, chiedilo naturalmente dopo la risposta.',
-    "Se l'utente e confuso, chiarisci senza pedanteria. Se e diretto, sii diretto.",
-    'Non ripetere domande gia risposte. Non chiedere dati gia nel profilo.',
-    'Se vuole fare domande prima del profiling, rispondi alle sue domande senza forzare i dati nello stesso turno.',
-    "Se Q&A mode: non chiedere profiling finche non chiede esplicitamente il matching.",
-    "Se il messaggio e meta/conversazionale, evita di ridirigere meccanicamente al form.",
-    'Se hai risposto in modo completo, chiudi anche senza domanda finale.',
-    '',
-    'ANTI-PATTERN:',
-    'No "Ciao, sono il tuo assistente BNDO" dopo il primo saluto.',
-    'No ripetizioni di struttura di frase. No tono da modulo/questionario.',
-    'Niente filler words o preamboli.',
-    '',
-    'OFF-TOPIC:',
-    'Se l\'utente chiede qualcosa che non riguarda finanza agevolata, bandi, contributi, finanziamenti o incentivi per imprese,',
-    'rispondi brevemente e con cortesia che sei specializzato esclusivamente in finanza agevolata e incentivi per imprese italiane.',
-    'Non cercare di rispondere a domande su cucina, sport, meteo, tecnologia, salute o altri argomenti non correlati.',
-    'Esempio: "Mi occupo solo di finanza agevolata per imprese — su questo posso aiutarti davvero. Dimmi il tuo progetto e dove operi."',
-    '',
-    avoidReply ? `ATTENZIONE: Non ripetere questa struttura: ${JSON.stringify(avoidReply)}` : null,
-    '',
-    'PRIMO MESSAGGIO (saluto puro):',
-    "Se isFirstTouch=true e isGreetingOnly=true e messaggio e solo saluto, rispondi ESATTAMENTE:",
-    '"Ciao, sono il tuo consulente BNDO. Dimmi in una frase cosa vuoi finanziare e dove operi."',
+    '🛡️ SCAN CONSTRAINT:',
+    shouldScanNow 
+      ? 'Comunica con entusiasmo che stai attivando il motore di ricerca di precisione e che ora vedrà i risultati esatti. NON FARE ALTRE DOMANDE.' 
+      : 'NON parlare di ricerca o risultati finché il profilo non è strategicamente pronto. Concentrati sulla consulenza e sul completamento dei dati mancanti.',
     '',
     'TUTTI I SUCCESSIVI: vai diritto al merito.'
   ]
@@ -488,7 +517,7 @@ async function generateAssistantTextWithOpenAI(args: {
     .join('\n');
 
   const history = (session.recentTurns ?? [])
-    .slice(-8)
+    .slice(-16)
     .map((t) => `${t.role === 'user' ? 'Utente' : 'Assistente'}: ${t.text}`)
     .join('\n');
 
@@ -507,7 +536,7 @@ async function generateAssistantTextWithOpenAI(args: {
       }
     ],
     temperature: 0.45,
-    max_output_tokens: 350
+    max_output_tokens: 600
   } as const;
 
   try {
@@ -603,6 +632,15 @@ function emptyProfile(): UserProfile {
     contributionPreference: null,
     contactEmail: null,
     contactPhone: null,
+    teamMajority: null,
+    agricultureStatus: null,
+    tech40: null,
+    professionalRegister: null,
+    isThirdSector: null,
+    propertyStatus: null,
+    foundationYear: null,
+    annualTurnover: null,
+    isInnovative: null,
     slotSource: {}
   };
 }
@@ -803,6 +841,8 @@ function getNextStep(profile: UserProfile): Step {
       return 'fundingGoal';
     case 'sector':
       return 'sector';
+    case 'legalForm':
+      return 'legalForm';
     case 'founderData':
       return 'activityType'; // chiediamo età/occupazione nello stesso step
     case 'budgetOrPreference':
@@ -1622,8 +1662,9 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { message } = payloadSchema.parse(body);
+    const { message, interactionId: rawInteractionId } = payloadSchema.parse(body);
     const trimmed = message.trim();
+    const interactionId = rawInteractionId ?? `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 
     const session = readSessionCookie() ?? {
       step: 'fundingGoal' as Step,
@@ -1634,153 +1675,144 @@ export async function POST(request: Request) {
       qaMode: false
     };
 
+    // Persist user message immediately so the next turn "remembers" even with streaming.
+    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
+    const lastTurn = turns[turns.length - 1] ?? null;
+    if (!(lastTurn?.role === 'user' && lastTurn.text === trimmed)) {
+      turns.push({ role: 'user', text: trimmed });
+    }
+    session.recentTurns = safeSliceTurns(turns, 16); // Buffer set to match AI context limit
+    (session as any).pendingInteractionId = interactionId;
+    writeSessionCookie(session);
+
     let profile = session.userProfile;
     let profileMemory = session.profileMemory ?? emptyProfileMemory();
     let profileProgressedThisTurn = false;
 
-    // --- NEW ORCHESTRATION FLOW ---
-    const { mergedProfile, finalAction, intent, missing_fields } = await runTwoPassChat(trimmed, profile);
+    // --- STREAMING ORCHESTRATION ---
+    const historyForOrchestrator = (session.recentTurns ?? [])
+      .slice(-16) // Increased from 8 to 16
+      .map(t => ({ role: t.role, text: t.text }));
 
-    // Track progression for session handling
-    const changed = getChangedFields(profile, mergedProfile as UserProfile);
-    if (changed.length > 0) {
-      profile = mergedProfile as UserProfile;
-      profileMemory = markProfileFields(profileMemory, changed, 'system');
-      profileProgressedThisTurn = true;
-    }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          let lastMetadata: any = null;
+          
+          for await (const chunk of runStreamingChat(trimmed, session.userProfile as UserProfile, historyForOrchestrator)) {
+            if (chunk.type === 'metadata') {
+              lastMetadata = chunk.content;
+              
+              // Process final state for metadata delivery
+              const profile = lastMetadata.mergedProfile;
+              const scanReadiness = evaluateScanReadiness(profile);
+              const scanReady = scanReadiness.ready;
+              const hardScanReady = scanReadiness.hardScanReady;
+              const softScanReady = scanReadiness.softScanReady;
+              const adaptiveReadiness = isScanReadyAdaptive(profile);
+              const autoReady = scanReady || adaptiveReadiness.ready;
+              const scanHash = (hardScanReady || softScanReady || adaptiveReadiness.ready) ? computeScanHash(profile) : null;
+              const scanIntentRequested =
+                lastMetadata.finalAction === 'run_scan' ||
+                lastMetadata.finalAction === 'refine_after_scan' ||
+                lastMetadata.intent === 'scan_ready' ||
+                lastMetadata.intent === 'discovery';
+              
+              const shouldScanNow = Boolean(
+                scanIntentRequested &&
+                ((autoReady && (scanHash !== session.lastScanHash || lastMetadata.intent === 'scan_ready' || lastMetadata.intent === 'discovery')) ||
+                 (session.lastAskedStep === 'preScanConfirm' && hardScanReady))
+              );
 
-    const isNewSession = isProfileEmpty(profile);
-    // Usa il nuovo Profile Completeness Engine V2
-    const scanReadiness = evaluateScanReadiness(profile as UserProfile);
-    const scanReady = scanReadiness.ready; // strong_ready only
-    const hardScanReady = scanReadiness.hardScanReady; // hard_scan_ready or strong_ready
-    const softScanReady = scanReadiness.softScanReady;
-    
-    // CRITICAL: compute scanHash for both hard and soft scans
-    const scanHash = (hardScanReady || softScanReady) ? computeScanHash(profile) : null;
-    const lastScanHash = session.lastScanHash ?? null;
+              const nextStep = shouldScanNow ? 'ready' : getNextStep(profile);
+              const mode = inferMode({
+                 handoffRequested: lastMetadata.finalAction === 'handoff_human',
+                 shouldScanNow,
+                 qaModeActive: lastMetadata.intent === 'general_qa' || lastMetadata.intent === 'measure_question'
+              });
 
-    // Finer-grained intent flags
-    const smallTalk = intent === 'small_talk';
-    const greeting = /\b(ciao|buongiorno|buonasera|salve|hey|hi|hello)\b/i.test(trimmed);
-    const questionLike = isQuestionLike(trimmed) || intent === 'measure_question' || intent === 'general_qa';
+              const meta = withConversationMeta({
+                userProfile: profile,
+                step: nextStep,
+                assistantText: lastMetadata.response_text || "",
+                readyToScan: shouldScanNow,
+                mode,
+                action: shouldScanNow ? 'run_scan' : lastMetadata.finalAction,
+                aiSource: 'openai',
+                needsClarification: !shouldScanNow && lastMetadata.finalAction === 'ask_clarification',
+                nextQuestionField: nextBestFieldFromStep(nextStep as Step),
+                profileCompletenessScore: profileCompletenessScore(normalizeProfile(profile), scanReadiness.missingSignals),
+                scanReadinessReason: scanReadinessReasonForStep(nextStep as Step, profile),
+                scanHash: shouldScanNow ? scanHash : null,
+                strategicFeedback: lastMetadata.strategicFeedback
+              });
 
-    const askedCounts = session.askedCounts ?? {};
-    let nextStep = getNextStep(profile as UserProfile);
-
-    // ── LOGICA PRE-SCAN CONFIRM ──────────────────────────────────────────────
-    // Se nel turno PRECEDENTE avevamo chiesto la domanda di conferma pre-scan,
-    // qualsiasi risposta dell'utente (tranne un "sì ho altro da aggiungere")
-    // viene trattata come conferma di procedere allo scan.
-    const wasInPreScanConfirm = session.lastAskedStep === 'preScanConfirm';
-    const userAddsMore = wasInPreScanConfirm && (
-      // L'utente ha fornito dati aggiuntivi che cambiano il profilo
-      profileProgressedThisTurn ||
-      // O ha detto esplicitamente che vuol aggiungere qualcosa
-      /\b(ho altro|voglio aggiungere|anche|in più|specifico|specific|aggiungo|preciso)\b/i.test(trimmed)
-    );
-
-    // Se eravamo in preScanConfirm e l'utente NON ha aggiunto dati utili,
-    // andiamo direttamente allo scan
-    const confirmedFromPreScan = wasInPreScanConfirm && !userAddsMore;
-
-    // Determine if we should trigger the scanner in the frontend
-    // REGOLA DEFINITIVA:
-    //   Caso A: il profilo è strong_ready (5 pilastri completi) → scan automatico
-    //   Caso B: l'utente ha confermato dal preScanConfirm → scan anche se solo pre_scan_ready
-    // In entrambi i casi, evitiamo re-scan se l'hash del profilo non è cambiato.
-    const isNewScan = !lastScanHash || scanHash !== lastScanHash;
-    const shouldScanNow = Boolean(
-      !smallTalk &&
-      (
-        // Caso A: strong_ready + hash diverso da ultimo scan
-        (scanReady && isNewScan) ||
-        // Caso B: confermato da preScanConfirm + profilo almeno pre_scan_ready
-        (confirmedFromPreScan && hardScanReady)
-      )
-    );
-
-    // Anti-repetition su step normale
-    if (!profileProgressedThisTurn && nextStep === session.lastAskedStep && nextStep !== 'preScanConfirm') {
-      nextStep = fallbackStepAfterStall(nextStep, profile as UserProfile);
-    }
-
-    const effectiveNextStep: Step = shouldScanNow ? 'ready' : nextStep;
-    const attempt = (askedCounts[effectiveNextStep] ?? 0) + 1;
-
-    // Grounded Question Hint (Deterministic)
-    const questionHint = shouldScanNow ? null : questionForStepWithProfile(effectiveNextStep, profile, trimmed, attempt);
-
-    // AI Text Generation (Slightly simplified)
-    const openAiResult = await generateAssistantTextWithOpenAI({
-      userMessage: trimmed,
-      session,
-      profile,
-      nextStep: effectiveNextStep as Step,
-      recap: (shouldScanNow || changed.length > 0) ? profileRecap(profile) : null,
-      attempt,
-      questionHint,
-      shouldScanNow,
-      scanReady,
-      isGreetingOnly: greeting && smallTalk,
-      isFirstTouch: isNewSession,
-      qaMode: intent === 'general_qa' || intent === 'measure_question',
-      questionLike,
-      smallTalk
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'metadata', content: { ...meta, interactionId } })}\n\n`)
+              );
+            } else {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+            }
+          }
+        } catch (err) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: 'Errore nello streaming' })}\n\n`));
+        } finally {
+          controller.close();
+        }
+      }
     });
 
-    let finalAssistantText = openAiResult.text || (questionHint ?? 'Capisco. Dimmi pure.');
-    finalAssistantText = applyTonePolicy(finalAssistantText, 'quasi_amichevole');
-
-    const nextTurns = [...(session.recentTurns ?? []), { role: 'user' as const, text: trimmed }, { role: 'assistant' as const, text: finalAssistantText }]
-      .slice(-8);
-
-    const nextSession: Session = {
-      step: effectiveNextStep as Step,
-      userProfile: profile,
-      profileMemory,
-      lastScanHash: shouldScanNow ? scanHash : lastScanHash,
-      askedCounts: { ...askedCounts, [effectiveNextStep]: attempt },
-      lastAskedStep: effectiveNextStep,
-      recentTurns: nextTurns,
-      humanHandoffRequested: finalAction === 'handoff_human',
-      humanHandoffCompleted: false,
-      qaMode: intent === 'general_qa' || intent === 'measure_question'
-    };
-    writeSessionCookie(nextSession);
-
-    const mode = inferMode({
-      handoffRequested: finalAction === 'handoff_human',
-      shouldScanNow,
-      qaModeActive: intent === 'general_qa' || intent === 'measure_question'
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      }
     });
 
-    // CRITICAL: quando shouldScanNow=true, la action DEVE essere 'run_scan'
-    // indipendentemente da cosa dice l'orchestrator LLM.
-    // Il frontend controlla json.action === 'run_scan' per avviare lo scanner.
-    const effectiveAction = shouldScanNow ? 'run_scan' : finalAction;
-
-    return NextResponse.json(
-      withConversationMeta({
-        userProfile: nextSession.userProfile,
-        step: nextSession.step,
-        assistantText: finalAssistantText,
-        readyToScan: shouldScanNow,
-        mode,
-        action: effectiveAction,
-        aiSource: openAiResult.source,
-        needsClarification: !shouldScanNow && effectiveAction === 'ask_clarification',
-        nextQuestionField: nextBestFieldFromStep(effectiveNextStep as Step),
-        profileCompletenessScore: profileCompletenessScore(normalizeProfile(profile), scanReadiness.missingSignals),
-        scanReadinessReason: scanReadinessReasonForStep(effectiveNextStep as Step, profile),
-      })
-    );
   } catch (e) {
     if (e instanceof z.ZodError) {
       return NextResponse.json({ error: 'Payload non valido.' }, { status: 422 });
     }
     console.error('Conversation Error:', e);
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Errore conversazione.' }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { interactionId, assistantText, userProfile, step, lastScanHash } = commitSchema.parse(body);
+
+    const session = readSessionCookie();
+    if (!session) return NextResponse.json({ ok: false, error: 'Sessione non trovata.' }, { status: 404 });
+
+    if ((session as any).lastCommittedInteractionId === interactionId) {
+      return NextResponse.json({ ok: true });
+    }
+
+    session.userProfile = userProfile as UserProfile;
+    session.step = step as Step;
+    if (typeof lastScanHash !== 'undefined') session.lastScanHash = lastScanHash ?? null;
+
+    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
+    const lastTurn = turns[turns.length - 1] ?? null;
+    if (!(lastTurn?.role === 'assistant' && lastTurn.text === assistantText)) {
+      turns.push({ role: 'assistant', text: assistantText });
+    }
+    session.recentTurns = safeSliceTurns(turns, 16);
+
+    (session as any).lastCommittedInteractionId = interactionId;
+    (session as any).pendingInteractionId = null;
+    writeSessionCookie(session);
+
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return NextResponse.json({ ok: false, error: 'Payload non valido.' }, { status: 422 });
+    }
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'Errore commit.' }, { status: 500 });
   }
 }
 

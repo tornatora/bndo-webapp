@@ -1,6 +1,8 @@
 'use client';
 
+import Image from 'next/image';
 import { useRef, useState, useEffect } from 'react';
+import { MARKETING_URL } from '@/shared/lib';
 import styles from './BndiHomeView.module.css';
 
 type Props = {
@@ -12,12 +14,7 @@ export function BndiHomeView({ onOpenScanner: _onOpenScanner }: Props) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [scrolled, setScrolled] = useState(false);
 
-  const appBase = 'https://bndo.it';
-  const quizUrl = `${appBase}/quiz/autoimpiego`;
-  const privacyUrl = `${appBase}/privacy`;
-  const cookieUrl = `${appBase}/cookie-policy`;
-  const gdprUrl = `${appBase}/gdpr`;
-  const termsUrl = `${appBase}/termini`;
+  const quizUrl = `${MARKETING_URL}/quiz/autoimpiego`;
 
   const scrollTo = (id: 'bandi' | 'servizi' | 'processo') => {
     const node = document.getElementById(`native-home-${id}`);
@@ -40,7 +37,7 @@ export function BndiHomeView({ onOpenScanner: _onOpenScanner }: Props) {
         <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ''}`}>
           <nav className={styles.nav}>
             <div className={styles.logo}>
-              <img src="/Logo-BNDO-header.png" alt="BNDO" width={220} height={64} />
+              <Image src="/Logo-BNDO-header.png" alt="BNDO" width={220} height={64} priority />
             </div>
             <ul className={styles.navMenu}>
               <li>
@@ -394,76 +391,6 @@ export function BndiHomeView({ onOpenScanner: _onOpenScanner }: Props) {
             </div>
           </section>
         </main>
-
-        <footer className={styles.footer}>
-          <div className={styles.footerGrid}>
-            <div className={styles.footerCol}>
-              <h4>BNDO</h4>
-              <p>La piattaforma con esperti reali per i bandi pubblici Resto al Sud 2.0 e Autoimpiego Centro Nord</p>
-            </div>
-            <div className={styles.footerCol}>
-              <h4>Bandi</h4>
-              <ul>
-                <li>
-                  <button type="button" onClick={() => scrollTo('bandi')}>
-                    Resto al Sud 2.0
-                  </button>
-                </li>
-                <li>
-                  <button type="button" onClick={() => scrollTo('bandi')}>
-                    Autoimpiego Centro Nord
-                  </button>
-                </li>
-                <li>
-                  <button type="button" onClick={() => scrollTo('servizi')}>
-                    Servizi
-                  </button>
-                </li>
-              </ul>
-            </div>
-            <div className={styles.footerCol}>
-              <h4>Processo</h4>
-              <ul>
-                <li>
-                  <button type="button" onClick={() => scrollTo('processo')}>
-                    Come funziona
-                  </button>
-                </li>
-                <li>
-                  <button type="button" onClick={() => scrollTo('servizi')}>
-                    Costi
-                  </button>
-                </li>
-                <li>
-                  <a href="#">FAQ</a>
-                </li>
-              </ul>
-            </div>
-            <div className={styles.footerCol}>
-              <h4>Supporto</h4>
-              <ul>
-                <li>
-                  <a href="https://wa.me/393477298671" target="_blank" rel="noreferrer">
-                    Contatti
-                  </a>
-                </li>
-                <li>
-                  <a href={privacyUrl}>Privacy</a>
-                </li>
-                <li>
-                  <a href={cookieUrl}>Cookie</a>
-                </li>
-                <li>
-                  <a href={gdprUrl}>GDPR</a>
-                </li>
-                <li>
-                  <a href={termsUrl}>Termini</a>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div className={styles.footerBottom}>© 2026 BNDO</div>
-        </footer>
       </div>
     </section>
   );

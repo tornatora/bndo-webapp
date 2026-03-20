@@ -205,6 +205,10 @@ function SubmissionCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const submittedAt = new Date(sub.created_at);
+  const submittedAtLabel = Number.isNaN(submittedAt.getTime())
+    ? 'N/D'
+    : submittedAt.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const nameParts = (sub.full_name || 'N/D').split(' ');
   const firstName = nameParts[0] || 'N/D';
   const lastName = nameParts.slice(1).join(' ') || '';
@@ -233,7 +237,7 @@ function SubmissionCard({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {sub.region ? <span style={{ fontSize: 12, color: '#64748B', background: '#F1F5F9', borderRadius: 4, padding: '2px 8px' }}>{sub.region}</span> : null}
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
-            {new Date(sub.created_at).toLocaleDateString('it-IT')}
+            {submittedAtLabel}
           </span>
           <span style={{ fontSize: 14 }}>{expanded ? '▲' : '▼'}</span>
         </div>
@@ -245,6 +249,10 @@ function SubmissionCard({
 }
 
 function SubmissionDetails({ submission: sub }: { submission: QuizSubmission }) {
+  const submittedAt = new Date(sub.created_at);
+  const submittedAtLabel = Number.isNaN(submittedAt.getTime())
+    ? 'N/D'
+    : submittedAt.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const questions = useMemo(() => getQuizQuestions(sub.bando_type), [sub.bando_type]);
   const answersRecord = useMemo(() => safeAnswersRecord(sub.answers as unknown as Json), [sub.answers]);
 
@@ -273,6 +281,9 @@ function SubmissionDetails({ submission: sub }: { submission: QuizSubmission }) 
 
   return (
     <div style={{ marginTop: 12, borderTop: '1px solid #E2E8F0', paddingTop: 12 }}>
+      <div style={{ marginBottom: 10, fontSize: 12, color: '#64748B', fontWeight: 600 }}>
+        Inviato il: {submittedAtLabel}
+      </div>
       {rows.length === 0 ? (
         <div style={{ color: '#94A3B8', fontSize: 13 }}>Nessuna risposta disponibile.</div>
       ) : (

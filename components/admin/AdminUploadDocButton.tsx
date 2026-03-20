@@ -6,11 +6,13 @@ export function AdminUploadDocButton({
   applicationId,
   companyId,
   documentLabel,
+  requirementKey,
   disabledReason
 }: {
   applicationId: string;
   companyId: string;
   documentLabel: string;
+  requirementKey?: string;
   disabledReason?: string;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -28,6 +30,9 @@ export function AdminUploadDocButton({
       fd.append('applicationId', applicationId);
       fd.append('companyId', companyId);
       fd.append('documentLabel', documentLabel);
+      if (requirementKey) {
+        fd.append('requirementKey', requirementKey);
+      }
       fd.append('file', file);
 
       const res = await fetch('/api/admin/applications/upload', { method: 'POST', body: fd });

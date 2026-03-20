@@ -22,6 +22,10 @@ export type ScanResultLike = {
   budgetTotal?: number | null;
   economicOffer?: Record<string, unknown> | null;
   probabilityScore?: number;
+  feasibilityScore?: number;
+  isClickDay?: boolean;
+  isSpecialArea?: boolean;
+  specialAreaType?: 'zes' | 'sisma' | 'montana' | null;
 };
 
 export type CandidateLike<T extends ScanResultLike = ScanResultLike> = {
@@ -74,6 +78,18 @@ export type NormalizedMatchingProfile = {
   budget: number | null;
   requestedContribution: number | null;
   atecoDigits: string[];
+  
+  // Advanced Intelligence Fields
+  teamMajority?: "female" | "youth" | "mixed" | "none" | null;
+  agricultureStatus?: "has_land_iap" | "no_land_iap" | "unknown" | null;
+  tech40?: boolean | null;
+  professionalRegister?: boolean | null;
+  isThirdSector?: boolean | null;
+  propertyStatus?: 'owned' | 'rented_registered' | 'none' | null;
+  foundationYear?: number | null;
+  annualTurnover?: number | null;
+  isInnovative?: boolean | null;
+  companySize?: 'micro' | 'piccola' | 'media' | 'grande' | null;
 };
 
 export type ScanMissingSignal =

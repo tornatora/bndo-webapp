@@ -13,6 +13,8 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const applicationId = String(formData.get('applicationId') ?? '');
+    const requirementKeyRaw = String(formData.get('requirementKey') ?? '').trim();
+    const requirementKey = requirementKeyRaw ? requirementKeyRaw : null;
     const documentLabel = String(formData.get('documentLabel') ?? '');
     const file = formData.get('file');
 
@@ -83,11 +85,20 @@ export async function POST(request: Request) {
       file_name: fileName,
       storage_path: storagePath,
       file_size: file.size,
-      mime_type: file.type || 'application/octet-stream'
+      mime_type: file.type || 'application/octet-stream',
+      requirement_key: requirementKey
     });
 
     if (docError) {
       return NextResponse.json({ error: `Inserimento documento fallito: ${docError.message}` }, { status: 500 });
+    }
+
+    if (requirementKey) {
+      await supabase
+        .from('practice_document_requirements')
+        .update({ status: 'uploaded' })
+        .eq('application_id', applicationId)
+        .eq('requirement_key', requirementKey);
     }
 
     // Notify consultant thread (non-blocking).
@@ -113,7 +124,7 @@ export async function POST(request: Request) {
         await supabase.from('consultant_messages').insert({
           thread_id: threadId,
           sender_profile_id: profile.id,
-          body: `Ho caricato il documento ${fileName} per la mia pratica.`
+          body: `Ho caricato il documento ${fileName}${requirementKey ? ` (requisito: ${requirementKey})` : ''} per la mia pratica.`
         });
       }
     } catch {

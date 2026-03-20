@@ -41,10 +41,14 @@ export type FallbackGrantDetail = {
   sectors: string[];
   officialUrl: string;
   officialAttachments: string[];
+  description: string | null;
+  cpvCode?: string | null;
   requisitiHard: Record<string, unknown>;
   requisitiSoft: Record<string, unknown>;
   requisitiStrutturati: Record<string, unknown>;
+  requiredDocuments?: string[];
 };
+
 
 export type FallbackGrantExplainability = {
   hardStatus: 'eligible' | 'not_eligible' | 'unknown';
@@ -192,6 +196,80 @@ function resolveGrantParts(grantId: string) {
   };
 }
 
+function normalizeLookupValue(value: string): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-+/g, '-');
+}
+
+function extractPathTail(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  try {
+    const asUrl = new URL(trimmed);
+    const parts = asUrl.pathname.split('/').filter(Boolean);
+    return parts[parts.length - 1] ?? '';
+  } catch {
+    const parts = trimmed.split('/').filter(Boolean);
+    return parts[parts.length - 1] ?? '';
+  }
+}
+
+function buildDocLookupKeys(doc: IncentiviDoc): Set<string> {
+  const keys = new Set<string>();
+  const push = (value: string | number | undefined | null) => {
+    if (value === undefined || value === null) return;
+    const normalized = normalizeLookupValue(String(value));
+    if (normalized) keys.add(normalized);
+  };
+
+  push(doc.id);
+  push(doc.title);
+  push(doc.url);
+  push(extractPathTail(String(doc.url ?? '')));
+  push(doc.institutionalLink);
+  push(extractPathTail(String(doc.institutionalLink ?? '')));
+  return keys;
+}
+
+function buildGrantLookupCandidates(grantId: string): Set<string> {
+  const { originalId, rawId } = resolveGrantParts(grantId);
+  const candidates = new Set<string>();
+  const push = (value: string) => {
+    const normalized = normalizeLookupValue(value);
+    if (normalized) candidates.add(normalized);
+  };
+
+  push(originalId);
+  push(rawId);
+  push(extractPathTail(originalId));
+  push(extractPathTail(rawId));
+  push(rawId.replace(/^grant-?/i, ''));
+  push(rawId.replace(/^bando-?/i, ''));
+  return candidates;
+}
+
+function tokenSet(value: string): Set<string> {
+  return new Set(
+    normalizeLookupValue(value)
+      .split('-')
+      .filter((token) => token.length >= 3)
+  );
+}
+
+function overlapScore(target: Set<string>, source: Set<string>): number {
+  if (target.size === 0 || source.size === 0) return 0;
+  let overlap = 0;
+  target.forEach((token) => {
+    if (source.has(token)) overlap += 1;
+  });
+  return overlap / target.size;
+}
+
 function strategicDocToIncentiviDoc(rawDoc: unknown): IncentiviDoc {
   const doc = (rawDoc ?? {}) as Record<string, unknown>;
   return {
@@ -262,6 +340,44 @@ async function findLocalDocByGrantId(grantId: string): Promise<IncentiviDoc | nu
     const byStrategic = docs.find((doc) => String(doc.id ?? '').trim() === strategicId);
     if (byStrategic) return byStrategic;
   }
+
+  const lookupCandidates = buildGrantLookupCandidates(grantId);
+  if (lookupCandidates.size === 0) return null;
+
+  for (const doc of docs) {
+    const docKeys = buildDocLookupKeys(doc);
+    for (const lookup of lookupCandidates) {
+      if (docKeys.has(lookup)) {
+        return doc;
+      }
+    }
+  }
+
+  const lookupTokenUnion = new Set<string>();
+  for (const value of lookupCandidates) {
+    tokenSet(value).forEach((token) => lookupTokenUnion.add(token));
+  }
+  if (lookupTokenUnion.size === 0) return null;
+
+  let best: IncentiviDoc | null = null;
+  let bestScore = 0;
+  for (const doc of docs) {
+    const docTokens = new Set<string>();
+    tokenSet(String(doc.title ?? '')).forEach((token) => docTokens.add(token));
+    tokenSet(String(doc.url ?? '')).forEach((token) => docTokens.add(token));
+    tokenSet(String(doc.institutionalLink ?? '')).forEach((token) => docTokens.add(token));
+
+    const score = overlapScore(lookupTokenUnion, docTokens);
+    if (score > bestScore) {
+      bestScore = score;
+      best = doc;
+    }
+  }
+
+  if (best && bestScore >= 0.6) {
+    return best;
+  }
+
   return null;
 }
 
@@ -373,6 +489,8 @@ export async function buildFallbackGrantDetail(grantId: string): Promise<Fallbac
     sectors,
     officialUrl: buildSourceUrl(doc),
     officialAttachments: [],
+    description: doc.description ?? null,
+    cpvCode: (doc as any).cpvCode ?? null,
     requisitiHard: {
       settori_scope: sectors.length ? 'settori_specifici' : 'tutti_tranne_esclusi',
     },
@@ -390,8 +508,10 @@ export async function buildFallbackGrantDetail(grantId: string): Promise<Fallbac
         estimatedCoverageMaxPercent: economic.coverageMax,
       },
     },
+    requiredDocuments: (doc as any).requiredDocuments || [],
   };
 }
+
 
 export async function buildFallbackGrantExplainability(grantId: string): Promise<FallbackGrantExplainability> {
   const detail = await buildFallbackGrantDetail(grantId);

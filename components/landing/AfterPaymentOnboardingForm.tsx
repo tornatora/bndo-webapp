@@ -34,6 +34,8 @@ type CompletePayload = {
   alreadyProvisioned?: boolean;
 };
 
+type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6;
+
 function readApiError(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== 'object') return fallback;
   const record = payload as Record<string, unknown>;
@@ -78,7 +80,82 @@ function moneyFromStripe(amountTotal: number | null | undefined, currency: strin
   return isZeroDecimal ? amountTotal : amountTotal / 100;
 }
 
-export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessionId?: string; practiceType?: PracticeType }) {
+function deriveUsernameFromEmail(email: string) {
+  const localPart = email.split('@')[0] ?? 'cliente';
+  const normalized = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '.')
+    .replace(/[._-]{2,}/g, '.')
+    .replace(/^[._-]+|[._-]+$/g, '');
+  const base = normalized || 'cliente';
+  return base.length >= 3 ? base.slice(0, 40) : `${base}${Math.floor(Math.random() * 9000 + 1000)}`;
+}
+
+const MATRIX_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%';
+const MATRIX_TOTAL_MS = 620;
+const MATRIX_TICK_MS = 52;
+const STEP_META: Record<OnboardingStep, { title: string; subtitle: string }> = {
+  1: {
+    title: 'Benvenuto in BNDO',
+    subtitle: 'Attiva la tua dashboard e avvia la pratica in pochi passaggi.',
+  },
+  2: {
+    title: 'Attiva la tua dashboard',
+    subtitle: 'Inserisci email e password con cui vuoi accedere.',
+  },
+  3: {
+    title: 'Dati pratica',
+    subtitle: 'Inserisci i dati essenziali per attivare la pratica.',
+  },
+  4: {
+    title: 'Documenti obbligatori',
+    subtitle: 'Carica documento di identità, codice fiscale e DID.',
+  },
+  5: {
+    title: 'Preventivi',
+    subtitle: 'Carica uno o più preventivi o inserisci il dettaglio manualmente.',
+  },
+  6: {
+    title: 'Conferme finali',
+    subtitle: 'Accetta i consensi e invia la pratica.',
+  },
+};
+
+function mergeQuoteFiles(existing: File[], incoming: File[]) {
+  const deduped = new Map<string, File>();
+  for (const file of [...existing, ...incoming]) {
+    deduped.set(`${file.name}-${file.size}-${file.lastModified}`, file);
+  }
+  return Array.from(deduped.values());
+}
+
+function quoteFileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function scrambleText(source: string, revealRatio: number) {
+  return source
+    .split('')
+    .map((char, index) => {
+      if (char === ' ') return ' ';
+      const keepReadable = index % 3 !== 0;
+      if (keepReadable) return char;
+      const noiseStrength = Math.max(0, 0.4 * (1 - revealRatio));
+      if (Math.random() > noiseStrength) return char;
+      return MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)] ?? char;
+    })
+    .join('');
+}
+
+export function AfterPaymentOnboardingForm({
+  sessionId,
+  practiceType,
+  quizSubmissionId,
+}: {
+  sessionId?: string;
+  practiceType?: PracticeType;
+  quizSubmissionId?: string;
+}) {
   const effectiveSessionId =
     sessionId && sessionId !== 'CHECKOUT_SESSION_ID' && !sessionId.includes('{CHECKOUT_SESSION_ID}')
       ? sessionId
@@ -89,15 +166,15 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
   const [pec, setPec] = useState('');
   const [digitalSignature, setDigitalSignature] = useState<'yes' | 'no'>('no');
-
   const [idDocument, setIdDocument] = useState<File | null>(null);
   const [taxCodeDocument, setTaxCodeDocument] = useState<File | null>(null);
   const [didDocument, setDidDocument] = useState<File | null>(null);
   const [quotes, setQuotes] = useState<File[]>([]);
   const [quotesText, setQuotesText] = useState('');
-
   const [acceptPrivacy, setAcceptPrivacy] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [consentStorage, setConsentStorage] = useState(false);
@@ -106,7 +183,11 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [completed, setCompleted] = useState<CompletePayload | null>(null);
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<OnboardingStep>(1);
+  const [stepTransitioning, setStepTransitioning] = useState(false);
+  const [matrixStep, setMatrixStep] = useState<OnboardingStep | null>(null);
+  const [matrixTitle, setMatrixTitle] = useState(STEP_META[1].title);
+  const [matrixSubtitle, setMatrixSubtitle] = useState(STEP_META[1].subtitle);
   const stepTopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -146,7 +227,6 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
   }, [effectiveSessionId]);
 
   useEffect(() => {
-    // Keep the wizard usable on mobile: always jump back to the top when switching steps.
     stepTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [step]);
 
@@ -154,7 +234,6 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
     () => moneyFromStripe(session?.amount_total ?? null, session?.currency ?? null),
     [session?.amount_total, session?.currency]
   );
-
   const paidLabel = useMemo(
     () => (paidAmount !== null ? formatMoney(paidAmount, session?.currency ?? null) : null),
     [paidAmount, session?.currency]
@@ -162,12 +241,12 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
 
   const canSubmit = useMemo(() => {
     if (submitting) return false;
+    if (effectiveSessionId && loadingSession) return false;
     if (!email.trim()) return false;
-    // If this comes from Stripe redirect, we expect a paid session. Manual flow can proceed without Stripe.
+    if (password.length < 8) return false;
     if (effectiveSessionId && session && session.payment_status && session.payment_status !== 'paid') return false;
-    if (!idDocument || !taxCodeDocument) return false;
     if (!pec.trim()) return false;
-    if (!didDocument) return false;
+    if (!idDocument || !taxCodeDocument || !didDocument) return false;
     if (!quotes.length && !quotesText.trim()) return false;
     if (!acceptPrivacy || !acceptTerms || !consentStorage) return false;
     return true;
@@ -179,6 +258,8 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
     email,
     effectiveSessionId,
     idDocument,
+    loadingSession,
+    password.length,
     pec,
     quotes.length,
     quotesText,
@@ -188,31 +269,103 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
   ]);
 
   const canProceed = useMemo(() => {
-    if (step === 1) return Boolean(email.trim() && pec.trim());
-    if (step === 2) return Boolean(idDocument && taxCodeDocument && didDocument);
+    if (stepTransitioning) return false;
+    if (step === 1) return true;
+    if (step === 2) return Boolean(email.trim() && password.length >= 8);
+    if (step === 3) {
+      if (effectiveSessionId && loadingSession) return false;
+      if (effectiveSessionId && session && session.payment_status && session.payment_status !== 'paid') return false;
+      return Boolean(pec.trim());
+    }
+    if (step === 4) {
+      if (!idDocument || !taxCodeDocument || !didDocument) return false;
+      return true;
+    }
+    if (step === 5) {
+      if (!quotes.length && !quotesText.trim()) return false;
+      return true;
+    }
     return canSubmit;
-  }, [canSubmit, didDocument, email, idDocument, pec, step, taxCodeDocument]);
+  }, [
+    canSubmit,
+    email,
+    effectiveSessionId,
+    idDocument,
+    loadingSession,
+    password.length,
+    pec,
+    quotes.length,
+    quotesText,
+    session,
+    step,
+    stepTransitioning,
+    taxCodeDocument,
+    didDocument,
+  ]);
 
-  function validateStep(targetStep: 1 | 2 | 3): string | null {
-    if (targetStep === 1) {
+  function validateStep(targetStep: OnboardingStep): string | null {
+    if (targetStep === 1) return null;
+
+    if (targetStep === 2) {
       if (!email.trim()) return 'Inserisci la tua email.';
+      if (password.length < 8) return 'La password deve essere di almeno 8 caratteri.';
+      return null;
+    }
+
+    if (targetStep === 3) {
+      if (effectiveSessionId && loadingSession) {
+        return 'Verifica pagamento in corso, attendi qualche secondo.';
+      }
+      if (effectiveSessionId && session && session.payment_status && session.payment_status !== 'paid') {
+        return 'Pagamento non risultante completato.';
+      }
       if (!pec.trim()) return 'Inserisci la PEC.';
       return null;
     }
-    if (targetStep === 2) {
+
+    if (targetStep === 4) {
       if (!idDocument || !taxCodeDocument) return 'Carica documento di identita e codice fiscale.';
       if (!didDocument) return 'Carica la certificazione DID.';
       return null;
     }
-    if (!quotes.length && !quotesText.trim()) {
-      return 'Carica almeno un preventivo oppure inserisci bene/servizio + prezzo + IVA.';
+
+    if (targetStep === 5) {
+      if (!quotes.length && !quotesText.trim()) {
+        return 'Carica almeno un preventivo oppure inserisci bene/servizio + prezzo + IVA.';
+      }
+      return null;
     }
+
     if (!acceptPrivacy) return 'Devi accettare la Privacy Policy.';
     if (!acceptTerms) return 'Devi accettare i Termini e Condizioni.';
-    if (!consentStorage) return 'Devi autorizzare la conservazione dei dati e dei documenti per la pratica.';
-    // Final safety: this also covers Stripe-paid sessions.
+    if (!consentStorage) return 'Devi autorizzare la conservazione dei dati.';
     if (!canSubmit) return 'Completa tutti i campi obbligatori prima di inviare.';
     return null;
+  }
+
+  async function runMatrixTransition(currentStep: OnboardingStep) {
+    const currentMeta = STEP_META[currentStep];
+    setStepTransitioning(true);
+    setMatrixStep(currentStep);
+    setMatrixTitle(currentMeta.title);
+    setMatrixSubtitle(currentMeta.subtitle);
+
+    await new Promise<void>((resolve) => {
+      let elapsed = 0;
+      const timer = setInterval(() => {
+        elapsed += MATRIX_TICK_MS;
+        const progress = Math.min(elapsed / MATRIX_TOTAL_MS, 1);
+        setMatrixTitle(scrambleText(currentMeta.title, progress));
+        setMatrixSubtitle(scrambleText(currentMeta.subtitle, progress));
+        if (progress >= 1) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, MATRIX_TICK_MS);
+    });
+
+    setStepTransitioning(false);
+    setMatrixStep(null);
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -223,47 +376,42 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
       const stepError = validateStep(step);
       if (stepError) throw new Error(stepError);
 
-      if (step < 3) {
-        setStep((prev) => ((prev + 1) as 1 | 2 | 3));
+      if (step < 6) {
+        await runMatrixTransition(step);
+        const nextStep = (step + 1) as OnboardingStep;
+        setStep(nextStep);
+        setMatrixTitle(STEP_META[nextStep].title);
+        setMatrixSubtitle(STEP_META[nextStep].subtitle);
         return;
       }
 
       setSubmitting(true);
-
-      if (!email.trim()) throw new Error('Inserisci la tua email.');
-      if (!idDocument || !taxCodeDocument) throw new Error('Carica documento identita e codice fiscale.');
-      if (!pec.trim()) throw new Error('Inserisci la PEC.');
-      if (!didDocument) throw new Error('Carica la certificazione DID.');
-      if (!quotes.length && !quotesText.trim()) {
-        throw new Error('Carica almeno un preventivo oppure inserisci i dati (bene/servizio + prezzo + IVA).');
-      }
-      if (!acceptPrivacy) throw new Error('Devi accettare la Privacy Policy.');
-      if (!acceptTerms) throw new Error('Devi accettare i Termini e Condizioni.');
-      if (!consentStorage) throw new Error('Devi autorizzare la conservazione dei dati e dei documenti per la pratica.');
+      const normalizedEmail = email.trim().toLowerCase();
 
       const fd = new FormData();
       if (effectiveSessionId) fd.set('sessionId', effectiveSessionId);
-      fd.set('email', email.trim());
+      if (quizSubmissionId) fd.set('quizSubmissionId', quizSubmissionId);
+      fd.set('email', normalizedEmail);
       if (practiceType) fd.set('practiceType', practiceType);
       fd.set('pec', pec.trim());
       fd.set('digitalSignature', digitalSignature);
-      fd.set('idDocument', idDocument);
-      fd.set('taxCodeDocument', taxCodeDocument);
-      fd.set('didDocument', didDocument);
+      fd.set('idDocument', idDocument as File);
+      fd.set('taxCodeDocument', taxCodeDocument as File);
+      fd.set('didDocument', didDocument as File);
       for (const file of quotes) fd.append('quotes', file);
       fd.set('quotesText', quotesText.trim());
       fd.set('acceptPrivacy', acceptPrivacy ? 'yes' : 'no');
       fd.set('acceptTerms', acceptTerms ? 'yes' : 'no');
       fd.set('consentStorage', consentStorage ? 'yes' : 'no');
+      fd.set('username', deriveUsernameFromEmail(normalizedEmail));
+      fd.set('password', password);
 
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
         body: fd
       });
-
       const json = (await res.json()) as CompletePayload;
       if (!res.ok) throw new Error(readApiError(json, 'Onboarding non riuscito.'));
-
       setCompleted(json);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Errore onboarding.');
@@ -281,8 +429,7 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
             Documenti ricevuti
           </div>
           <p className="text-sm text-slate-700">
-            Perfetto: abbiamo ricevuto i documenti base. Ora stiamo attivando la tua dashboard e ti invieremo le
-            credenziali via email.
+            Perfetto: abbiamo ricevuto i documenti base. Ora la tua dashboard è attiva: puoi entrare subito con le credenziali impostate.
           </p>
         </div>
 
@@ -291,32 +438,29 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
     );
   }
 
-  return (
-    <form className="panel p-6 sm:p-8" onSubmit={onSubmit}>
-      <div ref={stepTopRef} />
-      <div className="mb-1 text-sm font-semibold text-slate-500">Caricamento documenti</div>
-      <h2 className="text-2xl font-extrabold text-brand.navy">Attiva la dashboard</h2>
-      <p className="mt-2 text-sm text-slate-600">Completa questi 3 step per attivare la tua area cliente.</p>
+  const isActiveMatrixStep = stepTransitioning && matrixStep === step;
+  const stepTitle = isActiveMatrixStep ? matrixTitle : STEP_META[step].title;
+  const stepSubtitle = isActiveMatrixStep ? matrixSubtitle : STEP_META[step].subtitle;
 
-      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-          <span className={step >= 1 ? 'text-brand.navy' : ''}>1. Dati</span>
-          <span className={step >= 2 ? 'text-brand.navy' : ''}>2. Documenti</span>
-          <span className={step >= 3 ? 'text-brand.navy' : ''}>3. Conferma</span>
-        </div>
-        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${Math.round((step / 3) * 100)}%`,
-              background: 'linear-gradient(90deg, rgba(11,17,54,0.92), rgba(34,197,95,0.35))'
-            }}
-          />
-        </div>
-      </div>
+  return (
+    <form className={`panel p-6 sm:p-8 onboarding-form-shell ${stepTransitioning ? 'is-matrix-transition' : ''}`} onSubmit={onSubmit}>
+      <div ref={stepTopRef} />
+      <div className="onboarding-step-indicator">Step {step} di 6</div>
 
       {step === 1 ? (
+        <div className={`onboarding-stepBlock onboarding-stepWelcome ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+          <h2 className="onboarding-form-title">{stepTitle}</h2>
+          <p className="onboarding-form-subtitle">{stepSubtitle}</p>
+        </div>
+      ) : null}
+
+      {step === 2 ? (
         <>
+          <div className={`onboarding-stepBlock ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+            <h2 className="onboarding-form-title">{stepTitle}</h2>
+            <p className="onboarding-form-subtitle">{stepSubtitle}</p>
+          </div>
+
           <div className="mt-5">
             <label className="label" htmlFor="email">
               Email (login) *
@@ -331,83 +475,100 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
               required
               autoComplete="email"
             />
-            <p className="mt-2 text-xs text-slate-500">
-              Userai questa email per accedere alla dashboard. Riceverai una password temporanea via email.
-            </p>
+          </div>
+
+          <div className="mt-4">
+            <label className="label" htmlFor="password">
+              Password *
+            </label>
+            <input
+              id="password"
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Almeno 8 caratteri"
+              required
+              autoComplete="new-password"
+            />
+          </div>
+        </>
+      ) : null}
+
+      {step === 3 ? (
+        <>
+          <div className={`onboarding-stepBlock ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+            <h2 className="onboarding-form-title">{stepTitle}</h2>
+            <p className="onboarding-form-subtitle">{stepSubtitle}</p>
           </div>
 
           {loadingSession ? (
-            <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
+            <div className="mt-4 flex items-center gap-3 text-sm text-slate-600">
               <Loader2 className="h-4 w-4 animate-spin" />
               Verifica pagamento in corso...
             </div>
           ) : sessionError ? (
-            <div className="mt-3 text-sm font-semibold text-red-700">
+            <div className="mt-4 text-sm font-semibold text-red-700">
               {sessionError}
               <div className="mt-1 text-xs font-normal text-slate-600">
                 Se hai pagato offline e ti abbiamo inviato questo link, puoi continuare comunque.
               </div>
             </div>
           ) : effectiveSessionId && session?.payment_status && session.payment_status !== 'paid' ? (
-            <div className="mt-3 text-sm font-semibold text-red-700">
-              Pagamento non risultante completato. Se hai pagato offline e ti abbiamo inviato questo link, continua senza
-              sessione Stripe.
+            <div className="mt-4 text-sm font-semibold text-red-700">
+              Pagamento non risultante completato. Se hai pagato offline e ti abbiamo inviato questo link, continua senza sessione Stripe.
             </div>
           ) : effectiveSessionId ? (
-            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-              Pagamento verificato{paidLabel ? `: ${paidLabel}` : ''}. Email Stripe:{' '}
-              <strong>{session?.customer_email ?? 'N/D'}</strong>
+            <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+              Pagamento verificato{paidLabel ? `: ${paidLabel}` : ''}. Email Stripe: <strong>{session?.customer_email ?? 'N/D'}</strong>
             </div>
           ) : null}
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="label" htmlFor="pec">
-                PEC *
-              </label>
-              <input
-                id="pec"
-                className="input"
-                value={pec}
-                onChange={(e) => setPec(e.target.value)}
-                placeholder="nome@pec.it"
-                inputMode="email"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="label" htmlFor="digitalSignature">
-                Firma digitale *
-              </label>
-              <select
-                id="digitalSignature"
-                className="input"
-                value={digitalSignature}
-                onChange={(e) => setDigitalSignature(e.target.value as 'yes' | 'no')}
-              >
-                <option value="no">Non in possesso</option>
-                <option value="yes">In possesso</option>
-              </select>
-            </div>
+          <div className="mt-5">
+            <label className="label" htmlFor="pec">
+              PEC *
+            </label>
+            <input
+              id="pec"
+              className="input"
+              value={pec}
+              onChange={(e) => setPec(e.target.value)}
+              placeholder="nome@pec.it"
+              inputMode="email"
+              required
+            />
           </div>
 
+          <div className="mt-4">
+            <label className="label" htmlFor="digitalSignature">
+              Firma digitale
+            </label>
+            <select
+              id="digitalSignature"
+              className="input"
+              value={digitalSignature}
+              onChange={(e) => setDigitalSignature(e.target.value as 'yes' | 'no')}
+            >
+              <option value="no">Non in possesso</option>
+              <option value="yes">In possesso</option>
+            </select>
+          </div>
         </>
       ) : null}
 
-      {step === 2 ? (
+      {step === 4 ? (
         <>
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-            <div className="font-semibold text-brand.navy">Documenti base</div>
-            <div className="mt-1 text-slate-600">
-              Carica i documenti obbligatori. Formati ammessi: PDF, JPG, PNG.
-            </div>
+          <div className={`onboarding-stepBlock ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+            <h2 className="onboarding-form-title">{stepTitle}</h2>
+            <p className="onboarding-form-subtitle">{stepSubtitle}</p>
           </div>
+
+          <p className="onboarding-section-note">Carica i documenti obbligatori. Formati ammessi: PDF, JPG, PNG.</p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label" htmlFor="idDocument">
-                Documento di identita *
+                Documento di identità *
               </label>
               <input
                 id="idDocument"
@@ -439,9 +600,7 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
           <div className="mt-4">
             <label className="label" htmlFor="didDocument">
               Certificazione DID *{' '}
-              <span className="text-slate-500">
-                (reperibile online oppure presso il Centro per l&apos;Impiego piu vicino)
-              </span>
+              <span className="text-slate-500">(reperibile online oppure presso il Centro per l&apos;Impiego più vicino)</span>
             </label>
             <input
               id="didDocument"
@@ -456,101 +615,118 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
         </>
       ) : null}
 
-      {step === 3 ? (
+      {step === 5 ? (
         <>
-          <div className="mt-5">
+          <div className={`onboarding-stepBlock ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+            <h2 className="onboarding-form-title">{stepTitle}</h2>
+            <p className="onboarding-form-subtitle">{stepSubtitle}</p>
+          </div>
+
+          <div className="mt-4">
             <label className="label" htmlFor="quotes">
-              Preventivi di spesa * <span className="text-slate-500">(puoi allegarne piu di uno)</span>
+              Preventivi
             </label>
             <input
               id="quotes"
               className="input"
               type="file"
+              accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*,.zip"
               multiple
-              accept=".pdf,.png,.jpg,.jpeg,.zip,application/pdf,image/*,application/zip"
-              onChange={(e) => setQuotes(Array.from(e.target.files ?? []))}
+              onChange={(e) => {
+                const incoming = Array.from(e.target.files ?? []);
+                if (!incoming.length) return;
+                setQuotes((prev) => mergeQuoteFiles(prev, incoming));
+                e.currentTarget.value = '';
+              }}
             />
-            {quotes.length ? (
-              <div className="mt-2 text-xs text-slate-500">
-                {quotes.length} file selezionati: {quotes.map((f) => f.name).join(', ')}
-              </div>
-            ) : null}
-            <div className="mt-3">
-              <label className="label" htmlFor="quotesText">
-                Se non hai ancora i preventivi ufficiali, inserisci qui{' '}
-                <span className="text-slate-500">(uno per riga)</span>: <span className="text-slate-500">bene/servizio + prezzo + IVA</span>
-              </label>
-              <textarea
-                id="quotesText"
-                className="input min-h-28"
-                value={quotesText}
-                onChange={(e) => setQuotesText(e.target.value)}
-                placeholder={
-                  "Esempio:\\n- PC portatile: 1.200 + IVA\\n- Sito web: 900 + IVA\\n- Arredi ufficio: 2.500 + IVA"
-                }
-                maxLength={2000}
+          </div>
+
+          <div className="mt-4">
+            <label className="label" htmlFor="quotesText">
+              Se non hai ancora il preventivo indica nome del prodotto/servizio + prezzo + IVA.
+            </label>
+            <textarea
+              id="quotesText"
+              className="input min-h-[96px]"
+              value={quotesText}
+              onChange={(e) => setQuotesText(e.target.value)}
+              placeholder="Es. Attrezzature 4.500€ + IVA; Software 1.200€ + IVA"
+            />
+          </div>
+
+          {quotes.length ? (
+            <ul className="quote-files-grid">
+              {quotes.map((file) => {
+                const key = quoteFileKey(file);
+                return (
+                  <li key={key} className="quote-file-chip">
+                    <span className="quote-file-chipName" title={file.name}>
+                      {file.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="quote-file-chipRemove"
+                      aria-label={`Rimuovi ${file.name}`}
+                      onClick={() => setQuotes((prev) => prev.filter((item) => quoteFileKey(item) !== key))}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      {step === 6 ? (
+        <>
+          <div className={`onboarding-stepBlock ${isActiveMatrixStep ? 'is-matrix' : ''}`}>
+            <h2 className="onboarding-form-title">{stepTitle}</h2>
+            <p className="onboarding-form-subtitle">{stepSubtitle}</p>
+          </div>
+
+          <div className="mt-5 space-y-3 text-xs text-slate-600">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-[2px]"
+                checked={acceptPrivacy}
+                onChange={(e) => setAcceptPrivacy(e.target.checked)}
               />
-              <div className="mt-2 text-xs text-slate-500">
-                Puoi inserire tutte le spese che vuoi. Basta una riga per ogni spesa.
-              </div>
-            </div>
+              <span>
+                Accetto la <Link className="underline" href="/privacy">Privacy Policy</Link> *
+              </span>
+            </label>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-[2px]"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+              />
+              <span>
+                Accetto i <Link className="underline" href="/termini">Termini e Condizioni</Link> *
+              </span>
+            </label>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-[2px]"
+                checked={consentStorage}
+                onChange={(e) => setConsentStorage(e.target.checked)}
+              />
+              <span>Autorizzo la conservazione di dati e documenti ai fini della pratica *</span>
+            </label>
           </div>
 
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-            <div className="font-semibold text-brand.navy">Consensi</div>
-            <div className="mt-3 space-y-3">
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={acceptPrivacy}
-                  onChange={(e) => setAcceptPrivacy(e.target.checked)}
-                />
-                <span className="leading-relaxed text-slate-700">
-                  Ho letto e accetto la{' '}
-                  <Link href="/privacy" className="font-semibold text-brand.navy underline">
-                    Privacy Policy
-                  </Link>
-                  .
-                </span>
-              </label>
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={acceptTerms}
-                  onChange={(e) => setAcceptTerms(e.target.checked)}
-                />
-                <span className="leading-relaxed text-slate-700">
-                  Accetto i{' '}
-                  <Link href="/termini" className="font-semibold text-brand.navy underline">
-                    Termini e Condizioni
-                  </Link>
-                  .
-                </span>
-              </label>
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={consentStorage}
-                  onChange={(e) => setConsentStorage(e.target.checked)}
-                />
-                <span className="leading-relaxed text-slate-700">
-                  Autorizzo {`BNDO`} a trattare e conservare i miei dati e i documenti caricati (storage) per la gestione
-                  della pratica e gli adempimenti connessi, come descritto nella Privacy Policy.
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-            <div className="font-semibold text-brand.navy">Problemi con la documentazione?</div>
-            <div className="mt-1 text-slate-600">Scrivici su WhatsApp e ti aiutiamo passo-passo.</div>
-            <a className="btn btn-muted mt-3 inline-flex" href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noreferrer">
-              Scrivi su WhatsApp
+          <p className="mt-4 text-xs text-slate-500">
+            Hai dubbi sui documenti? Contattaci su{' '}
+            <a className="underline" href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer">
+              WhatsApp
             </a>
-          </div>
+            .
+          </p>
         </>
       ) : null}
 
@@ -563,7 +739,7 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
             className="btn btn-muted w-full sm:w-auto"
             onClick={() => {
               setSubmitError(null);
-              setStep((prev) => ((prev - 1) as 1 | 2 | 3));
+              setStep((prev) => ((prev - 1) as OnboardingStep));
             }}
           >
             Indietro
@@ -572,26 +748,25 @@ export function AfterPaymentOnboardingForm({ sessionId, practiceType }: { sessio
           <div />
         )}
 
-        <button className="btn btn-primary w-full sm:w-auto" type="submit" disabled={!canProceed}>
+        <button
+          className={`btn btn-primary ${step === 1 ? 'onboarding-primaryCta w-full' : 'w-full sm:w-auto'}`}
+          type="submit"
+          disabled={!canProceed}
+        >
           {submitting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               Invio documenti...
             </>
-          ) : step < 3 ? (
-            'Continua'
+          ) : step === 1 ? (
+            'Attiva ora'
+          ) : step < 6 ? (
+            'Avanti'
           ) : (
             'Invia documenti e attiva dashboard'
           )}
         </button>
       </div>
-
-      {step === 3 ? (
-        <p className="mt-3 text-xs leading-relaxed text-slate-500">
-          I documenti caricati saranno visibili al nostro team e verranno associati automaticamente alla tua pratica.
-          Potrai sempre esercitare i tuoi diritti (GDPR) come indicato nella Privacy Policy.
-        </p>
-      ) : null}
     </form>
   );
 }

@@ -6,7 +6,7 @@ import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/
 import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
 
 const payloadSchema = z.object({
-  practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord'])
+  practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord', 'generic'])
 });
 
 type AuthProfile = {

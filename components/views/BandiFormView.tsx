@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantCardPro as GrantCard, type MatchCardItem } from '@/components/views/GrantCardPro';
 import { apiRequest } from '@/lib/scannerPublicApi';
@@ -33,6 +33,9 @@ interface ProfileFormState {
   plannedInvestment: string;
   targetAmount: string;
   aidPreference: string;
+  annualTurnover: string;
+  isInnovative: boolean;
+  foundationYear: string;
 }
 
 type AvailabilityFilter = 'all' | 'open' | 'incoming';
@@ -80,6 +83,9 @@ const defaultProfile: ProfileFormState = {
   plannedInvestment: '',
   targetAmount: '',
   aidPreference: 'fondo perduto',
+  annualTurnover: '',
+  isInnovative: false,
+  foundationYear: '',
 };
 
 const toNumberOrNull = (value: string): number | null => {
@@ -233,7 +239,14 @@ const simplifyNearMissCondition = (value: string): string => {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
+type BandiFormViewProps = {
+  initialGrantId?: string | null;
+  onGrantSelect?: (grantId: string) => void;
+  onGrantDetail?: (grantId: string) => void;
+};
+
+export function BandiFormView(props: BandiFormViewProps = {}) {
+  const { onGrantSelect, onGrantDetail } = props;
   const [profile, setProfile] = useState<ProfileFormState>(defaultProfile);
 
   const [matching, setMatching] = useState(false);
@@ -256,7 +269,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
   const overlayProgressTimerRef = useRef<number | null>(null);
   const runIdRef = useRef(0);
 
-  const scrollScannerViewportToTop = (behavior: ScrollBehavior = 'smooth') => {
+  const scrollScannerViewportToTop = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const pane = formRef.current?.closest('.mainpane');
     if (pane instanceof HTMLElement) {
       pane.scrollTo({ top: 0, behavior });
@@ -271,9 +284,9 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
     }
 
     formRef.current?.scrollIntoView({ behavior, block: 'start' });
-  };
+  }, []);
 
-  const forceScannerViewportTop = (persistMs = 0) => {
+  const forceScannerViewportTop = useCallback((persistMs = 0) => {
     const pane = formRef.current?.closest('.mainpane');
     if (pane instanceof HTMLElement) {
       pane.scrollTop = 0;
@@ -292,7 +305,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       return;
     }
     scrollScannerViewportToTop('auto');
-  };
+  }, [scrollScannerViewportToTop]);
 
   const scheduleFormScroll = () => {
     window.requestAnimationFrame(() => {
@@ -335,7 +348,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeoutId);
     };
-  }, [journeyStep]);
+  }, [journeyStep, forceScannerViewportTop]);
 
   useEffect(() => {
     if (!matching) return;
@@ -350,7 +363,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeoutId);
     };
-  }, [matching]);
+  }, [matching, scrollScannerViewportToTop]);
 
   useEffect(() => {
     const clamped = Math.max(0, Math.min(100, overlayProgress));
@@ -509,6 +522,9 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
         activityType: profile.activityType,
         fundingGoal: profile.fundingGoal || null,
       },
+      annualTurnover: toNumberOrNull(profile.annualTurnover),
+      isInnovative: profile.isInnovative,
+      foundationYear: toIntOrNull(profile.foundationYear),
     });
   };
 
@@ -913,7 +929,7 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
                   >
                     <option value="fondo perduto">Fondo perduto</option>
                     <option value="finanziamento agevolato">Finanziamento agevolato</option>
-                    <option value="credito d'imposta">Credito d'imposta</option>
+                    <option value="credito d'imposta">Credito d’imposta</option>
                     <option value="voucher">Voucher</option>
                     <option value="garanzia">Garanzia</option>
                     <option value="misto">Misto</option>
@@ -959,6 +975,40 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
                           placeholder="Es. 8"
                         />
                       </label>
+
+                      <label className="form-field">
+                        <div className="form-label">Fatturato annuo (€)</div>
+                        <input
+                          className="form-control"
+                          inputMode="numeric"
+                          value={profile.annualTurnover}
+                          onChange={(event) => setProfile((prev) => ({ ...prev, annualTurnover: event.target.value }))}
+                          placeholder="Es. 500000"
+                        />
+                      </label>
+
+                      <label className="form-field">
+                        <div className="form-label">Anno fondazione</div>
+                        <input
+                          className="form-control"
+                          inputMode="numeric"
+                          value={profile.foundationYear}
+                          onChange={(event) => setProfile((prev) => ({ ...prev, foundationYear: event.target.value }))}
+                          placeholder="Es. 2021"
+                        />
+                      </label>
+
+                      <div className="form-field form-field-checkbox">
+                        <label className="checkbox-wrap">
+                          <input
+                            type="checkbox"
+                            checked={profile.isInnovative}
+                            onChange={(event) => setProfile((prev) => ({ ...prev, isInnovative: event.target.checked }))}
+                          />
+                          <div className="checkbox-box" />
+                          <div className="form-label">Status innovativo (Startup/PMI Innovativa)</div>
+                        </label>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -1055,7 +1105,13 @@ export function BandiFormView(_props: { initialGrantId?: string | null } = {}) {
         ) : visibleItems.length > 0 ? (
           <div className="result-grid">
             {visibleItems.map((item) => (
-              <GrantCard key={item.grantId} item={item} requestedAid={profile.aidPreference} />
+              <GrantCard
+                key={item.grantId}
+                item={item}
+                requestedAid={profile.aidPreference}
+                onOpenDetail={onGrantDetail ?? onGrantSelect}
+                onVerifyRequirements={onGrantSelect}
+              />
             ))}
           </div>
         ) : (
