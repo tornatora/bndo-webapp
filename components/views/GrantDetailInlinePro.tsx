@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProgressBarPro as ProgressBar } from '@/components/views/ProgressBarPro';
 
@@ -293,7 +294,13 @@ const humanizeCriticalItem = (value: string): string => {
   return clean.endsWith('.') ? clean : `${clean}.`;
 };
 
-export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
+export function GrantDetailInlinePro({
+  grantId,
+  sourceChannel = 'direct'
+}: {
+  grantId: string;
+  sourceChannel?: 'scanner' | 'chat' | 'direct' | 'admin';
+}) {
   const [detail, setDetail] = useState<GrantDetail | null>(null);
   const [explain, setExplain] = useState<Explainability | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -401,6 +408,9 @@ export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
   const openingLabel = formatDate(detail.openingDate, 'Già aperto');
   const deadlineLabel = formatDate(detail.deadlineDate, 'A sportello');
   const economicSummary = economicSummaryFromDetail(detail);
+  const verifyRequirementsHref = `/dashboard/new-practice/quiz?grantId=${encodeURIComponent(detail.id)}&source=${encodeURIComponent(
+    sourceChannel
+  )}`;
   const whyFitItems = (explain.whyFit || []).filter(Boolean);
   const satisfiedItems = (explain.satisfiedRequirements || []).filter(Boolean);
   const missingItems = (explain.missingRequirements || []).filter(Boolean);
@@ -462,7 +472,10 @@ export function GrantDetailInlinePro({ grantId }: { grantId: string }) {
           </div>
         </div>
 
-        <div className="grant-cta-row grant-cta-row--double">
+        <div className="grant-cta-row grant-cta-row--triple">
+          <Link href={verifyRequirementsHref} className="grant-cta-btn grant-cta-btn--solid">
+            Verifica requisiti
+          </Link>
           <a href={detail.officialUrl} target="_blank" rel="noreferrer" className="grant-cta-btn grant-cta-btn--solid">
             Vai al bando ufficiale
           </a>

@@ -1,73 +1,62 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ClientUploadDocButton } from '@/components/dashboard/ClientUploadDocButton';
+import React, { useState } from 'react';
+import { ClientUploadDocButton } from './ClientUploadDocButton';
+import { formatDate, formatFileSize } from '@/lib/utils';
 
-type MissingReq = {
+export interface ApplicationRequirement {
   key: string;
   label: string;
-};
+}
 
-type UploadedFile = {
+export interface ApplicationDocument {
   id: string;
   fileName: string;
   createdAt: string;
   fileSize: number;
-  downloadUrl: string | null;
-};
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  downloadUrl?: string | null;
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('it-IT', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value));
+interface DocumentsPracticeCardProps {
+  applicationId: string;
+  practiceTitle: string;
+  missing: ApplicationRequirement[];
+  uploaded: ApplicationDocument[];
 }
 
 export function DocumentsPracticeCard({
   applicationId,
   practiceTitle,
   missing,
-  uploaded
-}: {
-  applicationId: string;
-  practiceTitle: string;
-  missing: MissingReq[];
-  uploaded: UploadedFile[];
-}) {
-  const [tab, setTab] = useState<'missing' | 'uploaded' | null>(null);
+  uploaded,
+}: DocumentsPracticeCardProps) {
+  const [tab, setTab] = useState<'missing' | 'uploaded' | null>(missing.length > 0 ? 'missing' : 'uploaded');
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
   const missingCount = missing.length;
   const uploadedCount = uploaded.length;
 
-  const hasContent = useMemo(() => missingCount > 0 || uploadedCount > 0, [missingCount, uploadedCount]);
-
   return (
-    <article className="section-card docs-practice-card" style={{ marginBottom: 0 }}>
-      <div className="docs-practice-head">
-        <div className="pratica-type">Pratica</div>
-        <div className="pratica-title docs-practice-title">{practiceTitle}</div>
+    <article className="practice-card">
+      <div className="practice-card-header">
+        <h3 className="practice-card-title">{practiceTitle}</h3>
+        {missingCount > 0 && (
+          <div className="practice-card-badge is-warning">
+            {missingCount} da caricare
+          </div>
+        )}
       </div>
 
-      <div className="docs-practice-actions">
+      <div className="docs-tabs-nav">
         <button
           type="button"
-          className={`docs-open-btn docs-open-btn-missing ${tab === 'missing' ? 'is-active' : ''}`}
+          className={`docs-open-btn ${tab === 'missing' ? 'is-active' : ''}`}
           onClick={() => setTab((t) => (t === 'missing' ? null : 'missing'))}
           aria-expanded={tab === 'missing'}
         >
           <span className="docs-open-btn-ic" aria-hidden="true">
-            ⚠
+            ⚠️
           </span>
           <span className="docs-open-btn-txt">
             Documenti mancanti <strong>({missingCount})</strong>
@@ -107,7 +96,11 @@ export function DocumentsPracticeCard({
                       <div className="docs-row-sub">Da caricare per completare la pratica.</div>
                     </div>
                     <div className="docs-row-cta">
-                      <ClientUploadDocButton applicationId={applicationId} documentLabel={req.label} />
+                      <ClientUploadDocButton
+                        applicationId={applicationId}
+                        requirementKey={req.key}
+                        documentLabel={req.label}
+                      />
                     </div>
                   </div>
                 ))}
@@ -115,67 +108,65 @@ export function DocumentsPracticeCard({
             ) : (
               <div className="docs-empty">
                 <div className="docs-empty-title">Nessun documento mancante</div>
-                <div className="docs-empty-sub">Hai gia caricato tutto il necessario per questa pratica.</div>
+                <div className="docs-empty-sub">Hai già caricato tutto il necessario per questa pratica.</div>
               </div>
             )
           ) : uploadedCount ? (
             <div className="docs-list">
-              {uploaded.map((doc) => (
-                <div key={doc.id} className="docs-row">
-                  <div className="docs-row-main">
-                    <div className="docs-row-title">{doc.fileName}</div>
-                    <div className="docs-row-sub">
-                      {formatDate(doc.createdAt)} · {formatFileSize(doc.fileSize)}
+              {uploaded.map((doc) => {
+                const label = doc.fileName || '';
+                const isOnboarding = label.toLowerCase().includes('identità') || 
+                                   label.toLowerCase().includes('codice fiscale') || 
+                                   label.toLowerCase().includes('visura') ||
+                                   label.toLowerCase().includes('did');
+                return (
+                  <div key={doc.id} className={`docs-row ${isOnboarding ? 'is-onboarding' : ''}`}>
+                    <div className="docs-row-main">
+                      <div className="docs-row-title">{doc.fileName}</div>
+                      <div className="docs-row-sub">
+                        {formatDate(doc.createdAt)} · {formatFileSize(doc.fileSize)}
+                      </div>
+                    </div>
+                    <div className="docs-row-cta">
+                      <button
+                        type="button"
+                        className="docs-link"
+                        disabled={openingId === doc.id}
+                        onClick={async () => {
+                          const win = window.open('', '_blank', 'noreferrer');
+                          try {
+                            setOpenError(null);
+                            setOpeningId(doc.id);
+                            const res = await fetch(`/api/documents/signed-url?documentId=${doc.id}`, { cache: 'no-store' });
+                            const json = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; error?: string };
+                            if (!res.ok || !json.url) throw new Error(json.error ?? 'Impossibile aprire il documento.');
+                            if (win) {
+                              win.location.href = json.url;
+                            } else {
+                              window.location.href = json.url;
+                            }
+                          } catch (e) {
+                            if (win) win.close();
+                            setOpenError(e instanceof Error ? e.message : 'Errore durante l\'apertura del documento.');
+                          } finally {
+                            setOpeningId(null);
+                          }
+                        }}
+                      >
+                        {openingId === doc.id ? 'Apertura...' : 'Apri'}
+                      </button>
                     </div>
                   </div>
-                  <div className="docs-row-cta">
-                    <button
-                      type="button"
-                      className="docs-link"
-                      disabled={openingId === doc.id}
-                      onClick={async () => {
-                        // Avoid popup blockers on mobile Safari: open a blank tab synchronously,
-                        // then navigate it after the async signed-url fetch completes.
-                        const win = window.open('', '_blank', 'noreferrer');
-                        try {
-                          setOpenError(null);
-                          setOpeningId(doc.id);
-                          const res = await fetch(`/api/documents/signed-url?documentId=${doc.id}`, { cache: 'no-store' });
-                          const json = (await res.json().catch(() => ({}))) as { ok?: boolean; url?: string; error?: string };
-                          if (!res.ok || !json.url) throw new Error(json.error ?? 'Impossibile aprire il documento.');
-                          if (win) {
-                            win.location.href = json.url;
-                          } else {
-                            window.location.href = json.url;
-                          }
-                        } catch (e) {
-                          if (win) win.close();
-                          setOpenError(e instanceof Error ? e.message : 'Errore apertura documento.');
-                        } finally {
-                          setOpeningId(null);
-                        }
-                      }}
-                    >
-                      {openingId === doc.id ? 'Apro...' : 'Apri'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {openError ? (
-                <div className="docs-empty" style={{ marginTop: 10 }}>
-                  <div className="docs-empty-title">Errore</div>
-                  <div className="docs-empty-sub">{openError}</div>
-                </div>
-              ) : null}
+                );
+              })}
             </div>
           ) : (
             <div className="docs-empty">
               <div className="docs-empty-title">Nessun documento caricato</div>
-              <div className="docs-empty-sub">
-                Carica i documenti mancanti per iniziare. {hasContent ? null : 'Non risultano ancora file in questa pratica.'}
-              </div>
+              <div className="docs-empty-sub">Non è ancora stato caricato alcun documento per questa pratica.</div>
             </div>
           )}
+          {openError && <div className="docs-error">{openError}</div>}
         </div>
       ) : null}
     </article>

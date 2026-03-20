@@ -10,6 +10,8 @@ type CheckoutProvisionPayload = {
   contactName: string;
   stripeCustomerId?: string | null;
   stripePaymentIntentId?: string | null;
+  desiredUsername?: string | null; // User's choice
+  desiredPassword?: string | null; // User's choice
 };
 
 export async function provisionAccountFromCheckout(payload: CheckoutProvisionPayload) {
@@ -67,8 +69,20 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
       }
     }
 
-    const password = randomPassword(10);
-    await supabaseAdmin.auth.admin.updateUserById(existingProfile.id, { password });
+    const password = payload.desiredPassword || randomPassword(10);
+    const username = payload.desiredUsername || existingProfile.username || (slugify(payload.companyName).slice(0, 18) || 'cliente');
+
+    await supabaseAdmin.auth.admin.updateUserById(existingProfile.id, { 
+      password,
+      user_metadata: {
+        ...existingProfile,
+        username
+      }
+    });
+
+    if (username !== existingProfile.username) {
+      await supabaseAdmin.from('profiles').update({ username }).eq('id', existingProfile.id);
+    }
 
     const { data: order, error: orderError } = await supabaseAdmin
       .from('service_orders')
@@ -108,7 +122,7 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
         checkout_session_id: payload.checkoutSessionId,
         company_id: companyId,
         user_id: existingProfile.id,
-        username: existingProfile.username ?? (slugify(payload.companyName).slice(0, 18) || 'cliente'),
+        username,
         temp_password: password,
         emailed_at: emailResult.sent ? new Date().toISOString() : null,
         email_provider_message_id: emailResult.sent ? emailResult.providerMessageId ?? null : null,
@@ -141,10 +155,8 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     throw new Error(`Failed to create company: ${companyError?.message ?? 'unknown error'}`);
   }
 
-  const usernameBase = slugify(payload.companyName).slice(0, 18) || 'cliente';
-  const username = `${usernameBase}-${Math.floor(Math.random() * 900000) + 100000}`;
-  // Keep it reasonably short for usability (still random).
-  const password = randomPassword(10);
+  const username = payload.desiredUsername || `${slugify(payload.companyName).slice(0, 18) || 'cliente'}-${Math.floor(Math.random() * 900000) + 100000}`;
+  const password = payload.desiredPassword || randomPassword(10);
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: payload.customerEmail,

@@ -26,6 +26,20 @@ export type UserProfile = {
   contributionPreference: ContributionPreference | null;
   contactEmail: string | null;
   contactPhone: string | null;
+  
+  // Advanced Intelligence Fields
+  teamMajority: 'female' | 'youth' | 'mixed' | null;
+  agricultureStatus: 'has_land_iap' | 'no_land_iap' | null;
+  tech40: boolean | null;
+  professionalRegister: boolean | null;
+  isThirdSector: boolean | null;
+  propertyStatus: 'owned' | 'rented_registered' | 'none' | null;
+  foundationYear: number | null;
+  annualTurnover: number | null;
+  isInnovative: boolean | null;
+  activeMeasureId?: string | null;
+  activeMeasureTitle?: string | null;
+
   slotSource?: Partial<
     Record<
       | 'activityType'
@@ -41,7 +55,16 @@ export type UserProfile = {
       | 'budget'
       | 'requestedContributionEUR'
       | 'fundingGoal'
-      | 'contributionPreference',
+      | 'contributionPreference'
+      | 'teamMajority'
+      | 'agricultureStatus'
+      | 'tech40'
+      | 'professionalRegister'
+      | 'isThirdSector'
+      | 'propertyStatus'
+      | 'foundationYear'
+      | 'annualTurnover'
+      | 'isInnovative',
       'explicit' | 'demonym' | 'inferred'
     >
   >;
@@ -50,12 +73,22 @@ export type UserProfile = {
 export type Step =
   | 'activityType'
   | 'sector'
+  | 'legalForm'
   | 'ateco'
   | 'location'
   | 'employees'
   | 'fundingGoal'
   | 'budget'
   | 'contributionPreference'
+  | 'teamMajority'
+  | 'agricultureStatus'
+  | 'tech40'
+  | 'professionalRegister'
+  | 'isThirdSector'
+  | 'propertyStatus'
+  | 'foundationYear'
+  | 'annualTurnover'
+  | 'isInnovative'
   | 'contactEmail'
   | 'contactPhone'
   | 'preScanConfirm'

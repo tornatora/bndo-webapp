@@ -1,6 +1,6 @@
 import { APP_URL, MARKETING_URL } from '@/shared/lib';
 
-export type DashboardNavKey = 'home' | 'pratiche' | 'documenti' | 'messaggi' | 'profilo';
+export type DashboardNavKey = 'home' | 'pratiche' | 'documenti' | 'messaggi' | 'profilo' | 'new_practice';
 
 export type DashboardShellItem = {
   key: DashboardNavKey;
@@ -37,7 +37,9 @@ export const routes = {
     notifications: '/dashboard/notifications',
     profile: '/dashboard/profile',
     password: '/dashboard/password',
+    newPractice: '/dashboard/new-practice',
     practicesPrefix: '/dashboard/practices',
+    list: '/dashboard/pratiche',
   },
   admin: {
     root: '/admin',
@@ -64,6 +66,13 @@ export function resolveAssistantHomeUrl() {
 }
 
 export function resolveAppAuthOrigin() {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (host.endsWith('.netlify.app') || host === 'localhost' || host === '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+
   const raw = process.env.NEXT_PUBLIC_APP_AUTH_ORIGIN?.trim();
   if (!raw) return APP_URL;
   return raw.replace(/\/+$/, '');
@@ -76,19 +85,21 @@ export function buildLogoutPath(redirectTarget: string) {
 export function getDashboardShellItems(): DashboardShellItem[] {
   return [
     { key: 'home', label: 'Home', href: resolveAssistantHomeUrl(), icon: 'home', external: true },
-    { key: 'pratiche', label: 'Le tue pratiche', href: routes.dashboard.root, icon: 'pratiche' },
+    { key: 'pratiche', label: 'Le tue pratiche', href: routes.dashboard.list, icon: 'pratiche' },
     { key: 'documenti', label: 'I tuoi documenti', href: routes.dashboard.documents, icon: 'documenti' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
+    { key: 'new_practice', label: 'Nuova pratica', href: routes.dashboard.newPractice, icon: 'new_practice' },
   ];
 }
 
 export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
   if (
     pathname === routes.dashboard.root ||
+    pathname === routes.dashboard.list ||
     pathname.startsWith(routes.dashboard.practicesPrefix)
   ) {
-    return 'pratiche';
+    return pathname === routes.dashboard.list ? 'pratiche' : 'messaggi';
   }
   if (pathname === routes.dashboard.home) return 'home';
   if (pathname.startsWith(routes.dashboard.documents)) return 'documenti';
@@ -104,7 +115,8 @@ export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
   ) {
     return 'profilo';
   }
-  return 'pratiche';
+  if (pathname.startsWith(routes.dashboard.newPractice)) return 'new_practice';
+  return 'messaggi';
 }
 
 export function isPublicDashboardShellPath(pathname: string) {
@@ -112,11 +124,15 @@ export function isPublicDashboardShellPath(pathname: string) {
 }
 
 export function resolveDashboardInitialView(
-  slug: string[] | undefined
-): 'home' | 'chat' | 'form' | 'pratiche' {
-  const first = String(slug?.[0] || '').toLowerCase();
-  if (first === 'home') return 'home';
-  if (first === 'chat') return 'chat';
-  if (first === 'scanner' || first === 'scanner-bandi' || first === 'bandi') return 'form';
+  slugs: string[] | undefined
+): 'chat' | 'home' | 'form' | 'pratiche' | 'choice' {
+  if (!slugs || slugs.length === 0) {
+    return 'pratiche';
+  }
+  const main = slugs[0];
+  if (main === 'chat') return 'chat';
+  if (main === 'scanner') return 'form';
+  if (main === 'pratiche') return 'pratiche';
+  if (main === 'new-practice') return 'choice';
   return 'pratiche';
 }

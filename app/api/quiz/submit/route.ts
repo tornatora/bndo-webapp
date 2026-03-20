@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import { enforceRateLimit, getClientIp, publicError, rejectCrossSiteMutation } from '@/lib/security/http';
+import { dispatchQuizSubmissionNotifications } from '@/lib/services/quizNotifications';
 
 const payloadSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
           eligibility: payload.eligibility,
           answers: payload.answers
         })
-        .select('id')
+        .select('id, created_at')
         .single(),
       supabaseAdmin.from('leads').insert({
         full_name: fullName,
@@ -117,6 +118,28 @@ export async function POST(request: Request) {
         _legal_captured_at: new Date().toISOString()
       };
       await supabaseAdmin.from('quiz_submissions').update({ answers: fallbackAnswers }).eq('id', quizSubmission.id);
+    }
+
+    // Best effort admin notification + email (never blocks user flow).
+    try {
+      await dispatchQuizSubmissionNotifications({
+        submissionId: quizSubmission.id,
+        fullName,
+        email: payload.email.toLowerCase(),
+        phone: payload.phone,
+        region,
+        bandoType,
+        practiceTitle:
+          bandoType === 'sud'
+            ? 'Resto al Sud 2.0'
+            : bandoType === 'centro_nord'
+              ? 'Autoimpiego Centro-Nord'
+              : null,
+        eligibility: payload.eligibility,
+        createdAtIso: quizSubmission.created_at
+      });
+    } catch (e) {
+      console.error('[QUIZ_NOTIFY_DISPATCH_ERROR]', e);
     }
 
     return NextResponse.json({ success: true, submissionId: quizSubmission.id }, { status: 201 });

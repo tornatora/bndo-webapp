@@ -4,10 +4,9 @@ import { hasOpsAccess } from '@/lib/roles';
 import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
-import { ChatWindow } from '@/components/chat/ChatWindow';
 import { DashboardStatsClient } from '@/components/dashboard/DashboardStatsClient';
 import { DashboardApplicationsClient } from '@/components/dashboard/DashboardApplicationsClient';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import { computeProgressBar, computeDerivedProgressKey, extractProgressFromNotes, progressBadge } from '@/lib/admin/practice-progress';
 
 type ApplicationRow = {
@@ -27,11 +26,7 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return (
-      <main className="page-shell">
-        <ChatWindow initialView="pratiche" />
-      </main>
-    );
+    redirect('/login?next=/dashboard');
   }
 
   const { profile } = await requireUserProfile();
@@ -94,17 +89,47 @@ export default async function DashboardPage() {
   const { data: docs } = applicationIds.length
     ? await supabase
         .from('application_documents')
-        .select('application_id, file_name')
+        .select('application_id, file_name, requirement_key')
         .in('application_id', applicationIds)
         .order('created_at', { ascending: false })
         .limit(500)
-    : { data: [] as Array<{ application_id: string; file_name: string }> };
+    : { data: [] as Array<{ application_id: string; file_name: string; requirement_key: string | null }> };
+
+  const { data: dynamicRequirements } = applicationIds.length
+    ? await supabase
+        .from('practice_document_requirements')
+        .select('application_id, requirement_key, label, description, is_required')
+        .in('application_id', applicationIds)
+    : {
+        data: [] as Array<{
+          application_id: string;
+          requirement_key: string;
+          label: string;
+          description: string | null;
+          is_required: boolean;
+        }>
+      };
 
   const docsByApp = new Map<string, Array<{ application_id: string; file_name: string }>>();
   for (const d of docs ?? []) {
     const prev = docsByApp.get(d.application_id) ?? [];
     prev.push(d);
     docsByApp.set(d.application_id, prev);
+  }
+  const requirementsByApp = new Map<
+    string,
+    Array<{
+      application_id: string;
+      requirement_key: string;
+      label: string;
+      description: string | null;
+      is_required: boolean;
+    }>
+  >();
+  for (const requirement of dynamicRequirements ?? []) {
+    const prev = requirementsByApp.get(requirement.application_id) ?? [];
+    prev.push(requirement);
+    requirementsByApp.set(requirement.application_id, prev);
   }
 
   const docsCount = (docs ?? []).length;
@@ -136,7 +161,11 @@ export default async function DashboardPage() {
   const initialItems = typedApplications.map((application) => {
     const title = application.tender?.title ?? 'Pratica';
     const appDocs = docsByApp.get(application.id) ?? [];
-    const checklist = computeDocumentChecklist(application.id, title, appDocs);
+    const appRequirements = requirementsByApp.get(application.id) ?? [];
+    const checklist =
+      appRequirements.length > 0
+        ? computeDocumentChecklistFromRequirements(application.id, appRequirements, appDocs)
+        : computeDocumentChecklist(application.id, title, appDocs);
     const missingCount = checklist.filter((c) => !c.uploaded).length;
     const uploadedCount = appDocs.length;
 

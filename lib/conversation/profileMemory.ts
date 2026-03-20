@@ -39,16 +39,51 @@ function sameNorm(a: string | null | undefined, b: string | null | undefined) {
   return av === bv;
 }
 
+/**
+ * Merges a new goal declaration into the existing one if they are semantically related.
+ * Ensures the project vision "evolves" instead of being overwritten.
+ */
+export function evolveFundingGoal(current: string | null | undefined, next: string | null | undefined): string | null {
+  if (!next) return current ?? null;
+  if (!current) return next;
+
+  const currentNorm = (current ?? '').toLowerCase();
+  const nextNorm = (next ?? '').toLowerCase();
+  const currentWords = currentNorm.split(/\s+/);
+  const nextWords = nextNorm.split(/\s+/);
+
+  // If the new goal is a short refinement that isn't already there
+  const isRefinement = nextWords.length <= 4 && !nextWords.every((w: string) => currentWords.includes(w));
+  
+  if (isRefinement) {
+      return `${current} e ${next}`;
+  }
+
+  // If the new goal is significantly longer and contains the old one, it's an overwrite
+  if (nextNorm.includes(currentNorm) && nextNorm.length > currentNorm.length + 5) return next;
+
+  // Default: take the latest
+  return next;
+}
+
 export function validateProfileConstraint(profile: UserProfile): { isValid: boolean; conflictReason?: string } {
   // Prevent contradictions like marking an enterprise as "micro" but having 1000 employees
   if (profile.employees !== null && profile.employees !== undefined && profile.employees > 250 && profile.legalForm !== 'SPA') {
-     // A soft contradiction, but let's just log or handle in orchestration
+      // return { isValid: false, conflictReason: 'Contraddizione: un\'impresa con oltre 250 dipendenti è considerata "Grande" e raramente ha forme giuridiche semplici.' };
   }
 
   // Prevent conflicting startup vs existing states
-  const isStartupIntent = profile.activityType === 'Startup' || profile.activityType === 'Da costituire';
-  if (profile.businessExists === true && isStartupIntent) {
-     return { isValid: false, conflictReason: 'Contraddizione: dichiara startup ma anche impresa già avviata.' };
+  const isStartupIntent = profile.activityType === 'Startup' || profile.activityType === 'Da costituire' || profile.businessExists === false;
+  if (profile.businessExists === true && (profile.activityType === 'Startup' || profile.activityType === 'Da costituire')) {
+     return { isValid: false, conflictReason: 'Contraddizione: hai dichiarato un\'attività già esistente, ma stai chiedendo incentivi per una nuova startup.' };
+  }
+
+  // Budget/Turnover logical guardrail
+  if (profile.annualTurnover !== null && profile.revenueOrBudgetEUR !== null) {
+      if (profile.revenueOrBudgetEUR > profile.annualTurnover * 10 && profile.annualTurnover > 0) {
+          // A bit suspicious if a company wants to invest 10x its annual turnover, 
+          // but could be valid with venture capital. We just log or flag.
+      }
   }
 
   return { isValid: true };

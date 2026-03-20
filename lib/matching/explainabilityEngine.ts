@@ -17,6 +17,10 @@ export type GrantExplanation = {
   missingData: string[];
   /** Livello di affidabilità della valutazione */
   confidence: 'alta' | 'media' | 'bassa';
+  /** Avvisi proattivi (es. Click Day) */
+  alerts: { type: 'yellow' | 'info' | 'expert'; message: string }[];
+  /** Punteggio di fattibilità tecnica */
+  feasibilityScore: number;
 };
 
 /** Mappa dimensione → modello di frase utente */
@@ -70,6 +74,20 @@ const DIMENSION_TEMPLATES: Record<MatchDimension, {
     positive: (note, _p) => note || 'Requisiti speciali soddisfatti',
     caveat: (_n, _p) => 'Da verificare: requisiti speciali',
   },
+  contribution: {
+    positive: (note, _p) => note || 'Tipo di contributo coerente',
+    caveat: (_n, _p) => 'Da verificare: preferenza fondo perduto / finanziamento',
+  },
+  turnover: {
+    positive: (_n, p) => p.annualTurnover 
+      ? `Fatturato annuo compatibile: €${p.annualTurnover.toLocaleString('it-IT')}`
+      : 'Requisiti di fatturato rispettati',
+    caveat: (_n, _p) => 'Da verificare: requisiti di fatturato annuo minimo',
+  },
+  regulatory: {
+    positive: (note, _p) => note || 'Iscrizione a registri speciali compatibile',
+    caveat: (_n, _p) => 'Da verificare: iscrizione Sezione Speciale (Startup Innovativa)',
+  },
 };
 
 /**
@@ -97,6 +115,8 @@ export function explainGrant(
       if (dim.dimension === 'subject' && profile.businessExists === null) missingData.push('Tipo impresa (nuova / esistente)');
       if (dim.dimension === 'territory' && !profile.userRegionCanonical) missingData.push('Regione di investimento');
       if (dim.dimension === 'stage' && profile.businessExists === null) missingData.push('Fase aziendale');
+      if (dim.dimension === 'turnover' && profile.annualTurnover === null) missingData.push('Fatturato annuo');
+      if (dim.dimension === 'regulatory' && profile.isInnovative === null) missingData.push('Stato Startup Innovativa');
     } else if (!dim.compatible) {
       caveats.push(dim.note || template.caveat(dim.note || '', profile));
     }
@@ -111,12 +131,30 @@ export function explainGrant(
   const lowConfCount = evaluation.dimensions.filter(d => d.confidence === 'low').length;
   const confidence: GrantExplanation['confidence'] = lowConfCount >= 3 ? 'bassa' : lowConfCount >= 1 ? 'media' : 'alta';
 
+  const alerts: { type: 'yellow' | 'info' | 'expert'; message: string }[] = [];
+  if (evaluation.isClickDay) {
+    alerts.push({ type: 'yellow', message: '⚠️ URGENTE: Questo è un bando a sportello (Click Day). I fondi potrebbero esaurirsi rapidamente.' });
+  }
+  if (evaluation.isSpecialArea) {
+    const areaName = evaluation.specialAreaType === 'zes' ? 'Area ZES' : evaluation.specialAreaType === 'sisma' ? 'Area Cratere Sisma' : evaluation.specialAreaType === 'montana' ? 'Area Montana' : 'Area Speciale';
+    alerts.push({ type: 'info', message: `✨ OPPORTUNITÀ: Questo bando offre premialità o riserve per investimenti in ${areaName}.` });
+  }
+
+  // Inject Expert Consultative Advice
+  if (evaluation.consultativeAdvice && evaluation.consultativeAdvice.length > 0) {
+    for (const advice of evaluation.consultativeAdvice) {
+      alerts.push({ type: 'expert', message: advice });
+    }
+  }
+
   return {
     grantId: evaluation.grantId,
     strengths: [...new Set(strengths)].slice(0, 3),
     caveats: [...new Set(caveats)].slice(0, 3),
     missingData: [...new Set(missingData)],
     confidence,
+    alerts,
+    feasibilityScore: evaluation.feasibilityScore || 0,
   };
 }
 

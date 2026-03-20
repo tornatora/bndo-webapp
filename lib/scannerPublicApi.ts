@@ -20,6 +20,9 @@ type LocalScannerProfile = {
   requestedContributionEUR?: number | null;
   legalForm?: string | null;
   businessExists?: boolean | null;
+  annualTurnover?: number | null;
+  isInnovative?: boolean | null;
+  foundationYear?: number | null;
 };
 
 type ScanRouteItem = {
@@ -184,6 +187,32 @@ function normalizeText(value: string | null | undefined): string {
     .trim();
 }
 
+function hasStrongMatchingContext(profile: LocalScannerProfile): boolean {
+  const region = normalizeText(profile.location?.region ?? profile.region ?? null);
+  if (!region) return false;
+
+  const sector = normalizeText(profile.sector);
+  const fundingGoal = normalizeText(profile.fundingGoal);
+  const atecoDigits = (profile.ateco ?? '').replace(/\D/g, '');
+  const hasTopicSignal = Boolean(sector) || fundingGoal.length >= 8 || atecoDigits.length >= 2;
+
+  const hasBusinessContext =
+    typeof profile.businessExists === 'boolean' ||
+    Boolean(normalizeText(profile.activityType)) ||
+    Boolean(normalizeText(profile.legalForm));
+
+  const hasEconomicSignal =
+    (typeof profile.revenueOrBudgetEUR === 'number' && profile.revenueOrBudgetEUR > 0) ||
+    (typeof profile.requestedContributionEUR === 'number' && profile.requestedContributionEUR > 0) ||
+    Boolean(normalizeText(profile.contributionPreference));
+
+  return hasTopicSignal && hasBusinessContext && hasEconomicSignal;
+}
+
+function chooseMatchingMode(profile: LocalScannerProfile): 'fast' | 'full' {
+  return hasStrongMatchingContext(profile) ? 'full' : 'fast';
+}
+
 function getRequirementValue(requirements: string[] | undefined, prefixes: string[]): string | null {
   if (!requirements?.length) return null;
   const normalizedPrefixes = prefixes.map((prefix) => normalizeText(prefix));
@@ -338,7 +367,10 @@ function toLegacyProfile(body: unknown): LocalScannerProfile {
     revenueOrBudgetEUR: typeof raw.plannedInvestment === 'number' ? raw.plannedInvestment : null,
     requestedContributionEUR: typeof raw.targetAmount === 'number' ? raw.targetAmount : null,
     legalForm: typeof raw.legalForm === 'string' ? raw.legalForm : null,
-    businessExists: typeof raw.businessExists === 'boolean' ? raw.businessExists : null
+    businessExists: typeof raw.businessExists === 'boolean' ? raw.businessExists : null,
+    annualTurnover: typeof raw.annualTurnover === 'number' ? raw.annualTurnover : null,
+    isInnovative: typeof raw.isInnovative === 'boolean' ? raw.isInnovative : null,
+    foundationYear: typeof raw.foundationYear === 'number' ? raw.foundationYear : null
   };
 }
 
@@ -355,12 +387,14 @@ async function runLocalMatching(mode: 'fast' | 'full' = 'fast'): Promise<LocalMa
     phase?: 'fast' | 'full';
   }>(`${baseUrl}/api/scan-bandi`, {
     method: 'POST',
-    body: JSON.stringify({ userProfile: profile, mode })
+    body: JSON.stringify({ userProfile: profile, mode, channel: 'scanner', strictness: 'high' })
   });
 
   const latest: LocalMatchLatestResponse = {
     run: { id: `local-${Date.now()}` },
-    items: (scan.results ?? []).map((item) => normalizeScanItem(item)),
+    items: (scan.results ?? [])
+      .map((item) => normalizeScanItem(item))
+      .filter((item) => item.hardStatus !== 'not_eligible'),
     nearMisses: (scan.nearMisses ?? []).map((item) => normalizeScanItem(item))
   };
 
@@ -492,7 +526,13 @@ export async function apiRequest<T>(
   }
 
   if (path === '/api/v1/matching/run' && method === 'POST') {
-    const latest = await runLocalMatching('fast');
+    const profile = readStorage<LocalScannerProfile>(LOCAL_PROFILE_KEY);
+    const requestedMode =
+      body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>).mode === 'full'
+        ? 'full'
+        : null;
+    const selectedMode = requestedMode ?? (profile ? chooseMatchingMode(profile) : 'fast');
+    const latest = await runLocalMatching(selectedMode);
     return ({ run: latest.run } as unknown) as T;
   }
 

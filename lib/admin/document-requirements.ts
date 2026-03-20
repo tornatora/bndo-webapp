@@ -114,6 +114,15 @@ export const REQUIRED_DOCS_PIA_INVESTIMENTO: RequiredDoc[] = [
 export type DocumentLike = {
   application_id: string;
   file_name: string;
+  requirement_key?: string | null;
+};
+
+export type DynamicRequirementLike = {
+  application_id: string;
+  requirement_key: string;
+  label: string;
+  description?: string | null;
+  is_required?: boolean;
 };
 
 function normalize(text: string) {
@@ -137,9 +146,36 @@ export function computeDocumentChecklist(applicationId: string, practiceKeyOrTen
   const requirements = getRequiredDocsForPractice(practiceKeyOrTenderId);
 
   return requirements.map((req) => {
-    const uploaded = req.keywords.some((kw) => haystack.includes(normalize(kw)));
+    const uploaded =
+      inApp.some((doc) => doc.requirement_key && doc.requirement_key === req.key) ||
+      req.keywords.some((kw) => haystack.includes(normalize(kw)));
     return { ...req, uploaded };
   });
+}
+
+export function computeDocumentChecklistFromRequirements(
+  applicationId: string,
+  requirements: DynamicRequirementLike[],
+  docs: DocumentLike[]
+) {
+  const inAppDocs = docs.filter((doc) => doc.application_id === applicationId);
+  const haystack = inAppDocs.map((doc) => normalize(doc.file_name)).join(' | ');
+  const uploadedByKey = new Set(
+    inAppDocs
+      .map((doc) => doc.requirement_key)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  );
+
+  return requirements
+    .filter((requirement) => requirement.application_id === applicationId)
+    .map((requirement) => ({
+      key: requirement.requirement_key,
+      label: requirement.label,
+      keywords: [requirement.requirement_key],
+      uploaded:
+        uploadedByKey.has(requirement.requirement_key) ||
+        haystack.includes(normalize(requirement.label))
+    }));
 }
 
 export function computeMissingDocsForApplication(applicationId: string, docs: DocumentLike[]) {

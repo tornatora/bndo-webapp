@@ -166,7 +166,9 @@ export function AdminQuizViewer({
           {data ? (
             <>
               <div className="admin-quiz-meta">
-                <span className="meta-tag">Compilato: {new Date(data.created_at).toLocaleString('it-IT')}</span>
+                <span className="meta-tag">
+                  Compilato: {new Date(data.created_at).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}
+                </span>
                 <span className={`meta-tag ${data.eligibility === 'eligible' ? 'tag-ok' : 'tag-warn'}`}>
                   Esito: {data.eligibility === 'eligible' ? 'Idoneo' : 'Non idoneo'}
                 </span>

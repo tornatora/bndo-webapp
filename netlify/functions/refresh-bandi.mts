@@ -25,10 +25,18 @@ const REFRESH_QUERIES = [
   'piemonte', 'liguria', 'marche', 'abruzzo', 'basilicata',
   'friuli venezia giulia', 'trentino alto adige', 'umbria', 'molise',
 
-  // ── Tematici ──
+  // ── Tematici & Nazionali ──
   'autoimpiego', 'resto al sud', 'sabatini', 'smart start',
   'imprenditoria giovanile', 'imprenditoria femminile',
   'pmi investimenti', 'zona economica speciale', 'industria 4.0',
+  'simest', 'internazionalizzazione simest', 'finest',
+  'marchi piu', 'disegni piu', 'brevetti piu', 'voucher internazionalizzazione',
+  'voucher fiere', 'voucher digitalizzazione', 'ecobonus imprese',
+  
+  // ── Enti e Tipologie ──
+  'camera di commercio', 'gal', 'gruppo azione locale',
+  'psr', 'psre', 'sviluppo rurale', 'fondo agricolo',
+  'invitalia bandi', 'mimit bandi', 'unioncamere bandi'
 ];
 
 export default async (req: Request) => {

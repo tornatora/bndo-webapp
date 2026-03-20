@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 
 export function ClientUploadDocButton({
   applicationId,
+  requirementKey,
   documentLabel
 }: {
   applicationId: string;
+  requirementKey?: string;
   documentLabel: string;
 }) {
   const router = useRouter();
@@ -24,6 +26,7 @@ export function ClientUploadDocButton({
     try {
       const fd = new FormData();
       fd.append('applicationId', applicationId);
+      if (requirementKey) fd.append('requirementKey', requirementKey);
       fd.append('documentLabel', documentLabel);
       fd.append('file', file);
 
@@ -66,4 +69,3 @@ export function ClientUploadDocButton({
     </div>
   );
 }
-

@@ -18,8 +18,20 @@ const RegisterSchema = z
     path: ['confirmPassword']
   });
 
-function redirectWithMessage(path: string, key: 'error' | 'success', message: string) {
-  const url = buildAbsoluteUrl(APP_URL, path);
+function redirectWithMessage(request: NextRequest, path: string, key: 'error' | 'success', message: string) {
+  const requestHost = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  ).split(',')[0].trim().toLowerCase();
+  
+  const isPreview =
+    requestHost.endsWith('.netlify.app') ||
+    requestHost.startsWith('localhost') ||
+    requestHost.startsWith('127.0.0.1');
+
+  const targetBaseUrl = isPreview ? request.nextUrl.origin : APP_URL;
+  const url = buildAbsoluteUrl(targetBaseUrl, path);
   url.searchParams.set(key, message);
   return NextResponse.redirect(url, { status: 303 });
 }
@@ -53,7 +65,7 @@ export async function POST(request: NextRequest) {
 
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message ?? 'Compila tutti i campi correttamente.';
-    return redirectWithMessage('/register', 'error', message);
+    return redirectWithMessage(request, '/register', 'error', message);
   }
 
   const { fullName, companyName, password } = parsed.data;
@@ -72,7 +84,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profileByEmail } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
   if (profileByEmail) {
-    return redirectWithMessage('/register', 'error', 'Email gia registrata. Accedi oppure recupera password.');
+    return redirectWithMessage(request, '/register', 'error', 'Email gia registrata. Accedi oppure recupera password.');
   }
 
   let companyId: string | null = null;
@@ -134,6 +146,7 @@ export async function POST(request: NextRequest) {
     );
 
     return redirectWithMessage(
+      request,
       '/login',
       'success',
       `Registrazione completata. Ora accedi con username "${username}" o con la tua email.`
@@ -149,6 +162,6 @@ export async function POST(request: NextRequest) {
 
     const fallback = 'Registrazione non completata. Riprova tra pochi secondi.';
     const message = error instanceof Error ? error.message : fallback;
-    return redirectWithMessage('/register', 'error', message);
+    return redirectWithMessage(request, '/register', 'error', message);
   }
 }

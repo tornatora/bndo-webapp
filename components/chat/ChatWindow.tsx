@@ -1,16 +1,21 @@
 'use client';
 
+import Image from 'next/image';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { InputArea } from '@/components/chat/InputArea';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { BandiResults, type BandoResult } from '@/components/chat/BandiResults';
+import { ThinkingBubble } from '@/components/chat/ThinkingBubble';
 import { TypewriterExamples } from '@/components/chat/TypewriterExamples';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { BndiHomeView } from '@/components/views/BndiHomeView';
 import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
+import { OnboardingChoiceView } from '@/components/views/OnboardingChoiceView';
 import { PraticheView } from '@/components/views/PraticheView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
+import './ThinkingBubble.css';
 
 type UserProfile = {
   activityType?: string | null;
@@ -18,6 +23,7 @@ type UserProfile = {
   sector?: string | null;
   ateco?: string | null;
   atecoAnswered?: boolean;
+  budgetAnswered?: boolean;
   location?: { region?: string | null; municipality?: string | null } | null;
   locationNeedsConfirmation?: boolean;
   age?: number | null;
@@ -88,7 +94,9 @@ type ConversationResponse = {
   needsClarification?: boolean;
   profileCompletenessScore?: number;
   scanReadinessReason?: string;
+  scanHash?: string | null;
   error?: string;
+  interactionId?: string;
 };
 
 
@@ -129,7 +137,7 @@ type ChatMessage =
   | { id: string; role: 'assistant'; kind: 'results'; explanation: string; results: BandoResult[]; nearMisses?: BandoResult[]; scanToken?: string }
   ;
 const LANDING_TITLE_PREFIX = 'Vorresti partecipare ad un BNDO?';
-const LANDING_TECH = ['Matching AI', 'Piattaforma con professionisti umani'] as const;
+const LANDING_TECH = ['Piattaforma con professionisti umani'] as const;
 const LANDING_ROTATING_FULL = [
   'Parlami di te e del tuo progetto',
   'Parlami di te, della tua idea e dei tuoi obiettivi',
@@ -205,8 +213,12 @@ function friendlyChatError(error: unknown, fallback: string) {
 }
 
 type ChatWindowProps = {
-  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail';
+  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice';
   initialGrantId?: string | null;
+  embedded?: boolean;
+  practiceLaunchMode?: boolean;
+  onPracticeGrantSelect?: (grantId: string, source: 'scanner' | 'chat') => void;
+  onPracticeGrantOpenDetail?: (grantId: string, source: 'scanner' | 'chat') => void;
 };
 
 function normalizeHashString(value: string | null | undefined) {
@@ -234,6 +246,19 @@ function buildScanProfileHash(profile: UserProfile) {
   return JSON.stringify(normalized);
 }
 
+function buildServerScanHash(profile: UserProfile) {
+  const bits = [
+    profile.businessExists ?? null,
+    profile.location?.region ?? null,
+    profile.fundingGoal ?? null,
+    profile.sector ?? null,
+    profile.budgetAnswered ? (profile.revenueOrBudgetEUR ?? null) : null,
+    profile.ageBand ?? null,
+    profile.employmentStatus ?? null,
+  ];
+  return bits.map(String).join('|');
+}
+
 function isInformativeRefineAnswer(text: string) {
   const normalized = normalizeText(text);
   if (!normalized) return false;
@@ -253,15 +278,28 @@ function isInformativeRefineAnswer(text: string) {
   );
 }
 
-export function ChatWindow({ initialView = 'chat', initialGrantId = null }: ChatWindowProps = {}) {
-  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' =
-    initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail'
-        ? initialView
-        : 'chat';
+export function ChatWindow({
+  initialView = 'chat',
+  initialGrantId = null,
+  embedded = false,
+  practiceLaunchMode: practiceLaunchModeOverride,
+  onPracticeGrantSelect,
+  onPracticeGrantOpenDetail
+}: ChatWindowProps = {}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' =
+    initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail' || initialView === 'choice'
+      ? initialView
+      : 'chat';
+
+  const streamingAssistantBodyRef = useRef('');
+  const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [profile, setProfile] = useState<UserProfile>({});
   const [step, setStep] = useState<ConversationResponse['step']>('location');
   const [isTyping, setIsTyping] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanOverlayProgress, setScanOverlayProgress] = useState(0);
   const [scanOverlayStepIndex, setScanOverlayStepIndex] = useState(0);
@@ -273,12 +311,13 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
-  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail'>(resolvedInitialView);
-  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail', boolean>>({
+  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice'>(resolvedInitialView);
+  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice', boolean>>({
     home: resolvedInitialView === 'home',
     form: resolvedInitialView === 'form',
     pratiche: resolvedInitialView === 'pratiche',
-    grantDetail: resolvedInitialView === 'grantDetail'
+    grantDetail: resolvedInitialView === 'grantDetail',
+    choice: resolvedInitialView === 'choice'
   });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -293,6 +332,32 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const interactionVersionRef = useRef(0);
   const awaitingRefineAnswerRef = useRef(false);
   const lastRenderedScanHashRef = useRef<string | null>(null);
+  const lastSuccessfulServerScanHashRef = useRef<string | null>(null);
+  const practiceLaunchMode = practiceLaunchModeOverride ?? searchParams.get('launch') === 'practice';
+
+  const onSelectGrantForPractice = useCallback(
+    (grantId: string, source: 'scanner' | 'chat') => {
+      if (!practiceLaunchMode) return;
+      if (onPracticeGrantSelect) {
+        onPracticeGrantSelect(grantId, source);
+        return;
+      }
+      router.push(`/dashboard/new-practice/quiz?grantId=${encodeURIComponent(grantId)}&source=${source}`);
+    },
+    [onPracticeGrantSelect, practiceLaunchMode, router]
+  );
+
+  const onOpenGrantDetailForPractice = useCallback(
+    (grantId: string, source: 'scanner' | 'chat') => {
+      if (!practiceLaunchMode) return;
+      if (onPracticeGrantOpenDetail) {
+        onPracticeGrantOpenDetail(grantId, source);
+        return;
+      }
+      router.push(`/dashboard/new-practice?mode=detail&grantId=${encodeURIComponent(grantId)}&source=${source}`);
+    },
+    [onPracticeGrantOpenDetail, practiceLaunchMode, router]
+  );
 
   useLayoutEffect(() => {
     if (typeof window === 'undefined') return;
@@ -327,13 +392,6 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       root.classList.remove('keyboard-open');
       body.classList.remove('keyboard-open');
     };
-  }, []);
-
-  useEffect(() => {
-    // The UI currently doesn't persist chat history; always start with a clean server session
-    // to avoid stale cookies generating incoherent replies (e.g. "Ciao" -> "posso affinare...").
-    resetConversation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -399,10 +457,10 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     stopOverlayProgressLoop();
     overlayProgressTimerRef.current = window.setInterval(() => {
       setScanOverlayProgress((prev) => {
-        if (prev >= 92) return prev;
-        const baseStep = prev < 26 ? 7.2 : prev < 58 ? 3.8 : prev < 80 ? 1.9 : 0.9;
-        const jitter = prev < 80 ? Math.random() : Math.random() * 0.3;
-        return Math.min(92, prev + baseStep + jitter);
+        if (prev >= 99) return prev;
+        const baseStep = prev < 26 ? 7.2 : prev < 58 ? 3.8 : prev < 80 ? 1.9 : prev < 92 ? 0.9 : 0.1;
+        const jitter = prev < 80 ? Math.random() : Math.random() * 0.2;
+        return Math.min(99, prev + baseStep + jitter);
       });
     }, 110);
   }
@@ -555,6 +613,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     _refineStep?: ConversationResponse['step'],
     scanProfileHash?: string,
     interactionVersionAtStart?: number,
+    serverScanHash?: string | null,
   ) {
     if (scanInFlightRef.current) return;
     scanInFlightRef.current = true;
@@ -618,8 +677,18 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       const refineText =
         payload.refineQuestion?.trim() ||
         "Per essere preciso mi serve un dettaglio in più: settore principale e importo indicativo dell'investimento.";
+      
       setMessages((prev) => [
         ...prev,
+        {
+          id: resultMessageId,
+          role: 'assistant',
+          kind: 'results',
+          explanation: payload.explanation || "Non abbiamo trovato bandi corrispondenti al tuo profilo.",
+          results: [],
+          nearMisses: payload.nearMisses ?? [],
+          scanToken
+        },
         {
           id: followupMessageId,
           role: 'assistant',
@@ -628,8 +697,8 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
           scanToken,
         },
       ]);
+      setFocusResultMessageId(resultMessageId);
       lockAutoBottomScrollRef.current = false;
-      setFocusResultMessageId(null);
       awaitingRefineAnswerRef.current = true;
     };
 
@@ -707,6 +776,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
         appendScanMessages(scanJson);
       }
       lastRenderedScanHashRef.current = scanProfileHash ?? buildScanProfileHash(nextProfile);
+      lastSuccessfulServerScanHashRef.current = serverScanHash ?? buildServerScanHash(nextProfile);
       if ((scanJson.results?.length ?? 0) > 0) {
         awaitingRefineAnswerRef.current = true;
       }
@@ -741,57 +811,132 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   async function onSend(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const interactionId = uid();
     interactionVersionRef.current += 1;
     const interactionVersion = interactionVersionRef.current;
 
+    // Optimistic UI
     setMessages((prev) => [...prev, { id: uid(), role: 'user', kind: 'text', body: trimmed }]);
 
     setIsTyping(true);
+    setIsThinking(true);
+    setShowTypingIndicator(true);
+    let assistantMessageId = uid();
+    streamingAssistantBodyRef.current = '';
+    let finalMetadata: ConversationResponse | null = null;
+    let hasAddedAssistantPlaceholder = false;
+
     try {
-      const startedAt = Date.now();
       const res = await fetch('/api/conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed })
+        body: JSON.stringify({ message: trimmed, interactionId })
       });
-      const json = (await res.json()) as ConversationResponse;
-      if (!res.ok) throw new Error(json.error ?? 'Conversazione non disponibile.');
 
-      // Ensure a modern "typing" feel even when the API is fast.
-      const minMs = 700;
-      const byLengthMs = Math.min(1100, Math.max(200, Math.round((json.assistantText ?? '').length * 10)));
-      const target = minMs + byLengthMs;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < target) await new Promise((r) => setTimeout(r, target - elapsed));
-
-      setProfile(json.userProfile);
-      setStep(json.step);
-      if (!isEchoLikeReply(trimmed, json.assistantText ?? '') && json.assistantText) {
-        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: json.assistantText }]);
+      if (!res.ok) {
+         const errData = await res.json().catch(() => ({}));
+         throw new Error(errData.error ?? 'Conversazione non disponibile.');
       }
 
-      // Respect the strict decision model
-      if (json.action === 'run_scan' || json.action === 'refine_after_scan') {
-        const profileHash = buildScanProfileHash(json.userProfile);
-        const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
-        const shouldRunFirstScan = lastRenderedScanHashRef.current === null && hasProfileDelta;
-        const refineAnswerInformative = isInformativeRefineAnswer(trimmed);
-        const shouldRunRefineScan = awaitingRefineAnswerRef.current && hasProfileDelta && refineAnswerInformative;
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("Stream non disponibile");
+
+      let sseBuffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        if (
-          (shouldRunFirstScan || shouldRunRefineScan || json.readyToScan) &&
-          !scanInFlightRef.current
-        ) {
-          await runScan(json.userProfile, json.step, profileHash, interactionVersion);
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
+          
+          try {
+            const dataStr = trimmedLine.slice(6);
+            if (dataStr === '[DONE]') break;
+            const data = JSON.parse(dataStr);
+            
+            if (data.type === 'text') {
+              const delta = String(data.content ?? '');
+              if (!delta) continue;
+              streamingAssistantBodyRef.current += delta;
+              if (isThinking) setIsThinking(false);
+            } else if (data.type === 'thinking') {
+              setIsThinking(!!data.content);
+            } else if (data.type === 'metadata') {
+              finalMetadata = data.content as ConversationResponse;
+              setProfile(finalMetadata.userProfile);
+              setStep(finalMetadata.step);
+
+              const finalText = (streamingAssistantBodyRef.current || finalMetadata.assistantText || '').trim();
+              if (finalText && !hasAddedAssistantPlaceholder) {
+                setMessages((prev) => [...prev, { id: assistantMessageId, role: 'assistant', kind: 'text', body: finalText }]);
+                hasAddedAssistantPlaceholder = true;
+                setShowTypingIndicator(false);
+              }
+            } else if (data.type === 'error') {
+              throw new Error(data.content || "Errore durante lo streaming");
+            }
+          } catch (e) {
+            console.warn("Parse error in stream line:", line, e);
+          }
         }
       }
+
+      if (finalMetadata && (finalMetadata.action === 'run_scan' || finalMetadata.action === 'refine_after_scan')) {
+          const profileHash = buildScanProfileHash(finalMetadata.userProfile);
+          const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
+          if ((lastRenderedScanHashRef.current === null || hasProfileDelta || finalMetadata.readyToScan) && !scanInFlightRef.current) {
+            await runScan(
+              finalMetadata.userProfile,
+              finalMetadata.step,
+              profileHash,
+              interactionVersion,
+              finalMetadata.scanHash ?? null,
+            );
+          }
+      }
+
     } catch (e) {
-      setMessages((prev) => [
+      console.error("Chat error:", e);
+       setMessages((prev) => [
         ...prev,
         { id: uid(), role: 'assistant', kind: 'text', body: friendlyChatError(e, 'Errore conversazione.') }
       ]);
     } finally {
+      const assistantTextToCommit = (streamingAssistantBodyRef.current || finalMetadata?.assistantText || '').trim();
+      if (!hasAddedAssistantPlaceholder && assistantTextToCommit) {
+        setMessages((prev) => [...prev, { id: assistantMessageId, role: 'assistant', kind: 'text', body: assistantTextToCommit }]);
+        hasAddedAssistantPlaceholder = true;
+      }
+      try {
+        if (finalMetadata && assistantTextToCommit) {
+          const commitInteractionId = finalMetadata.interactionId || interactionId;
+          // Fire-and-forget persistence for server-side memory continuity.
+          await fetch('/api/conversation', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              interactionId: commitInteractionId,
+              assistantText: assistantTextToCommit,
+              userProfile: finalMetadata.userProfile,
+              step: finalMetadata.step,
+              ...(lastSuccessfulServerScanHashRef.current
+                ? { lastScanHash: lastSuccessfulServerScanHashRef.current }
+                : {}),
+            })
+          });
+        }
+      } catch {
+        // ignore commit errors; chat UX should not be blocked
+      }
       setIsTyping(false);
+      setIsThinking(false);
+      setShowTypingIndicator(false);
     }
   }
 
@@ -811,6 +956,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     activeScanTokenRef.current = null;
     awaitingRefineAnswerRef.current = false;
     lastRenderedScanHashRef.current = null;
+    lastSuccessfulServerScanHashRef.current = null;
     setMessages([]);
     setProfile({});
     setStep('location');
@@ -863,46 +1009,78 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   );
 
   return (
-    <div className={sidebarOpen ? 'bndo-shell with-sidebar sidebar-open' : 'bndo-shell with-sidebar'}>
-      {sidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Chiudi menu" /> : null}
-      <button
-        type="button"
-        className={sidebarOpen ? 'mobile-menu-fab is-open' : 'mobile-menu-fab'}
-        onClick={() => setSidebarOpen((v) => !v)}
-        aria-label={sidebarOpen ? 'Chiudi menu' : 'Apri menu'}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="4.5" width="17" height="15" rx="4" stroke="currentColor" strokeWidth="2" />
-          <path d="M10 5.5v13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </button>
-      <Sidebar
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
-        onNewChat={resetConversation}
-        items={navItems}
-        recent={[]}
-      />
+    <div
+      className={
+        embedded
+          ? 'chat-window-embedded'
+          : sidebarOpen
+            ? 'bndo-shell with-sidebar sidebar-open'
+            : 'bndo-shell with-sidebar'
+      }
+    >
+      {!embedded && sidebarOpen ? (
+        <button type="button" className="mobile-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Chiudi menu" />
+      ) : null}
+      {!embedded ? (
+        <button
+          type="button"
+          className={sidebarOpen ? 'mobile-menu-fab is-open' : 'mobile-menu-fab'}
+          onClick={() => setSidebarOpen((v) => !v)}
+          aria-label={sidebarOpen ? 'Chiudi menu' : 'Apri menu'}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3.5" y="4.5" width="17" height="15" rx="4" stroke="currentColor" strokeWidth="2" />
+            <path d="M10 5.5v13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+      ) : null}
+      {!embedded ? (
+        <Sidebar
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen((v) => !v)}
+          onNewChat={resetConversation}
+          items={navItems}
+          recent={[]}
+        />
+      ) : null}
 
-      <main className="mainpane">
-        {view === 'home' ? null : (
+      <main className={embedded ? 'mainpane chat-mainpane-embedded' : 'mainpane'}>
+        {!embedded && view === 'home' ? null : !embedded ? (
           <div className="topbar">
             <button type="button" className="topbar-logo topbar-logo-btn" onClick={goHome} aria-label="BNDO Home">
-              <img src="/Logo-BNDO-header.png" alt="BNDO" width={98} height={26} />
+              <Image src="/Logo-BNDO-header.png" alt="BNDO" width={98} height={26} priority />
             </button>
           </div>
-        )}
+        ) : null}
+
+        {view === 'choice' || viewLoaded.choice ? (
+          <div className={view === 'choice' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'choice'}>
+            <OnboardingChoiceView onStartChat={goChat} onOpenScanner={goScanner} />
+          </div>
+        ) : null}
 
         {view === 'home' || viewLoaded.home ? (
           <div className={view === 'home' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'home'}>
-            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} />
+            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} embedded={embedded} />
           </div>
         ) : null}
 
         {view === 'form' || viewLoaded.form ? (
           <div className={view === 'form' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'form'}>
             <div className="scanner-pro-page">
-              <ScannerBandiProView initialGrantId={initialGrantId} />
+              <ScannerBandiProView
+                initialGrantId={initialGrantId}
+                onGrantSelect={
+                  practiceLaunchMode
+                    ? (grantId) => onSelectGrantForPractice(grantId, 'scanner')
+                    : undefined
+                }
+                onGrantDetail={
+                  practiceLaunchMode
+                    ? (grantId) => onOpenGrantDetailForPractice(grantId, 'scanner')
+                    : undefined
+                }
+              />
             </div>
           </div>
         ) : null}
@@ -932,9 +1110,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                   </div>
                   <TypewriterExamples />
                   <div className="chat-tech" aria-hidden="true">
-                    <span className="chat-tech-left">{LANDING_TECH[0]}</span>
-                    <span className="chat-tech-mid" aria-hidden="true" />
-                    <span className="chat-tech-right">{LANDING_TECH[1]}</span>
+                    {LANDING_TECH.map((tag, i) => (
+                      <span key={tag} className={i === 0 ? 'chat-tech-left' : 'chat-tech-right'}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 </div>
               ) : null}
@@ -962,13 +1142,30 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                           }}
                         >
                           <MessageBubble role="assistant">
-                            <BandiResults explanation={m.explanation} results={m.results} nearMisses={m.nearMisses} />
+                            <BandiResults
+                              explanation={m.explanation}
+                              results={m.results}
+                              nearMisses={m.nearMisses}
+                              onOpenDetail={
+                                practiceLaunchMode
+                                  ? (grantId) => onOpenGrantDetailForPractice(grantId, 'chat')
+                                  : undefined
+                              }
+                              onVerifyRequirements={
+                                practiceLaunchMode
+                                  ? (grantId) => onSelectGrantForPractice(grantId, 'chat')
+                                  : undefined
+                              }
+                            />
                           </MessageBubble>
                         </div>
                       );
                     return null;
                   })}
-                  {isTyping ? (
+                  {isThinking && (
+                    <ThinkingBubble />
+                  )}
+                  {isTyping && !isThinking && showTypingIndicator ? (
                     <MessageBubble role="assistant">
                       <span className="typing" aria-label="Assistant sta scrivendo">
                         <span className="typing-dot" />

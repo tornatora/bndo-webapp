@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readBandiCache, readBundledBandiSeed, writeBandiCache } from '@/lib/bandiCache';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { getStrategicDatasetDocs } from '@/lib/matching/datasetStrategic';
@@ -24,6 +23,14 @@ type MemoryCacheState = {
 };
 
 let memoryCache: MemoryCacheState | null = null;
+let hybridMemoryCache: {
+  docs: IncentiviDoc[];
+  source: 'supabase' | 'tmp-cache' | 'bundled-seed';
+  fetchedAt: string | null;
+  expiresAt: number;
+} | null = null;
+
+const HYBRID_TTL_MS = 5 * 60 * 1000; // 5 minutes for the full merged set
 
 function cloneDocs(docs: IncentiviDoc[]) {
   return docs.map((doc) => ({ ...doc }));
@@ -46,7 +53,7 @@ function rowToSnapshot(row: SnapshotRow): DatasetSnapshot {
   };
 }
 
-function computeVersionHash(docs: IncentiviDoc[]) {
+async function computeVersionHash(docs: IncentiviDoc[]) {
   const payload = JSON.stringify(
     docs
       .map((doc) => ({
@@ -63,7 +70,12 @@ function computeVersionHash(docs: IncentiviDoc[]) {
       }))
       .sort((a, b) => String(a.id ?? '').localeCompare(String(b.id ?? ''))),
   );
-  return createHash('sha256').update(payload).digest('hex');
+
+  const msgUint8 = new TextEncoder().encode(payload);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
 }
 
 function setMemorySnapshot(snapshot: DatasetSnapshot | null) {
@@ -131,7 +143,7 @@ export async function saveActiveDatasetSnapshotToSupabase(args: {
   const docs = cloneDocs(args.docs);
   const source = args.source ?? SNAPSHOT_SOURCE_INCENTIVI;
   const fetchedAt = args.fetchedAt ?? new Date().toISOString();
-  const versionHash = computeVersionHash(docs);
+  const versionHash = await computeVersionHash(docs);
 
   const admin = getSupabaseAdmin();
 
@@ -187,33 +199,57 @@ export async function loadHybridDatasetDocs(): Promise<{
   source: 'supabase' | 'tmp-cache' | 'bundled-seed';
   fetchedAt: string | null;
 }> {
+  // Ultra-Fast Singleton Check
+  if (hybridMemoryCache && hybridMemoryCache.expiresAt > Date.now()) {
+    return {
+      docs: hybridMemoryCache.docs, // Note: returning reference for speed, matching engine should not mutate
+      source: hybridMemoryCache.source,
+      fetchedAt: hybridMemoryCache.fetchedAt,
+    };
+  }
+
   const strategic = getStrategicDatasetDocs();
   const regional = getRegionalGrantsDocs();
   const curated = [...strategic, ...regional];
   const activeSnapshot = await loadActiveDatasetSnapshotFromSupabase();
+
+  let result: {
+    docs: IncentiviDoc[];
+    source: 'supabase' | 'tmp-cache' | 'bundled-seed';
+    fetchedAt: string | null;
+  };
+
   if (activeSnapshot && activeSnapshot.docs.length > 0) {
-    return {
+    result = {
       docs: [...activeSnapshot.docs, ...curated],
       source: 'supabase',
       fetchedAt: activeSnapshot.fetchedAt,
     };
+  } else {
+    const cached = await readBandiCache<IncentiviDoc>();
+    if ((cached?.docs?.length ?? 0) > 0) {
+      result = {
+        docs: [...(cached?.docs ?? []), ...curated],
+        source: 'tmp-cache',
+        fetchedAt: cached?.fetchedAt ?? null,
+      };
+    } else {
+      const bundled = await readBundledBandiSeed<IncentiviDoc>();
+      result = {
+        docs: [...(bundled?.docs ?? []), ...curated],
+        source: 'bundled-seed',
+        fetchedAt: bundled?.fetchedAt ?? null,
+      };
+    }
   }
 
-  const cached = await readBandiCache<IncentiviDoc>();
-  if ((cached?.docs?.length ?? 0) > 0) {
-    return {
-      docs: [...(cached?.docs ?? []), ...curated],
-      source: 'tmp-cache',
-      fetchedAt: cached?.fetchedAt ?? null,
-    };
-  }
-
-  const bundled = await readBundledBandiSeed<IncentiviDoc>();
-  return {
-    docs: [...(bundled?.docs ?? []), ...curated],
-    source: 'bundled-seed',
-    fetchedAt: bundled?.fetchedAt ?? null,
+  // Update Singleton
+  hybridMemoryCache = {
+    ...result,
+    expiresAt: Date.now() + HYBRID_TTL_MS,
   };
+
+  return result;
 }
 
 export async function refreshRuntimeCacheFile(docs: IncentiviDoc[]) {

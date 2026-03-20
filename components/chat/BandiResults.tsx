@@ -1,5 +1,7 @@
 'use client';
 
+import { memo } from 'react';
+
 function formatDateIT(iso: string | null) {
   if (!iso) return 'N/D';
   const d = new Date(iso);
@@ -25,6 +27,9 @@ export type BandoResult = {
   budgetTotal?: number | null;
   economicOffer?: Record<string, unknown> | null;
   bookingUrl?: string | null;
+  isClickDay?: boolean;
+  isSpecialArea?: boolean;
+  specialAreaType?: 'zes' | 'sisma' | 'montana' | null;
 };
 
 function normalizeAid(value: string) {
@@ -189,14 +194,20 @@ function economicSummary(item: BandoResult): { amount: string; coverage: string 
   };
 }
 
-export function BandiResults({
+export const BandiResults = memo(function BandiResults({
   explanation,
   results,
   nearMisses = [],
+  onOpenDetail,
+  onVerifyRequirements,
+  onSelectGrant,
 }: {
   explanation: string;
   results: BandoResult[];
   nearMisses?: BandoResult[];
+  onOpenDetail?: (grantId: string) => void;
+  onVerifyRequirements?: (grantId: string) => void;
+  onSelectGrant?: (grantId: string) => void;
 }) {
   const followupDetailsHref = (item: BandoResult) => `/grants/${encodeURIComponent(item.id)}`;
   const followupBookingHref = (item: BandoResult) =>
@@ -211,6 +222,27 @@ export function BandiResults({
   return (
     <div className="results-wrap">
       <div className="results-explanation">{explanation}</div>
+      
+      {results.length === 0 && (
+        <div style={{ 
+          background: '#FFF5F5', 
+          border: '2px solid #FEB2B2', 
+          padding: '1.5rem', 
+          borderRadius: '16px', 
+          marginBottom: '1.5rem', 
+          textAlign: 'center' 
+        }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</div>
+          <div style={{ color: '#C53030', fontWeight: 800, fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+            Nessun bando trovato per i criteri inseriti
+          </div>
+          <div style={{ color: '#742A2A', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            Non abbiamo trovato agevolazioni attive che corrispondano esattamente al tuo profilo. 
+            Prova a descrivere meglio il tuo **settore** o l’**obiettivo** del finanziamento per aiutarci nella ricerca.
+          </div>
+        </div>
+      )}
+
       <div className="results-list">
         {results.map((bando) => {
           const economic = economicSummary(bando);
@@ -231,9 +263,21 @@ export function BandiResults({
                 </div>
               </div>
 
+              {bando.isClickDay ? (
+                <div style={{ background: '#FFF3CD', border: '1px solid #FFEBAA', padding: '0.5rem 0.75rem', borderRadius: '6px', marginBottom: '0.75rem', fontSize: '0.85rem', color: '#856404', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>⚠️</span>
+                    <span>URGENTE: Bando a sportello (Click Day). Agisci subito!</span>
+                </div>
+              ) : null}
+
               <div className="result-authority-row">
                 <span className="result-authority-k">Ente</span>
                 <span className="result-authority-v">{bando.authorityName}</span>
+                {bando.isSpecialArea ? (
+                  <span style={{ marginLeft: 'auto', background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)', color: '#000', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>
+                    PREMIALITÀ {bando.specialAreaType?.toUpperCase()}
+                  </span>
+                ) : null}
               </div>
 
               <div className="result-econ-grid">
@@ -256,17 +300,37 @@ export function BandiResults({
               </div>
 
               <div className="chat-result-actions">
-                <a className="chat-result-btn chat-result-btn--details" href={followupDetailsHref(bando)}>
-                  Dettagli e requisiti
-                </a>
-                <a
-                  className="chat-result-btn chat-result-btn--consult"
-                  href={followupBookingHref(bando)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Prenota una consulenza per questo bando con BNDO
-                </a>
+                {onOpenDetail || onSelectGrant ? (
+                  <button
+                    type="button"
+                    className="chat-result-btn chat-result-btn--details"
+                    onClick={() => (onOpenDetail ?? onSelectGrant)?.(bando.id)}
+                  >
+                    Dettagli Bando
+                  </button>
+                ) : (
+                  <a className="chat-result-btn chat-result-btn--details" href={followupDetailsHref(bando)}>
+                    Dettagli Bando
+                  </a>
+                )}
+                {onVerifyRequirements ? (
+                  <button
+                    type="button"
+                    className="chat-result-btn chat-result-btn--consult"
+                    onClick={() => onVerifyRequirements(bando.id)}
+                  >
+                    Verifica requisiti
+                  </button>
+                ) : (
+                  <a
+                    className="chat-result-btn chat-result-btn--consult"
+                    href={followupBookingHref(bando)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Prenota una consulenza per questo bando con BNDO
+                  </a>
+                )}
               </div>
             </div>
           );
@@ -283,9 +347,20 @@ export function BandiResults({
                   {typeof bando.matchScore === 'number' ? <div className="near-miss-score">{Math.round(bando.matchScore * 100)}%</div> : null}
                 </div>
                 {bando.mismatchFlags?.length ? <div className="near-miss-hint">{bando.mismatchFlags[0]}</div> : null}
-                <a className="near-miss-link" href={followupDetailsHref(bando)}>
-                  Dettagli e requisiti
-                </a>
+                {onOpenDetail || onSelectGrant ? (
+                  <button
+                    type="button"
+                    className="near-miss-link"
+                    style={{ border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}
+                    onClick={() => (onOpenDetail ?? onSelectGrant)?.(bando.id)}
+                  >
+                    Dettagli Bando
+                  </button>
+                ) : (
+                  <a className="near-miss-link" href={followupDetailsHref(bando)}>
+                    Dettagli Bando
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -293,4 +368,4 @@ export function BandiResults({
       ) : null}
     </div>
   );
-}
+});

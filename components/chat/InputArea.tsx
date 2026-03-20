@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState, memo } from 'react';
 
 type FocusMode = 'desktop' | 'manual';
 
@@ -9,7 +9,7 @@ function isDesktopViewport() {
   return window.matchMedia('(min-width: 900px)').matches;
 }
 
-export function InputArea({
+export const InputArea = memo(function InputArea({
   placeholder,
   disabled,
   onSend,
@@ -72,4 +72,4 @@ export function InputArea({
       </button>
     </form>
   );
-}
+});

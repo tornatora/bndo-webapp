@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
 import { getQuizQuestions } from '@/lib/quiz/quiz-map';
-import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
+import { SUPPORT_WHATSAPP_URL, buildEligibleQuizWhatsAppUrl } from '@/lib/support';
 import './quiz.css';
 
 type StepId =
@@ -98,6 +99,7 @@ export default function QuizPage() {
   const [consentDataProcessing, setConsentDataProcessing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [latestSubmissionId, setLatestSubmissionId] = useState<string | null>(null);
   const [blockedFromStep, setBlockedFromStep] = useState<StepId | null>(null);
 
   const progress = Math.round((progressMap[step] / 13) * 100);
@@ -313,12 +315,13 @@ export default function QuizPage() {
           consentDataProcessing
         })
       });
+      const payload = (await response.json().catch(() => null)) as { error?: string; submissionId?: string } | null;
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(payload?.error ?? 'Salvataggio non riuscito.');
       }
 
+      setLatestSubmissionId(payload?.submissionId ?? null);
       setBlockedFromStep(null);
       setStep('success');
     } catch (error) {
@@ -328,6 +331,22 @@ export default function QuizPage() {
     }
   }
 
+  function goToPracticePayment() {
+    const practiceType = isSouth ? 'resto_sud_2_0' : 'autoimpiego_centro_nord';
+    if (!latestSubmissionId) {
+      setSubmissionError('Errore sessione quiz. Riprova l’invio del quiz per procedere al pagamento.');
+      return;
+    }
+    setSubmissionError(null);
+    window.location.href = `/onboarding?bando=${practiceType}&quiz=${encodeURIComponent(latestSubmissionId)}`;
+  }
+
+  function openConsultantChat() {
+    const practiceType = isSouth ? 'resto_sud_2_0' : 'autoimpiego_centro_nord';
+    const whatsappUrl = buildEligibleQuizWhatsAppUrl(practiceType);
+    window.open(whatsappUrl, '_blank');
+  }
+
   return (
     <main className="quiz-page">
       <section className={`container ${step === 'intro' ? 'intro-container' : ''}`}>
@@ -335,7 +354,7 @@ export default function QuizPage() {
           <>
             <div className="top-links">
               <Link href={MARKETING_URL}>Torna al sito</Link>
-              <Link href={`${APP_URL}/login`}>Area clienti</Link>
+              {step !== 'success' && <Link href={`${APP_URL}/login`}>Area clienti</Link>}
             </div>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />
@@ -602,6 +621,14 @@ export default function QuizPage() {
 
         {step === 'q12' ? (
           <QuestionLayout title="Inserisci i tuoi dati per procedere" subtitle="Domanda 13 di 13">
+            <div className="quiz-warning-banner">
+              <div className="quiz-warning-icon">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="quiz-warning-text">
+                <strong>Attenzione:</strong> Non fare il furbo a non mettere i tuoi dati, se risulterai idoneo e non inserisci i dati correttamente, non avremo modo di ricontattarti. Non ci perderemo noi, ma perderai tu l&apos;opportunità di ottenere il contributo.
+              </div>
+            </div>
             <div className="input-group">
               <input
                 placeholder="Nome *"
@@ -716,26 +743,24 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => {
-                  window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
-                }}
+                onClick={goToPracticePayment}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
+                    goToPracticePayment();
                   }
                 }}
               >
                 <h3>
-                  ⚡ Salta la fila
+                  ⚡ Avvia la pratica Online con Bndo
                   <span className="badge badge-premium">Consigliato</span>
                 </h3>
                 <p>
-                  Pagamento immediato di <strong>100€</strong> per accedere subito alla verifica documenti e saltare la
+                  Pagamento immediato di <strong>50€</strong> per avviare la pratica, accedere subito alla verifica documenti e saltare la
                   lista d&apos;attesa.
                 </p>
                 <button type="button" className="btn-premium">
-                  Paga 100€ e inizia subito
+                  Avvia la pratica Online con Bndo
                 </button>
               </div>
 
@@ -743,30 +768,32 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => window.open(SUPPORT_WHATSAPP_URL, '_blank')}
+                onClick={openConsultantChat}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.open(SUPPORT_WHATSAPP_URL, '_blank');
+                    openConsultantChat();
                   }
                 }}
               >
                 <h3>
-                  💬 Parla con un consulente
+                  💬 Chat con il consulente
                   <span className="badge badge-free">Gratuito</span>
                 </h3>
                 <p>Chatta gratuitamente con un nostro esperto per approfondire la tua situazione prima di procedere.</p>
                 <button type="button" className="btn-chat">
-                  Chatta con noi
+                  Chat con il consulente
                 </button>
               </div>
             </div>
+
+            {submissionError ? <p className="error-text">{submissionError}</p> : null}
 
             <div className="process-info">
               <h4>📋 Come funziona il processo &quot;Salta la fila&quot;:</h4>
               <ol>
                 <li>
-                  <strong>Pagamento 100€:</strong> Accedi immediatamente alla verifica documenti
+                  <strong>Pagamento 50€:</strong> Accedi immediatamente alla verifica documenti
                 </li>
                 <li>
                   <strong>Invio documenti:</strong> Carica i documenti richiesti per la verifica
@@ -778,7 +805,7 @@ export default function QuizPage() {
                       ✅ <strong>Documenti OK:</strong> Riceverai link per pagare altri 200€ per la compilazione pratica
                     </li>
                     <li>
-                      ❌ <strong>Documenti NON OK:</strong> Rimborso completo dei 100€
+                      ❌ <strong>Documenti NON OK:</strong> Rimborso completo dei 50€
                     </li>
                   </ul>
                 </li>
@@ -790,7 +817,7 @@ export default function QuizPage() {
                 </li>
               </ol>
               <p style={{ marginTop: 12, fontWeight: 500, color: 'var(--navy)' }}>
-                💰 Totale servizio completo: 500€ (100€ + 200€ + 200€)
+                💰 Totale servizio completo: 450€ (50€ + 200€ + 200€)
               </p>
             </div>
           </div>

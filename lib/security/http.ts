@@ -112,7 +112,9 @@ export function safeSessionId(value: string | null | undefined) {
     return null;
   }
 
-  if (!/^cs_(test|live)_[a-zA-Z0-9]+$/.test(raw)) {
+  const isCheckoutSession = /^cs_(test|live)_[a-zA-Z0-9]+$/.test(raw);
+  const isPaymentIntent = /^pi_[a-zA-Z0-9]+$/.test(raw);
+  if (!isCheckoutSession && !isPaymentIntent) {
     return null;
   }
 

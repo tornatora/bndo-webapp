@@ -2,7 +2,16 @@ import type { IncentiviDoc } from '@/lib/matching/types';
 
 const INCENTIVI_SOLR_ENDPOINT = 'https://www.incentivi.gov.it/solr/coredrupal/select';
 
+let cachedDocs: IncentiviDoc[] | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
+
 export async function fetchAllIncentiviDocs(timeoutMs: number): Promise<IncentiviDoc[]> {
+  const now = Date.now();
+  if (cachedDocs && (now - lastFetchTime < CACHE_DURATION)) {
+    return cachedDocs;
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -38,16 +47,30 @@ export async function fetchAllIncentiviDocs(timeoutMs: number): Promise<Incentiv
     );
 
     const url = `${INCENTIVI_SOLR_ENDPOINT}?${params.toString()}`;
+    console.log(`[datasetIncentivi] Fetching from ${INCENTIVI_SOLR_ENDPOINT}... (timeout: ${timeoutMs}ms)`);
     const res = await fetch(url, {
       method: 'GET',
       headers: { 'User-Agent': 'BNDO-Bandi-Assistant/0.1' },
       signal: controller.signal,
       cache: 'no-store',
     });
-    if (!res.ok) throw new Error(`Incentivi.gov non disponibile (HTTP ${res.status}).`);
+    if (!res.ok) {
+        console.error(`[datasetIncentivi] Fetch failed with status ${res.status}`);
+        throw new Error(`Incentivi.gov non disponibile (HTTP ${res.status}).`);
+    }
 
-    const json = (await res.json().catch(() => null)) as null | { response?: { docs?: IncentiviDoc[] } };
+    const jsonText = await res.text();
+    console.log(`[datasetIncentivi] Raw response sample: ${jsonText.substring(0, 200)}...`);
+    const json = JSON.parse(jsonText);
     const docs = json?.response?.docs ?? [];
+    console.log(`[datasetIncentivi] Received ${docs.length} docs.`);
+    
+    // Update cache
+    if (Array.isArray(docs) && docs.length > 0) {
+      cachedDocs = docs;
+      lastFetchTime = now;
+    }
+
     return Array.isArray(docs) ? docs : [];
   } finally {
     clearTimeout(timeoutId);

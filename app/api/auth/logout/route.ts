@@ -19,5 +19,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectTo, { status: 303 });
   }
 
-  return NextResponse.redirect(buildAbsoluteUrl(APP_URL, redirectTo), { status: 303 });
+  const requestHost = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  
+  const isPreview =
+    requestHost.endsWith('.netlify.app') ||
+    requestHost.startsWith('localhost') ||
+    requestHost.startsWith('127.0.0.1');
+
+  const targetBaseUrl = isPreview ? request.nextUrl.origin : APP_URL;
+
+  return NextResponse.redirect(buildAbsoluteUrl(targetBaseUrl, redirectTo), { status: 303 });
 }

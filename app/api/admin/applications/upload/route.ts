@@ -13,6 +13,11 @@ export async function POST(request: Request) {
     const applicationId = String(formData.get('applicationId') ?? '');
     const companyId = String(formData.get('companyId') ?? '');
     const documentLabel = String(formData.get('documentLabel') ?? '');
+    const requirementKeyRaw = formData.get('requirementKey');
+    const requirementKey =
+      typeof requirementKeyRaw === 'string' && requirementKeyRaw.trim()
+        ? requirementKeyRaw.trim().slice(0, 120)
+        : null;
     const file = formData.get('file');
 
     if (!applicationId || !companyId || !file || !(file instanceof File)) {
@@ -54,6 +59,7 @@ export async function POST(request: Request) {
       application_id: applicationId,
       uploaded_by: profile.id,
       file_name: fileName,
+      requirement_key: requirementKey,
       storage_path: storagePath,
       file_size: file.size,
       mime_type: file.type || 'application/octet-stream'
@@ -61,6 +67,14 @@ export async function POST(request: Request) {
 
     if (docError) {
       return NextResponse.json({ error: `Inserimento record fallito: ${docError.message}` }, { status: 500 });
+    }
+
+    if (requirementKey) {
+      await supabaseAdmin
+        .from('practice_document_requirements')
+        .update({ status: 'uploaded' })
+        .eq('application_id', applicationId)
+        .eq('requirement_key', requirementKey);
     }
 
     return NextResponse.json({ ok: true }, { status: 200 });
@@ -71,4 +85,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

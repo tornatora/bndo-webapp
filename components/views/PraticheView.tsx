@@ -1,6 +1,6 @@
-'use client';
+import { MARKETING_URL } from '@/shared/lib';
 
-const QUIZ_URL = 'https://bndo.it/quiz/autoimpiego';
+const QUIZ_URL = `${MARKETING_URL}/quiz/autoimpiego`;
 
 type Practice = {
   title: string;

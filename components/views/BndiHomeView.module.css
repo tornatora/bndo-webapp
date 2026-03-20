@@ -3,6 +3,11 @@
   min-height: calc(100vh - var(--topbar-h));
 }
 
+.hostEmbedded {
+  padding: 0;
+  min-height: 0;
+}
+
 .frame {
   min-height: calc(100vh - var(--topbar-h) - 24px);
   border-radius: 18px;
@@ -11,6 +16,17 @@
   box-shadow: 0 24px 70px rgba(11, 17, 54, 0.1);
   overflow: auto;
   scroll-behavior: smooth;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #0b1136;
+}
+
+.frameEmbedded {
+  min-height: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   color: #0b1136;
 }
@@ -157,9 +173,18 @@
 .ctaGroup {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
   animation: fadeInUp 1.2s ease;
+}
+
+@media (min-width: 768px) {
+  .ctaGroup {
+    flex-direction: row;
+    justify-content: center;
+  }
 }
 
 .btnPrimary {
@@ -174,7 +199,7 @@
   transition: all 0.3s ease;
   letter-spacing: -0.01em;
   width: 100%;
-  min-height: 52px;
+  min-height: 56px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -183,6 +208,34 @@
   overflow: hidden;
   isolation: isolate;
   -webkit-mask-image: -webkit-radial-gradient(white, black);
+}
+
+.btnChoiceSecondary {
+  background: white;
+  color: #0b1136;
+  padding: 16px 28px;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 16px;
+  border: 1px solid rgba(11, 17, 54, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  letter-spacing: -0.01em;
+  width: 100%;
+  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(11, 17, 54, 0.04);
+}
+
+.btnChoiceSecondary:hover {
+  background: #f8fafc;
+  border-color: #22c55f;
+  color: #22c55f;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(34, 197, 95, 0.1);
 }
 
 .btnPrimary::before {

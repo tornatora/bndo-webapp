@@ -1,31 +1,31 @@
 {
-  "passed": 16,
-  "failed": 0,
+  "passed": 9,
+  "failed": 7,
   "skipped": 1,
   "details": [
     {
       "category": "scanner-retrieval",
       "id": "software-sicilia",
       "status": "PASS",
-      "msg": "Relevant results: 7 (sector match)"
+      "msg": "Relevant results: 6 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "agricoltura-sicilia",
       "status": "PASS",
-      "msg": "Relevant results: 1 (sector match)"
+      "msg": "Relevant results: 8 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "turismo-campania",
-      "status": "SKIP",
-      "msg": "No results (dataset may not cover this profile)"
+      "status": "PASS",
+      "msg": "Relevant results: 2 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "pmi-digitale-lombardia",
-      "status": "PASS",
-      "msg": "Found Nuova Sabatini, Sabatini"
+      "status": "FAIL",
+      "msg": "Missing expected: Nuova Sabatini, Sabatini. Got: bonus digitalizzazione pmi nazionale | contratti di sviluppo - \"bus elettrici\" (pnrr)"
     },
     {
       "category": "scanner-retrieval",
@@ -37,7 +37,7 @@
       "category": "scanner-retrieval",
       "id": "agroalimentare",
       "status": "PASS",
-      "msg": "Results: 3 (sector match weak, dataset dependent)"
+      "msg": "Results: 2 (sector match weak, dataset dependent)"
     },
     {
       "category": "regional",
@@ -48,8 +48,8 @@
     {
       "category": "regional",
       "id": "national-for-any-region",
-      "status": "PASS",
-      "msg": "National/regional mix: 1 results"
+      "status": "SKIP",
+      "msg": "No results to check"
     },
     {
       "category": "freshness",
@@ -60,32 +60,32 @@
     {
       "category": "direct-qa",
       "id": "formazione-resto-al-sud",
-      "status": "PASS",
-      "msg": "Grounded answer on measure"
+      "status": "FAIL",
+      "msg": "Empty or too short reply"
     },
     {
       "category": "direct-qa",
       "id": "srl-accedere",
-      "status": "PASS",
-      "msg": "Grounded answer on measure"
+      "status": "FAIL",
+      "msg": "Empty or too short reply"
     },
     {
       "category": "direct-qa",
       "id": "impresa-gia-attiva",
-      "status": "PASS",
-      "msg": "Grounded answer on measure"
+      "status": "FAIL",
+      "msg": "Empty or too short reply"
     },
     {
       "category": "direct-qa",
       "id": "bando-copre-software",
-      "status": "PASS",
-      "msg": "Reply provided"
+      "status": "FAIL",
+      "msg": "Empty or too short reply"
     },
     {
       "category": "direct-qa",
       "id": "contributi-agricoltura-sicilia",
-      "status": "PASS",
-      "msg": "Reply provided"
+      "status": "FAIL",
+      "msg": "Empty or too short reply"
     },
     {
       "category": "conversation",
@@ -96,8 +96,8 @@
     {
       "category": "conversation",
       "id": "extraction-first-msg",
-      "status": "PASS",
-      "msg": "Extracted region and sector/business from first message"
+      "status": "FAIL",
+      "msg": "Missing extraction: region=false sector=false business=false"
     },
     {
       "category": "conversation",
@@ -106,6 +106,14 @@
       "msg": "No onboarding on direct measure question"
     }
   ],
-  "errors": [],
-  "timestamp": "2026-03-07T23:53:29.480Z"
+  "errors": [
+    "scanner-retrieval/pmi-digitale-lombardia: Missing expected: Nuova Sabatini, Sabatini. Got: bonus digitalizzazione pmi nazionale | contratti di sviluppo - \"bus elettrici\" (pnrr)",
+    "direct-qa/formazione-resto-al-sud: Empty or too short reply",
+    "direct-qa/srl-accedere: Empty or too short reply",
+    "direct-qa/impresa-gia-attiva: Empty or too short reply",
+    "direct-qa/bando-copre-software: Empty or too short reply",
+    "direct-qa/contributi-agricoltura-sicilia: Empty or too short reply",
+    "conversation/extraction-first-msg: Missing extraction: region=false sector=false business=false"
+  ],
+  "timestamp": "2026-03-14T09:20:33.806Z"
 }

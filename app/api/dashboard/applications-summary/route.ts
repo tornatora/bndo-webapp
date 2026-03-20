@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
-import { computeDocumentChecklist } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import {
   computeDerivedProgressKey,
   computeProgressBar,
@@ -30,6 +30,7 @@ type ApplicationRow = {
 type DocRow = {
   application_id: string;
   file_name: string;
+  requirement_key: string | null;
 };
 
 export async function GET() {
@@ -71,11 +72,26 @@ export async function GET() {
   const { data: docs } = applicationIds.length
     ? await supabase
         .from('application_documents')
-        .select('application_id, file_name')
+        .select('application_id, file_name, requirement_key')
         .in('application_id', applicationIds)
         .order('created_at', { ascending: false })
         .limit(500)
     : { data: [] as DocRow[] };
+
+  const { data: dynamicRequirements } = applicationIds.length
+    ? await supabase
+        .from('practice_document_requirements')
+        .select('application_id, requirement_key, label, description, is_required')
+        .in('application_id', applicationIds)
+    : {
+        data: [] as Array<{
+          application_id: string;
+          requirement_key: string;
+          label: string;
+          description: string | null;
+          is_required: boolean;
+        }>
+      };
 
   const docsByApp = new Map<string, DocRow[]>();
   for (const d of (docs ?? []) as unknown as DocRow[]) {
@@ -83,13 +99,32 @@ export async function GET() {
     prev.push(d);
     docsByApp.set(d.application_id, prev);
   }
+  const requirementsByApp = new Map<
+    string,
+    Array<{
+      application_id: string;
+      requirement_key: string;
+      label: string;
+      description: string | null;
+      is_required: boolean;
+    }>
+  >();
+  for (const requirement of dynamicRequirements ?? []) {
+    const prev = requirementsByApp.get(requirement.application_id) ?? [];
+    prev.push(requirement);
+    requirementsByApp.set(requirement.application_id, prev);
+  }
 
   const items = typedApplications.map((application) => {
     const tender = tenderMap.get(application.tender_id) ?? null;
     const title = tender?.title ?? 'Pratica';
 
     const appDocs = docsByApp.get(application.id) ?? [];
-    const checklist = computeDocumentChecklist(application.id, title, appDocs);
+    const appRequirements = requirementsByApp.get(application.id) ?? [];
+    const checklist =
+      appRequirements.length > 0
+        ? computeDocumentChecklistFromRequirements(application.id, appRequirements, appDocs)
+        : computeDocumentChecklist(application.id, title, appDocs);
     const missingCount = checklist.filter((c) => !c.uploaded).length;
     const uploadedCount = appDocs.length;
 
@@ -113,4 +148,3 @@ export async function GET() {
 
   return NextResponse.json({ ok: true, items }, { status: 200 });
 }
-

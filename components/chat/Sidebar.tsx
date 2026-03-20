@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { resolveAppAuthOrigin } from '@/shared/config';
+import { useEffect, useMemo, useState, memo } from 'react';
+import Link from 'next/link';
 
 type NavItem = {
   id: string;
@@ -57,7 +57,7 @@ type SessionPayload = {
   email?: string | null;
 };
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   open,
   onToggle,
   onNewChat,
@@ -72,8 +72,7 @@ export function Sidebar({
 }) {
   const [authState, setAuthState] = useState<AuthState>('guest');
   const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [redirectTarget, setRedirectTarget] = useState('https://bndo.it/');
-  const authAppOrigin = resolveAppAuthOrigin();
+  const [redirectTarget, setRedirectTarget] = useState('/');
 
   useEffect(() => {
     setRedirectTarget(`${window.location.origin}/`);
@@ -85,7 +84,7 @@ export function Sidebar({
 
     const readSession = async () => {
       try {
-        const response = await fetch(`${authAppOrigin}/api/auth/session`, {
+        const response = await fetch('/api/auth/session', {
           method: 'GET',
           credentials: 'include',
           signal: controller.signal,
@@ -118,7 +117,7 @@ export function Sidebar({
       active = false;
       controller.abort();
     };
-  }, [authAppOrigin]);
+  }, []);
 
   const topItems = useMemo<NavItem[]>(
     () =>
@@ -131,9 +130,9 @@ export function Sidebar({
 
   const recents = recent ?? [];
   const guestCard = authState !== 'authenticated';
-  const loginUrl = `${authAppOrigin}/login`;
-  const dashboardUrl = `${authAppOrigin}/dashboard`;
-  const logoutUrl = `${authAppOrigin}/api/auth/logout?redirect=${encodeURIComponent(redirectTarget)}`;
+  const loginUrl = '/login';
+  const dashboardUrl = '/dashboard';
+  const logoutUrl = `/api/auth/logout?redirect=${encodeURIComponent(redirectTarget)}`;
   const collapsedActionUrl = authState === 'authenticated' ? dashboardUrl : loginUrl;
 
   const onItemClick = (it: NavItem) => {
@@ -171,14 +170,14 @@ export function Sidebar({
 
       <div className="sidebar-bottom">
         <div className={`${open ? 'sidebar-user sidebar-user-open' : 'sidebar-user'}${guestCard ? ' sidebar-user-guest' : ''}`}>
-          <a
+          <Link
             className="sidebar-avatar sidebar-avatar-link"
             aria-label={authState === 'guest' ? 'Login a BNDO Assistant' : 'Apri dashboard BNDO Assistant'}
             href={collapsedActionUrl}
-            data-tip={authState === 'guest' ? 'Login su app.bndo.it' : 'Apri dashboard'}
+            data-tip={authState === 'guest' ? 'Login area clienti' : 'Apri dashboard'}
           >
             B
-          </a>
+          </Link>
           {open ? (
             <div className="sidebar-user-meta">
               <div className="sidebar-user-sub">
@@ -213,4 +212,4 @@ export function Sidebar({
       </div>
     </aside>
   );
-}
+});
