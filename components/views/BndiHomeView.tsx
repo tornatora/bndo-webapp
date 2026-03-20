@@ -11,7 +11,7 @@ type Props = {
   embedded?: boolean;
 };
 
-export function BndiHomeView({ onOpenScanner: _onOpenScanner, embedded }: Props) {
+export function BndiHomeView({ onStart, onOpenScanner, embedded }: Props) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [scrolled, setScrolled] = useState(false);
 
@@ -77,8 +77,11 @@ export function BndiHomeView({ onOpenScanner: _onOpenScanner, embedded }: Props)
                 <span className={styles.leadHighlight}>100% digitale</span>.
               </p>
               <div className={styles.ctaGroup}>
-                <button type="button" className={styles.btnPrimary} onClick={() => scrollTo('processo')}>
-                  <span>Come Funziona</span>
+                <button type="button" className={styles.btnPrimary} onClick={onStart}>
+                  <span>Chat AI (Consulente)</span>
+                </button>
+                <button type="button" className={styles.btnChoiceSecondary} onClick={onOpenScanner}>
+                  <span>Scanner Bandi (Database)</span>
                 </button>
               </div>
             </div>

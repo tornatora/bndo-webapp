@@ -127,8 +127,11 @@ export function resolveDashboardInitialView(
   slug: string[] | undefined
 ): 'home' | 'chat' | 'form' | 'pratiche' {
   const first = String(slug?.[0] || '').toLowerCase();
-  if (first === 'home') return 'home';
+  if (first === 'home' || first === 'new-practice') return 'home';
   if (first === 'chat') return 'chat';
   if (first === 'scanner' || first === 'scanner-bandi' || first === 'bandi') return 'form';
-  return 'chat';
+  if (first === 'pratiche' || first === 'practices') return 'pratiche';
+  
+  // Default for /dashboard is now practices
+  return 'pratiche';
 }

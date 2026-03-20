@@ -146,9 +146,9 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(buildAbsoluteUrl(adminBase, '/admin'));
     }
 
-    return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard'));
+    return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard/pratiche'));
   }
-  } catch {
+} catch {
     return NextResponse.next({ request });
   }
 
