@@ -125,13 +125,13 @@ export function isPublicDashboardShellPath(pathname: string) {
 
 export function resolveDashboardInitialView(
   slugs: string[] | undefined
-): 'chat' | 'home' | 'scanner' | 'pratiche' | 'choice' {
+): 'chat' | 'home' | 'form' | 'pratiche' | 'choice' {
   if (!slugs || slugs.length === 0) {
     return 'pratiche';
   }
   const main = slugs[0];
   if (main === 'chat') return 'chat';
-  if (main === 'scanner') return 'scanner';
+  if (main === 'scanner') return 'form';
   if (main === 'pratiche') return 'pratiche';
   if (main === 'new-practice') return 'choice';
   return 'pratiche';
