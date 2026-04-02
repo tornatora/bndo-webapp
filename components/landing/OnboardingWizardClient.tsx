@@ -1,5 +1,5 @@
 'use client';
-// Force build v1.0.1 - JPEG + File Removal Fixes
+// Force build v1.0.2 - Star Crypto Fixes
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

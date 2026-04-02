@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { Json } from '@/lib/supabase/database.types';

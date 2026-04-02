@@ -24,7 +24,7 @@ import {
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import type { Json } from '@/lib/supabase/database.types';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
 import {
   getPracticePaymentBySession,
