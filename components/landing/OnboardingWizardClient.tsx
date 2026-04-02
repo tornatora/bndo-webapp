@@ -582,8 +582,8 @@ export function OnboardingWizardClient({
     if (onboardingStartTrackedRef.current) return;
     if (bootstrapping && !wizardState) return;
     onboardingStartTrackedRef.current = true;
-    if (typeof window !== 'undefined' && window.bndoTrackEvent) {
-      window.bndoTrackEvent('onboarding_started', {
+    if (typeof window !== 'undefined' && (window as any).bndoTrackEvent) {
+      (window as any).bndoTrackEvent('onboarding_started', {
         onboardingMode: resolvedOnboardingMode,
         applicationId: activeApplicationId ?? null,
         grantId: grantId ?? null,
@@ -1203,8 +1203,8 @@ export function OnboardingWizardClient({
         }
       }
 
-      if (typeof window !== 'undefined' && window.bndoTrackEvent) {
-        window.bndoTrackEvent('onboarding_completed', {
+      if (typeof window !== 'undefined' && (window as any).bndoTrackEvent) {
+        (window as any).bndoTrackEvent('onboarding_completed', {
           onboardingMode: resolvedOnboardingMode,
           applicationId: payload.applicationId ?? canonicalApplicationId ?? activeApplicationId ?? null,
           grantId: grantId ?? null,
@@ -1212,7 +1212,7 @@ export function OnboardingWizardClient({
           practiceType: practiceType ?? null,
           guestFlow: needsGuestCredentials && guestCredentialMode === 'new',
         });
-        window.bndoTrackEvent('practice_activated', {
+        (window as any).bndoTrackEvent('practice_activated', {
           onboardingMode: resolvedOnboardingMode,
           applicationId: payload.applicationId ?? canonicalApplicationId ?? activeApplicationId ?? null,
           grantId: grantId ?? null,
