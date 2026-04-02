@@ -1,4 +1,6 @@
 'use client';
+// Force build v1.0.1 - JPEG + File Removal Fixes
+
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';

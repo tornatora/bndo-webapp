@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { Json } from '@/lib/supabase/database.types';
@@ -216,7 +216,7 @@ export async function POST(request: Request) {
       const safeOriginal = safeFileName(args.file.name);
       const safeLabel = safeFileName(args.label).slice(0, 80) || 'documento';
       const fileName = `${safeLabel}__${safeOriginal}`;
-      const storagePath = `${profile.company_id}/${application.id}/${timestamp}_${randomUUID()}_${fileName}`;
+      const storagePath = `${profile.company_id}/${application.id}/${timestamp}_${crypto.randomUUID()}_${fileName}`;
       const fileBuffer = Buffer.from(await args.file.arrayBuffer());
 
       const { error: storageError } = await admin.storage

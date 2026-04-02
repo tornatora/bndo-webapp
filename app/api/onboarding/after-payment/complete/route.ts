@@ -24,7 +24,7 @@ import {
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import type { Json } from '@/lib/supabase/database.types';
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
 import {
   getPracticePaymentBySession,
@@ -881,7 +881,7 @@ export async function POST(request: Request) {
         const safeOriginal = safeFileName(args.file.name);
         const safeLabel = safeFileName(args.label).slice(0, 80);
         const fileName = `${safeLabel}__${safeOriginal}`;
-        const storagePath = `${companyId}/${applicationId}/${timestamp}_${fileName}`;
+        const storagePath = `${companyId}/${applicationId}/${timestamp}_${crypto.randomUUID()}_${fileName}`;
         const fileBuffer = Buffer.from(await args.file.arrayBuffer());
 
         const { error: storageError } = await supabaseAdmin.storage
@@ -1251,7 +1251,7 @@ export async function POST(request: Request) {
       'Cliente BNDO';
 
     const effectiveCheckoutSessionId =
-      checkoutSessionId ?? (manualOnboardingEnabled || paymentDeferred ? `manual_${randomUUID()}` : null);
+      checkoutSessionId ?? (manualOnboardingEnabled || paymentDeferred ? `manual_${crypto.randomUUID()}` : null);
     if (!effectiveCheckoutSessionId) {
       return NextResponse.json({ error: 'Pagamento non verificato. Completa prima il pagamento Stripe.' }, { status: 403 });
     }
