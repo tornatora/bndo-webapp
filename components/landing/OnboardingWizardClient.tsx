@@ -1,5 +1,5 @@
 'use client';
-// Force build v1.0.2 - Star Crypto Fixes
+// Force build v1.0.3 - Indexing Fixes
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1359,7 +1359,9 @@ export function OnboardingWizardClient({
 
         setRequirementFiles((previous) => {
           const next: Record<string, File | null> = {};
-          for (const key of Object.keys(previous)) next[key] = null;
+          Object.keys(previous).forEach((k) => {
+            next[k] = null;
+          });
           return next;
         });
         setRemovedUploadedKeys(new Set());
