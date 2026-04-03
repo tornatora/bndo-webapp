@@ -65,6 +65,13 @@ export default async function ClientPracticePage({
 
   if (!application) notFound();
 
+  const { data: docs } = await supabase
+    .from('application_documents')
+    .select('id, file_name, requirement_key, created_at, storage_path')
+    .eq('application_id', application.id)
+    .order('created_at', { ascending: false })
+    .limit(120);
+
   const { data: tender } = await supabase
     .from('tenders')
     .select('title, authority_name')
@@ -134,7 +141,7 @@ export default async function ClientPracticePage({
       typedDocs.map((doc) => ({
         application_id: application.id,
         file_name: doc.file_name,
-        requirement_key: null
+        requirement_key: doc.requirement_key
       }))
     );
   }

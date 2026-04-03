@@ -348,7 +348,7 @@ export function OnboardingWizardClient({
   const [activeApplicationId, setActiveApplicationId] = useState<string | null>(applicationId ?? null);
   const [embeddedCheckoutClientSecret, setEmbeddedCheckoutClientSecret] = useState<string | null>(null);
   const [attemptedAutoPaymentElement, setAttemptedAutoPaymentElement] = useState(false);
-  const [paymentDeferred, setPaymentDeferred] = useState(isDashboardMode);
+  const [paymentDeferred, setPaymentDeferred] = useState(isDashboardMode || skipPayment);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -410,7 +410,7 @@ export function OnboardingWizardClient({
   }, [activeApplicationId, grantId, grantSlug, practiceType]);
 
   useEffect(() => {
-    if (isDashboardMode) {
+    if (isDashboardMode || skipPayment) {
       setPaymentDeferred(true);
       setDigitalSignature('');
       return;
@@ -1003,7 +1003,7 @@ export function OnboardingWizardClient({
     if (!acceptPrivacy) return 'Devi accettare la Privacy Policy.';
     if (!acceptTerms) return 'Devi accettare i Termini e Condizioni.';
     if (!consentStorage) return 'Devi autorizzare la conservazione dei dati.';
-    if (paymentStatus !== 'paid' && !paymentDeferred) return 'Pagamento non verificato.';
+    if (paymentStatus !== 'paid' && !paymentDeferred && !skipPayment) return 'Pagamento non verificato.';
     return null;
   }
 

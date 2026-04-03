@@ -13127,7 +13127,7 @@ textarea.form-control,
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 50; /* Higher than file input */
+  z-index: 10;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -13144,7 +13144,6 @@ textarea.form-control,
   margin: 0;
   transition: all 0.2s ease;
   line-height: 1;
-  pointer-events: auto;
 }
 
 .wizard7-fileRemoveBtn:hover {

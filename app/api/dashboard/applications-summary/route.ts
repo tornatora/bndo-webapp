@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
-import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import {
   computeDerivedProgressKey,
   computeProgressBar,
@@ -143,8 +143,8 @@ export async function GET() {
     const checklist =
       appRequirements.length > 0
         ? computeDocumentChecklistFromRequirements(application.id, appRequirements, appDocs)
-        : [];
-    const missingCount = checklist.filter((c) => !c.uploaded).length;
+        : computeDocumentChecklist(application.id, title, appDocs);
+    const missingCount = checklist.filter((c: any) => !c.uploaded).length;
     const uploadedCount = appDocs.length;
 
     const step =

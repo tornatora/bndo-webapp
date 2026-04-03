@@ -598,7 +598,9 @@ export async function POST(request: Request) {
         file_name: fileName,
         storage_path: storagePath,
         file_size: doc.file.size,
-        mime_type: doc.file.type || 'application/octet-stream'
+        mime_type: doc.file.type || 'application/octet-stream',
+        requirement_key: doc.key,
+        label: doc.label
       });
 
       if (docError) {
@@ -630,7 +632,9 @@ export async function POST(request: Request) {
         file_name: fileName,
         storage_path: storagePath,
         file_size: file.size,
-        mime_type: file.type || 'application/octet-stream'
+        mime_type: file.type || 'application/octet-stream',
+        requirement_key: 'preventivi_spesa',
+        label: 'Preventivo spesa'
       });
 
       if (docError) {
