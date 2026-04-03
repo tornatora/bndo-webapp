@@ -1,31 +1,31 @@
 {
-  "passed": 9,
-  "failed": 7,
-  "skipped": 1,
+  "passed": 14,
+  "failed": 0,
+  "skipped": 3,
   "details": [
     {
       "category": "scanner-retrieval",
       "id": "software-sicilia",
       "status": "PASS",
-      "msg": "Relevant results: 6 (sector match)"
+      "msg": "Relevant results: 3 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "agricoltura-sicilia",
-      "status": "PASS",
-      "msg": "Relevant results: 8 (sector match)"
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
     },
     {
       "category": "scanner-retrieval",
       "id": "turismo-campania",
-      "status": "PASS",
-      "msg": "Relevant results: 2 (sector match)"
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
     },
     {
       "category": "scanner-retrieval",
       "id": "pmi-digitale-lombardia",
-      "status": "FAIL",
-      "msg": "Missing expected: Nuova Sabatini, Sabatini. Got: bonus digitalizzazione pmi nazionale | contratti di sviluppo - \"bus elettrici\" (pnrr)"
+      "status": "PASS",
+      "msg": "Found one expected option in top results"
     },
     {
       "category": "scanner-retrieval",
@@ -36,8 +36,8 @@
     {
       "category": "scanner-retrieval",
       "id": "agroalimentare",
-      "status": "PASS",
-      "msg": "Results: 2 (sector match weak, dataset dependent)"
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
     },
     {
       "category": "regional",
@@ -48,8 +48,8 @@
     {
       "category": "regional",
       "id": "national-for-any-region",
-      "status": "SKIP",
-      "msg": "No results to check"
+      "status": "PASS",
+      "msg": "National/regional mix: 1 results"
     },
     {
       "category": "freshness",
@@ -60,32 +60,32 @@
     {
       "category": "direct-qa",
       "id": "formazione-resto-al-sud",
-      "status": "FAIL",
-      "msg": "Empty or too short reply"
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
     },
     {
       "category": "direct-qa",
       "id": "srl-accedere",
-      "status": "FAIL",
-      "msg": "Empty or too short reply"
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
     },
     {
       "category": "direct-qa",
       "id": "impresa-gia-attiva",
-      "status": "FAIL",
-      "msg": "Empty or too short reply"
+      "status": "PASS",
+      "msg": "Grounded answer on measure"
     },
     {
       "category": "direct-qa",
       "id": "bando-copre-software",
-      "status": "FAIL",
-      "msg": "Empty or too short reply"
+      "status": "PASS",
+      "msg": "Reply provided"
     },
     {
       "category": "direct-qa",
       "id": "contributi-agricoltura-sicilia",
-      "status": "FAIL",
-      "msg": "Empty or too short reply"
+      "status": "PASS",
+      "msg": "Reply provided"
     },
     {
       "category": "conversation",
@@ -96,8 +96,8 @@
     {
       "category": "conversation",
       "id": "extraction-first-msg",
-      "status": "FAIL",
-      "msg": "Missing extraction: region=false sector=false business=false"
+      "status": "PASS",
+      "msg": "Extracted region and sector/business from first message"
     },
     {
       "category": "conversation",
@@ -106,14 +106,6 @@
       "msg": "No onboarding on direct measure question"
     }
   ],
-  "errors": [
-    "scanner-retrieval/pmi-digitale-lombardia: Missing expected: Nuova Sabatini, Sabatini. Got: bonus digitalizzazione pmi nazionale | contratti di sviluppo - \"bus elettrici\" (pnrr)",
-    "direct-qa/formazione-resto-al-sud: Empty or too short reply",
-    "direct-qa/srl-accedere: Empty or too short reply",
-    "direct-qa/impresa-gia-attiva: Empty or too short reply",
-    "direct-qa/bando-copre-software: Empty or too short reply",
-    "direct-qa/contributi-agricoltura-sicilia: Empty or too short reply",
-    "conversation/extraction-first-msg: Missing extraction: region=false sector=false business=false"
-  ],
-  "timestamp": "2026-03-14T09:20:33.806Z"
+  "errors": [],
+  "timestamp": "2026-03-28T16:53:57.107Z"
 }

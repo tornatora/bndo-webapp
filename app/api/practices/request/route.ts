@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { ensureBandoApplication, practiceTitle, type PracticeType } from '@/lib/bandi';
 import { AUTO_REPLY_BODY } from '@/lib/chat/constants';
+import { logPlatformEvent } from '@/lib/ops/telemetry';
 
 const payloadSchema = z.object({
   practiceType: z.enum(['resto_sud_2_0', 'autoimpiego_centro_nord', 'generic'])
@@ -115,7 +116,7 @@ export async function POST(request: Request) {
     }
 
     // Create or ensure the application exists so the admin sees it in "Pratiche richieste".
-    await ensureBandoApplication(admin, typedProfile.company_id, practiceType);
+    const ensured = await ensureBandoApplication(admin, typedProfile.company_id, practiceType);
 
     const { data: existingThread } = await admin
       .from('consultant_threads')
@@ -156,6 +157,19 @@ export async function POST(request: Request) {
     });
 
     await ensureOpsAutoReply(threadId);
+
+    await logPlatformEvent({
+      eventType: 'practice_created',
+      actorProfileId: typedProfile.id,
+      actorRole: typedProfile.role,
+      companyId: typedProfile.company_id,
+      applicationId: ensured.applicationId,
+      channel: 'dashboard',
+      metadata: {
+        practiceType,
+        quizSubmissionId: latestQuiz?.id ?? null,
+      },
+    });
 
     return NextResponse.json({
       success: true,

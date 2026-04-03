@@ -12,19 +12,27 @@ import {
   ShieldCheck,
   UserCircle2,
 } from 'lucide-react';
-import { ONBOARDING_STEPS } from '@/components/landing/onboarding-wizard/config';
-import type { OnboardingWizardStep, StepStatus } from '@/components/landing/onboarding-wizard/types';
+import { LEGACY_ONBOARDING_STEPS } from '@/components/landing/onboarding-wizard/config';
+import type {
+  OnboardingMode,
+  OnboardingWizardStep,
+  OnboardingWizardStepConfig,
+  StepStatus
+} from '@/components/landing/onboarding-wizard/types';
 
 type BandoOnboardingShellProps = {
   children: ReactNode;
   sidebar: ReactNode;
   currentStep?: OnboardingWizardStep;
+  stepMode?: 'default' | 'payment';
 };
 
 type BandoOnboardingSidebarProps = {
   currentStep: OnboardingWizardStep;
   completedSteps: OnboardingWizardStep[];
   maxReachableStep: OnboardingWizardStep;
+  steps?: OnboardingWizardStepConfig[];
+  mode?: OnboardingMode;
   onSelectStep?: (step: OnboardingWizardStep) => void;
 };
 
@@ -49,7 +57,22 @@ type BandoOnboardingFooterActionsProps = {
   onNext: () => void;
 };
 
-function iconForStep(step: OnboardingWizardStep) {
+function iconForStep(step: OnboardingWizardStep, mode: OnboardingMode) {
+  if (mode === 'dashboard_client') {
+    switch (step) {
+      case 1:
+        return UserCircle2;
+      case 2:
+        return FileCheck2;
+      case 3:
+        return FileText;
+      case 4:
+        return ShieldCheck;
+      default:
+        return UserCircle2;
+    }
+  }
+
   switch (step) {
     case 1:
       return CreditCard;
@@ -80,8 +103,12 @@ export function resolveStepStatus(args: {
   return 'upcoming';
 }
 
-export function BandoOnboardingShell({ children, sidebar, currentStep }: BandoOnboardingShellProps) {
-  const stepMode = currentStep === 1 ? 'payment' : 'default';
+export function BandoOnboardingShell({
+  children,
+  sidebar,
+  currentStep,
+  stepMode = 'default',
+}: BandoOnboardingShellProps) {
   return (
     <main className="wizard7-page">
       <section className="wizard7-card" data-current-step={currentStep} data-step-mode={stepMode}>
@@ -96,6 +123,8 @@ export function BandoOnboardingSidebar({
   currentStep,
   completedSteps,
   maxReachableStep,
+  steps = LEGACY_ONBOARDING_STEPS,
+  mode = 'legacy',
   onSelectStep,
 }: BandoOnboardingSidebarProps) {
   return (
@@ -105,9 +134,9 @@ export function BandoOnboardingSidebar({
       </div>
 
       <ol className="wizard7-stepper" aria-label="Progressione onboarding BNDO">
-        {ONBOARDING_STEPS.map((entry) => {
+        {steps.map((entry) => {
           const status = resolveStepStatus({ step: entry.id, currentStep, completedSteps });
-          const Icon = iconForStep(entry.id);
+          const Icon = iconForStep(entry.id, mode);
           const reachable = entry.id <= maxReachableStep;
           return (
             <li

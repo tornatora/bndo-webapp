@@ -1,0 +1,205 @@
+ ›   Warning: --build is now the default and can safely be omitted.
+[96m[1m​[22m[39m
+[96m[1mNetlify Build                                                 [22m[39m
+[96m[1m────────────────────────────────────────────────────────────────[22m[39m
+[36m[1m​[22m[39m
+[36m[1m❯ Version[22m[39m
+  @netlify/build 35.8.3
+[36m[1m​[22m[39m
+[36m[1m❯ Flags[22m[39m
+  accountId: 697e8664388a2b409d64864e
+  deployId: 69b1fe689886c495d4a03cf9
+[36m[1m​[22m[39m
+[36m[1m❯ Current directory[22m[39m
+  /Users/nataleletteriotornatora/Documents/bndo-webapp
+[36m[1m​[22m[39m
+[36m[1m❯ Config file[22m[39m
+  /Users/nataleletteriotornatora/Documents/bndo-webapp/netlify.toml
+[36m[1m​[22m[39m
+[36m[1m❯ Context[22m[39m
+  production
+[36m[1m​[22m[39m
+[36m[1m❯ Using Next.js Runtime - v5.15.9[22m[39m
+[96m[1m​[22m[39m
+[96m[1mbuild.command from netlify.toml                               [22m[39m
+[96m[1m────────────────────────────────────────────────────────────────[22m[39m
+​
+[36m$ npm run build[39m
+
+> bndo-bandi-assistant@0.1.0 build
+> npm run clean && next build
+
+
+> bndo-bandi-assistant@0.1.0 clean
+> rm -rf .next
+
+  ▲ Next.js 14.2.35
+  - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/61) ...
+   Generating static pages (15/61) 
+   Generating static pages (30/61) 
+   Generating static pages (45/61) 
+ ✓ Generating static pages (61/61)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size     First Load JS
+┌ ○ /                                       188 B           127 kB
+├ ○ /_not-found                             180 B          87.6 kB
+├ ƒ /admin                                  147 B           142 kB
+├ ƒ /admin/clients                          180 B          87.6 kB
+├ ƒ /admin/clients/[companyId]              12.7 kB         146 kB
+├ ƒ /admin/quiz-responses                   3.76 kB         128 kB
+├ ƒ /api/admin/applications/upload          0 B                0 B
+├ ƒ /api/admin/billing                      0 B                0 B
+├ ƒ /api/admin/billing/invoice-send         0 B                0 B
+├ ƒ /api/admin/billing/invoice-upload       0 B                0 B
+├ ƒ /api/admin/client-info                  0 B                0 B
+├ ƒ /api/admin/client-summary               0 B                0 B
+├ ƒ /api/admin/company-crm                  0 B                0 B
+├ ƒ /api/admin/document-reminder            0 B                0 B
+├ ƒ /api/admin/notifications                0 B                0 B
+├ ƒ /api/admin/practice-progress            0 B                0 B
+├ ƒ /api/admin/quiz-answers                 0 B                0 B
+├ ƒ /api/admin/quiz-submissions             0 B                0 B
+├ ƒ /api/applications/upload                0 B                0 B
+├ ƒ /api/auth/forgot-password               0 B                0 B
+├ ƒ /api/auth/login                         0 B                0 B
+├ ƒ /api/auth/logout                        0 B                0 B
+├ ƒ /api/auth/register                      0 B                0 B
+├ ƒ /api/auth/session                       0 B                0 B
+├ ƒ /api/chat/mark-read                     0 B                0 B
+├ ƒ /api/chat/messages                      0 B                0 B
+├ ƒ /api/chat/sync                          0 B                0 B
+├ ƒ /api/chat/thread-context                0 B                0 B
+├ ƒ /api/checkout                           0 B                0 B
+├ ƒ /api/conversation                       0 B                0 B
+├ ƒ /api/dashboard/applications-summary     0 B                0 B
+├ ƒ /api/dashboard/stats                    0 B                0 B
+├ ƒ /api/dev/provision                      0 B                0 B
+├ ƒ /api/dev/seed-client-data               0 B                0 B
+├ ƒ /api/documents/signed-url               0 B                0 B
+├ ƒ /api/grants/[id]                        0 B                0 B
+├ ƒ /api/grants/[id]/explainability         0 B                0 B
+├ ƒ /api/health                             0 B                0 B
+├ ƒ /api/jobs/refresh-bandi                 0 B                0 B
+├ ƒ /api/onboarding-credentials             0 B                0 B
+├ ƒ /api/onboarding/after-payment/complete  0 B                0 B
+├ ƒ /api/onboarding/complete                0 B                0 B
+├ ƒ /api/practices/request                  0 B                0 B
+├ ƒ /api/practices/upload-document          0 B                0 B
+├ ƒ /api/profile/update                     0 B                0 B
+├ ƒ /api/quiz/submit                        0 B                0 B
+├ ƒ /api/scan-bandi                         0 B                0 B
+├ ƒ /api/stripe/checkout-session            0 B                0 B
+├ ƒ /api/stripe/webhook                     0 B                0 B
+├ ƒ /api/visura/parse                       0 B                0 B
+├ ƒ /checkout/success                       2.08 kB        89.5 kB
+├ ○ /cookie-policy                          198 B           101 kB
+├ ƒ /dashboard                              157 B           175 kB
+├ ƒ /dashboard/[...slug]                    157 B           175 kB
+├ ƒ /dashboard/documents                    2.03 kB        98.1 kB
+├ ƒ /dashboard/messages                     2.89 kB         128 kB
+├ ƒ /dashboard/notifications                180 B          87.6 kB
+├ ƒ /dashboard/password                     180 B          87.6 kB
+├ ƒ /dashboard/practices/[applicationId]    954 B            97 kB
+├ ƒ /dashboard/profile                      2.68 kB         127 kB
+├ ƒ /dashboard/tenders/[id]                 196 B          96.3 kB
+├ ƒ /dashboard/tenders/[id]/apply           1.84 kB        97.9 kB
+├ ○ /demo                                   196 B          96.3 kB
+├ ƒ /embed/landing                          0 B                0 B
+├ ƒ /forbidden                              196 B          96.3 kB
+├ ƒ /forgot-password                        199 B          96.3 kB
+├ ○ /gdpr                                   200 B           101 kB
+├ ƒ /grants/[id]                            182 B           127 kB
+├ ○ /landing                                3.59 kB         105 kB
+├ ƒ /login                                  199 B          96.3 kB
+├ ƒ /onboarding                             6.78 kB         108 kB
+├ ƒ /onboarding/after-payment               180 B          87.6 kB
+├ ○ /privacy                                198 B           101 kB
+├ ○ /quiz                                   180 B          87.6 kB
+├ ○ /quiz/autoimpiego                       7 kB            103 kB
+├ ƒ /register                               196 B          96.3 kB
+├ ○ /reset-password                         1.75 kB         135 kB
+└ ○ /termini                                200 B           101 kB
++ First Load JS shared by all               87.4 kB
+  ├ chunks/2117-52bbbe4994b420b3.js         31.7 kB
+  ├ chunks/fd9d1056-e226a271c6b100f2.js     53.7 kB
+  └ other shared chunks (total)             2.04 kB
+
+
+ƒ Middleware                                57.8 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+​
+[90m(build.command completed in 17.9s)[39m
+[96m[1m​[22m[39m
+[96m[1mFunctions bundling                                            [22m[39m
+[96m[1m────────────────────────────────────────────────────────────────[22m[39m
+​
+Packaging Functions from [36m.netlify/functions-internal[39m directory:
+ - ___netlify-server-handler/___netlify-server-handler.mjs
+​
+Packaging Functions from [36mnetlify/functions[39m directory:
+ - refresh-bandi.js
+ - scrape-regional-grants.mts
+​
+​
+[90m(Functions bundling completed in 1.2s)[39m
+[96m[1m​[22m[39m
+[96m[1mEdge Functions bundling                                       [22m[39m
+[96m[1m────────────────────────────────────────────────────────────────[22m[39m
+​
+Packaging Edge Functions from [36m.netlify/edge-functions[39m directory:
+ - ___netlify-edge-handler-middleware
+​
+[90m(Edge Functions bundling completed in 793ms)[39m
+
+Deploying to Netlify
+────────────────────────────────────────────────────────────────
+
+[32mDeploy path: [39m       /Users/nataleletteriotornatora/Documents/bndo-webapp/.next
+[32mFunctions path: [39m    /Users/nataleletteriotornatora/Documents/bndo-webapp/netlify/functions
+[32mConfiguration path: [39m/Users/nataleletteriotornatora/Documents/bndo-webapp/netlify.toml
+
+⠋ Uploading blobs to deploy store...
+
+✔ Finished uploading blobs to deploy store
+⠋ Hashing files...
+⠋ Looking for a functions cache...
+✔ Deploying functions from cache (use --skip-functions-cache to override)
+✔ Finished hashing 71 files, 3 functions and edge functions
+⠋ CDN diffing files...
+✔ CDN requesting 15 files and 1 functions
+⠋ Uploading 16 files
+✔ Finished uploading 16 assets
+⠋ Waiting for deploy to go live...
+✔ Deploy is live!
+[96m[1m​[22m[39m
+[96m[1mNetlify Build Complete                                        [22m[39m
+[96m[1m────────────────────────────────────────────────────────────────[22m[39m
+​
+[90m(Netlify Build completed in 55.2s)[39m
+
+🚀 Deploy complete
+────────────────────────────────────────────────────────────────
+
+ ╭───────────────────── ⬥  Production deploy is live ⬥  ─────────────────────╮
+ │                                                                           │
+ │                Deployed to production URL: https://bndo.it                │
+ │                                                                           │
+ │                            Unique deploy URL:                             │
+ │   https://69b1fe689886c495d4a03cf9--cheerful-cobbler-f23efc.netlify.app   │
+ │                                                                           │
+ ╰───────────────────────────────────────────────────────────────────────────╯
+
+[32mBuild logs: [39m        https://app.netlify.com/projects/cheerful-cobbler-f23efc/deploys/69b1fe689886c495d4a03cf9
+[32mFunction logs: [39m     https://app.netlify.com/projects/cheerful-cobbler-f23efc/logs/functions
+[32mEdge function Logs: [39mhttps://app.netlify.com/projects/cheerful-cobbler-f23efc/logs/edge-functions

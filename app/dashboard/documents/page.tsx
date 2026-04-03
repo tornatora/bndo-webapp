@@ -4,7 +4,7 @@ import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
-import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import { DocumentsPracticeCard } from '@/components/dashboard/DocumentsPracticeCard';
 
 type DocumentRow = {
@@ -131,15 +131,7 @@ export default async function DashboardDocumentsPage() {
                 requirement_key: d.requirement_key
               }))
             )
-          : computeDocumentChecklist(
-              application.id,
-              practiceTitle,
-              docsInApp.map((d) => ({
-                application_id: application.id,
-                file_name: d.file_name,
-                requirement_key: d.requirement_key
-              }))
-            );
+          : [];
       const missing = checklist.filter((c) => !c.uploaded);
 
       return {

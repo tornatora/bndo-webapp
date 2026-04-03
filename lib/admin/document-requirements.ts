@@ -126,7 +126,12 @@ export type DynamicRequirementLike = {
 };
 
 function normalize(text: string) {
-  return text.toLowerCase().replace(/[_\-]/g, ' ');
+  return text
+    .toLowerCase()
+    .normalize('NFD') // Decompose combined characters (accents)
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .replace(/[^a-z0-9]/g, '') // Remove EVERYTHING except letters and numbers
+    .trim();
 }
 
 export function getRequiredDocsForPractice(practiceKeyOrTenderId: string): RequiredDoc[] {
@@ -141,14 +146,17 @@ export function getRequiredDocsForPractice(practiceKeyOrTenderId: string): Requi
 
 export function computeDocumentChecklist(applicationId: string, practiceKeyOrTenderId: string, docs: DocumentLike[]) {
   const inApp = docs.filter((d) => d.application_id === applicationId);
-  const haystack = inApp.map((d) => normalize(d.file_name)).join(' | ');
-
   const requirements = getRequiredDocsForPractice(practiceKeyOrTenderId);
 
   return requirements.map((req) => {
-    const uploaded =
-      inApp.some((doc) => doc.requirement_key && doc.requirement_key === req.key) ||
-      req.keywords.some((kw) => haystack.includes(normalize(kw)));
+    const normReqLabel = normalize(req.label);
+    const uploaded = inApp.some((doc) => {
+      if (doc.requirement_key && doc.requirement_key === req.key) return true;
+      const normFileName = normalize(doc.file_name);
+      // Check if filename contains normalized label or any of the keywords
+      if (normFileName.includes(normReqLabel)) return true;
+      return req.keywords.some((kw) => normFileName.includes(normalize(kw)));
+    });
     return { ...req, uploaded };
   });
 }
@@ -159,23 +167,26 @@ export function computeDocumentChecklistFromRequirements(
   docs: DocumentLike[]
 ) {
   const inAppDocs = docs.filter((doc) => doc.application_id === applicationId);
-  const haystack = inAppDocs.map((doc) => normalize(doc.file_name)).join(' | ');
-  const uploadedByKey = new Set(
-    inAppDocs
-      .map((doc) => doc.requirement_key)
-      .filter((value): value is string => typeof value === 'string' && value.length > 0)
-  );
 
   return requirements
     .filter((requirement) => requirement.application_id === applicationId)
-    .map((requirement) => ({
-      key: requirement.requirement_key,
-      label: requirement.label,
-      keywords: [requirement.requirement_key],
-      uploaded:
-        uploadedByKey.has(requirement.requirement_key) ||
-        haystack.includes(normalize(requirement.label))
-    }));
+    .map((requirement) => {
+      const normReqLabel = normalize(requirement.label);
+      const isUploaded = inAppDocs.some((doc) => {
+        // 1. Direct key match (id DB column exists and is populated)
+        if (doc.requirement_key && doc.requirement_key === requirement.requirement_key) return true;
+        // 2. Filename match (common for our onboarding flow which strips accents and uses underscores)
+        const normFileName = normalize(doc.file_name);
+        return normFileName.includes(normReqLabel);
+      });
+
+      return {
+        key: requirement.requirement_key,
+        label: requirement.label,
+        keywords: [requirement.requirement_key],
+        uploaded: isUploaded
+      };
+    });
 }
 
 export function computeMissingDocsForApplication(applicationId: string, docs: DocumentLike[]) {

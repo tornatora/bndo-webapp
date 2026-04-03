@@ -3,7 +3,10 @@
     {
       "path": "/api/jobs/refresh-bandi",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/jobs/refresh-bandi-incremental",
+      "schedule": "0 15 * * *"
     }
   ]
 }
-

@@ -1,34 +1,77 @@
 .host {
-  padding: 18px 16px 24px;
+  padding: 0;
   min-height: calc(100vh - var(--topbar-h));
+  background: #ffffff;
 }
 
 .hostEmbedded {
   padding: 0;
   min-height: 0;
+  background: #ffffff;
 }
 
 .frame {
-  min-height: calc(100vh - var(--topbar-h) - 24px);
-  border-radius: 18px;
-  border: 1px solid rgba(11, 17, 54, 0.1);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 24px 70px rgba(11, 17, 54, 0.1);
-  overflow: auto;
-  scroll-behavior: smooth;
+  min-height: calc(100vh - var(--topbar-h));
+  border-radius: 0;
+  border: none;
+  background: #ffffff;
+  box-shadow: none;
+  overflow: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   color: #0b1136;
+  position: relative;
 }
 
 .frameEmbedded {
   min-height: 0;
   border-radius: 0;
   border: none;
-  background: transparent;
+  background: #ffffff;
   box-shadow: none;
-  overflow: visible;
+  overflow: hidden;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   color: #0b1136;
+  position: relative;
+}
+
+.landingFrame {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - var(--topbar-h));
+  border: 0;
+  background: #fff;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+
+.framePlaceholder {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.frameStateLoading .landingFrame {
+  opacity: 0;
+}
+
+.frameStateReady .framePlaceholder {
+  opacity: 0;
+}
+
+@media (max-width: 980px) {
+  .host {
+    padding-top: 0;
+    min-height: 100vh;
+  }
+
+  .frame,
+  .landingFrame {
+    min-height: 100vh;
+  }
 }
 
 .header {

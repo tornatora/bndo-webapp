@@ -209,7 +209,8 @@ export const BandiResults = memo(function BandiResults({
   onVerifyRequirements?: (grantId: string) => void;
   onSelectGrant?: (grantId: string) => void;
 }) {
-  const followupDetailsHref = (item: BandoResult) => `/grants/${encodeURIComponent(item.id)}`;
+  const followupDetailsHref = (item: BandoResult) =>
+    `/dashboard/new-practice?mode=detail&grantId=${encodeURIComponent(item.id)}&source=chat`;
   const followupBookingHref = (item: BandoResult) =>
     item.bookingUrl && item.bookingUrl.trim() ? item.bookingUrl : `/prenota?bandoId=${encodeURIComponent(item.id)}`;
 
@@ -234,7 +235,7 @@ export const BandiResults = memo(function BandiResults({
         }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</div>
           <div style={{ color: '#C53030', fontWeight: 800, fontSize: '1.1rem', marginBottom: '0.5rem' }}>
-            Nessun bando trovato per i criteri inseriti
+            Sulla base delle informazioni fornite non risultano bandi in linea con il suo profilo
           </div>
           <div style={{ color: '#742A2A', fontSize: '0.9rem', lineHeight: 1.5 }}>
             Non abbiamo trovato agevolazioni attive che corrispondano esattamente al tuo profilo. 

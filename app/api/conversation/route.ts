@@ -1,55 +1,85 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { fetchIncentiviDocs, mergeIncentiviDocs, INCENTIVI_SOLR_ENDPOINT } from '@/lib/matching/fetchIncentiviShared';
-import { runStreamingChat } from '@/lib/ai/conversationOrchestrator';
 import { z } from 'zod';
-import { addAIFallbackUsage, addPaidAIUsage, canUsePaidAI } from '@/lib/aiBudget';
-import { detectTurnIntent, normalizeForMatch } from '@/lib/conversation/intentRouter';
-import { extractProfileFromMessage } from '@/lib/engines/profileExtractor';
-import { computeConfidenceMetadata } from '@/lib/engines/confidenceMetadata';
-import { nextBestFieldFromStep, naturalBridgeQuestion, questionFor, questionForFounderEligibility } from '@/lib/conversation/questionPlanner';
-import { emptyProfileMemory, getChangedFields, markProfileFields, summarizeProfileForPrompt } from '@/lib/conversation/profileMemory';
-import { findClosestSimilarReply } from '@/lib/conversation/repetitionGuard';
-import { composeAssistantReply } from '@/lib/conversation/responseComposer';
-import { applyTonePolicy } from '@/lib/conversation/tonePolicy';
-import { answerGroundedMeasureQuestion } from '@/lib/knowledge/groundedMeasureAnswerer';
-import { isMeasureUpdateQuestion, resolveMeasureUpdateReply } from '@/lib/knowledge/measureStatus';
-import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '@/lib/knowledge/regoleBandi';
-import { normalizeProfile, canonicalizeRegion } from '@/lib/matching/profileNormalizer';
-import { runTwoPassChat } from '@/lib/ai/conversationOrchestrator';
-import {
-  evaluateScanReadiness,
-  isStrongReady,
-  isHardScanReady,
-  isSoftScanReady
-} from '@/lib/conversation/scanReadiness';
-import { evaluateProfileCompleteness } from '@/lib/conversation/profileCompleteness';
-import type { ChatAction } from '@/lib/ai/ChatDecisionModel';
+import { runStreamingChat } from '@/lib/ai/conversationOrchestrator';
+import { nextBestFieldFromStep } from '@/lib/conversation/questionPlanner';
 import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
+import { normalizeProfile } from '@/lib/matching/profileNormalizer';
 import { checkRateLimit } from '@/lib/security/rateLimit';
-import type { ContributionPreference, ConversationMode, NextBestField, Session, Step, UserProfile } from '@/lib/conversation/types';
+import { publicError, rejectCrossSiteMutation } from '@/lib/security/http';
+import { evaluateScanReadiness } from '@/lib/conversation/scanReadiness';
+import { evaluateAdaptiveScanReadiness } from '@/lib/conversation/adaptiveScanReadiness';
+import { nextStepFromProfile, scanReadinessReasonForStep } from '@/lib/conversation/stepPlanner';
+import {
+  buildRollingSummary,
+  decodeLegacySessionCookie,
+  deleteSession,
+  ensureSession,
+  getSession,
+  isLikelySessionPayloadCookie,
+  upsertSession
+} from '@/lib/conversation/sessionStore';
+import type { ConversationMode, Session, Step, UserProfile } from '@/lib/conversation/types';
+import type { ChatAction } from '@/lib/ai/ChatDecisionModel';
 
 export const runtime = 'edge';
 
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const AI_CHAT_V2_ENABLED = process.env.AI_CHAT_V2?.trim() !== 'false';
-const CHAT_DETERMINISTIC_V3 = process.env.CHAT_DETERMINISTIC_V3?.trim() !== 'false';
-
 const COOKIE_NAME = 'bndo_assistant_session';
-const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 8;
+const RATE_COOKIE = 'bndo_assistant_rl';
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_PER_WINDOW = 40;
 
 const payloadSchema = z.object({
   message: z.string().min(1).max(1200),
-  interactionId: z.string().min(6).max(64).optional()
+  interactionId: z.string().min(6).max(64).optional(),
+  conversationId: z.string().min(8).max(80).optional(),
+  focusGrantContext: z.boolean().optional(),
+  focusedGrantId: z.string().trim().min(2).max(220).optional(),
+  focusedGrantTitle: z.string().trim().min(2).max(260).optional(),
 });
 
 const commitSchema = z.object({
   interactionId: z.string().min(6).max(64),
-  assistantText: z.string().min(1).max(2400),
+  assistantText: z.string().min(1).max(3200),
   userProfile: z.unknown(),
   step: z.unknown(),
-  lastScanHash: z.string().max(600).nullable().optional()
+  lastScanHash: z.string().max(600).nullable().optional(),
+  conversationId: z.string().min(8).max(80).optional(),
+  summarySnapshot: z.string().max(5000).nullable().optional()
 });
+
+type ConversationMetaPayload = {
+  userProfile: UserProfile;
+  step: Step;
+  assistantText: string;
+  readyToScan: boolean;
+  mode: ConversationMode;
+  action?: ChatAction;
+  aiSource: 'openai' | 'disabled' | 'budget' | 'error' | null;
+  needsClarification: boolean;
+  nextQuestionField?: ReturnType<typeof nextBestFieldFromStep>;
+  profileCompletenessScore?: number;
+  scanReadinessReason?: string;
+  scanHash?: string | null;
+  questionReasonCode?: string;
+  strategicFeedback?: string;
+  interactionId: string;
+  conversationId: string;
+  modelUsed?: string;
+  routingReason?: string;
+  confidence?: number;
+  citations?: Array<{
+    title: string;
+    url: string;
+    sourceTier: 'official' | 'authoritative' | 'web';
+    publishedAt: string | null;
+    evidenceSnippet: string;
+  }>;
+  estimatedWithWarning?: boolean;
+  factSource?: 'scanner_dataset' | 'faq' | 'mixed' | 'none';
+  groundingStatus?: 'grounded' | 'estimated_with_warning' | 'degraded' | 'none';
+};
 
 function safeSliceTurns(turns: Array<{ role: 'user' | 'assistant'; text: string }>, maxTurns: number) {
   if (turns.length <= maxTurns) return turns;
@@ -67,25 +97,8 @@ function inferMode(args: {
   return 'profiling';
 }
 
-function withConversationMeta(args: {
-  userProfile: UserProfile;
-  step: Step;
-  assistantText: string;
-  readyToScan: boolean;
-  mode: ConversationMode;
-  action?: ChatAction;
-  aiSource: 'openai' | 'disabled' | 'budget' | 'error' | null;
-  needsClarification: boolean;
-  hasErrorPrompt?: boolean;
-  nextQuestionField?: NextBestField | null;
-  profileCompletenessScore?: number;
-  scanReadinessReason?: string;
-  scanHash?: string | null;
-  questionReasonCode?: string;
-  strategicFeedback?: string;
-}) {
-  const nextBestField: NextBestField | null =
-    typeof args.nextQuestionField !== 'undefined' ? args.nextQuestionField : nextBestFieldFromStep(args.step);
+function withConversationMeta(args: ConversationMetaPayload) {
+  const nextBestField = typeof args.nextQuestionField !== 'undefined' ? args.nextQuestionField : nextBestFieldFromStep(args.step);
   return {
     userProfile: args.userProfile,
     step: args.step,
@@ -96,832 +109,95 @@ function withConversationMeta(args: {
     nextBestField,
     nextQuestionField: nextBestField,
     aiSource: args.aiSource,
-    assistantConfidence: computeConfidenceMetadata({
-      aiSource: args.aiSource,
-      hasErrorPrompt: args.hasErrorPrompt,
-      needsClarification: args.needsClarification
-    }).assistantConfidence,
+    assistantConfidence: args.confidence ?? 0.75,
     needsClarification: args.needsClarification,
     profileCompletenessScore: args.profileCompletenessScore,
     scanReadinessReason: args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
     scanHash: typeof args.scanHash === 'undefined' ? undefined : args.scanHash,
     questionReasonCode: args.questionReasonCode ?? args.scanReadinessReason ?? (args.readyToScan ? 'ready' : undefined),
-    strategicFeedback: args.strategicFeedback
+    strategicFeedback: args.strategicFeedback,
+    interactionId: args.interactionId,
+    conversationId: args.conversationId,
+    modelUsed: args.modelUsed,
+    routingReason: args.routingReason,
+    confidence: args.confidence,
+    citations: args.citations ?? [],
+    estimatedWithWarning: Boolean(args.estimatedWithWarning),
+    factSource: args.factSource ?? 'none',
+    groundingStatus: args.groundingStatus ?? (args.estimatedWithWarning ? 'estimated_with_warning' : 'none')
   };
 }
 
-function extractOpenAIText(json: any): string | null {
-  try {
-    if (typeof json?.output_text === 'string' && json.output_text.trim()) {
-      return json.output_text.trim();
-    }
-    const out = json?.output;
-    if (!Array.isArray(out)) return null;
-    const parts: string[] = [];
-    for (const item of out) {
-      if (!item || item.type !== 'message' || item.role !== 'assistant') continue;
-      const content = item.content;
-      if (!Array.isArray(content)) continue;
-      for (const c of content) {
-        if (c?.type === 'output_text' && typeof c.text === 'string') parts.push(c.text);
-      }
-    }
-    const text = parts.join('').trim();
-    return text ? text : null;
-  } catch {
-    return null;
-  }
-}
-
-function extractUsageTokens(json: any): { input: number; output: number } {
-  const input =
-    Number(json?.usage?.input_tokens) ||
-    Number(json?.usage?.prompt_tokens) ||
-    Number(json?.usage?.total_input_tokens) ||
-    0;
-  const output =
-    Number(json?.usage?.output_tokens) ||
-    Number(json?.usage?.completion_tokens) ||
-    Number(json?.usage?.total_output_tokens) ||
-    0;
-  return {
-    input: Number.isFinite(input) ? Math.max(0, Math.floor(input)) : 0,
-    output: Number.isFinite(output) ? Math.max(0, Math.floor(output)) : 0
-  };
-}
-
-function cleanupAssistantText(text: string) {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/^\s*[-*]\s+/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function stripRepeatedAssistantIntro(text: string) {
-  const intro = /^ciao,\s*sono\s+il\s+tuo\s+assistente\s+bndo\.\s*/i;
-  return text.replace(intro, '').trim();
-}
-
-function tokenizeForSimilarity(value: string) {
-  return normalizeForMatch(value)
-    .split(' ')
-    .map((part) => part.trim())
-    .filter((part) => part.length >= 3);
-}
-
-function isEchoSentence(sentence: string, userMessage: string) {
-  const sNorm = normalizeForMatch(sentence);
-  const uNorm = normalizeForMatch(userMessage);
-  if (!sNorm || !uNorm) return false;
-  if (sNorm === uNorm) return true;
-
-  const echoPrefixes = [
-    'hai scritto',
-    'mi hai detto',
-    'ok hai scritto',
-    'perfetto hai scritto',
-    'stai cercando',
-    'quindi cerchi',
-    'ho capito che',
-    'mi confermi che',
-    'perfetto ho capito',
-    'ho segnato che',
-    'mi dici che'
+function computeScanHash(profile: UserProfile) {
+  const bits = [
+    profile.businessExists,
+    profile.location?.region,
+    profile.fundingGoal,
+    profile.sector,
+    profile.ateco,
+    profile.budgetAnswered ? profile.revenueOrBudgetEUR : null,
+    profile.requestedContributionEUR,
+    profile.ageBand,
+    profile.employmentStatus
   ];
-  const sClean = sNorm
-    .replace(/^(perfetto|ottimo|ok|bene|ho capito|ho segnato)\s+/, '')
-    .trim();
-
-  if (echoPrefixes.some((prefix) => sNorm.startsWith(prefix) || sClean.startsWith(prefix))) return true;
-
-  if (uNorm.length >= 14 && sNorm.includes(uNorm)) return true;
-
-  const userTokens = new Set(tokenizeForSimilarity(userMessage));
-  const sentenceTokens = tokenizeForSimilarity(sentence);
-  if (!userTokens.size || !sentenceTokens.length) return false;
-
-  const overlapCount = sentenceTokens.filter((token) => userTokens.has(token)).length;
-  const overlapRatio = overlapCount / sentenceTokens.length;
-  if (overlapRatio >= 0.70 && sentenceTokens.length <= Math.max(8, userTokens.size + 2)) return true;
-  if (overlapCount >= 3 && overlapRatio >= 0.25 && sentenceTokens.length <= 14) return true;
-
-  return false;
+  return bits.map((bit) => String(bit ?? '')).join('|');
 }
 
-function stripUserEchoFromReply(reply: string, userMessage: string) {
-  if (!reply || !userMessage) return reply;
-  const sentences = reply
-    .split(/(?<=[.!?])\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (!sentences.length) return reply;
+function parseRateCookie(raw: string | null) {
+  if (!raw) return { windowStartMs: Date.now(), count: 0 };
+  const [tsRaw, countRaw] = raw.split(':');
+  const ts = Number.parseInt(String(tsRaw ?? ''), 10);
+  const count = Number.parseInt(String(countRaw ?? ''), 10);
+  if (!Number.isFinite(ts) || !Number.isFinite(count)) return { windowStartMs: Date.now(), count: 0 };
+  return { windowStartMs: ts, count };
+}
 
-  const filtered = sentences.filter((sentence, index) => {
-    const echo = isEchoSentence(sentence, userMessage);
-    if (!echo) return true;
-    // Remove echo sentences, especially at the beginning where they feel robotic.
-    return index === 0 || sentence.length < 100;
+function checkCookieRateLimit() {
+  const parsed = parseRateCookie(cookies().get(RATE_COOKIE)?.value ?? null);
+  const now = Date.now();
+  const elapsed = now - parsed.windowStartMs;
+  const currentCount = elapsed > RATE_WINDOW_MS ? 0 : parsed.count;
+  if (currentCount >= RATE_MAX_PER_WINDOW) {
+    const retryAfterMs = Math.max(0, RATE_WINDOW_MS - elapsed);
+    return { ok: false, retryAfterSec: Math.max(1, Math.ceil(retryAfterMs / 1000)) };
+  }
+  const nextWindowStart = elapsed > RATE_WINDOW_MS ? now : parsed.windowStartMs;
+  const nextCount = currentCount + 1;
+  cookies().set(RATE_COOKIE, `${nextWindowStart}:${nextCount}`, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: Math.ceil((RATE_WINDOW_MS * 3) / 1000)
   });
-  if (!filtered.length) return reply;
-  return filtered.join(' ').trim();
+  return { ok: true, retryAfterSec: 0 };
 }
 
-function enforceQaModeReply(text: string) {
-  const n0 = normalizeForMatch(text);
-  if (n0.includes('dimmi pure la domanda') || n0.includes('dimmi pure la prima domanda')) return text.trim();
-
-  const sentences = text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const hasNudge = (s: string) => {
-    const n = normalizeForMatch(s);
-    const hasProfilingQuestion =
-      s.includes('?') &&
-      /(region|attivit|costitu|ateco|settore|budget|import|contribut|finanzia|spesa|invest|dipendent|addett|mail|telefono)/.test(n);
-    return (
-      hasProfilingQuestion ||
-      n.includes('quando sei pronto') ||
-      n.includes('potresti dirmi') ||
-      n.includes('puoi dirmi in una frase') ||
-      n.includes('dimmi in una riga') ||
-      n.includes('cosa vuoi finanziare') ||
-      n.includes('quale la spesa principale') ||
-      n.includes('qual e la spesa principale') ||
-      n.includes('vorresti finanziare') ||
-      n.includes('chiedere fondi') ||
-      n.includes('obiettivo concreto') ||
-      n.includes('investimento specifico') ||
-      n.includes('hai in mente un investimento') ||
-      n.includes('in che regione') ||
-      n.includes('per capire meglio') ||
-      n.includes('hai gia un attivita') ||
-      n.includes('hai già un attivita') ||
-      n.includes('devi costituirla') ||
-      n.includes('ateco') ||
-      n.includes('budget') ||
-      n.includes('contributo prefer')
-    );
-  };
-
-  const filtered = sentences.filter((s) => !hasNudge(s));
-  const core = (filtered.length ? filtered : sentences).join(' ').trim();
-  if (!core || core.length < 20) return 'Fai pure la tua domanda, ti rispondo in modo concreto.';
-  if (/[?]$/.test(core)) return core;
-  return core;
-}
-
-function enforceConsultantDirectness(
-  text: string,
-  args: {
-    shouldScanNow: boolean;
-    questionHint: string | null;
-  },
-) {
-  const { shouldScanNow, questionHint } = args;
-  if (!text) return text;
-
-  const sentences = text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (shouldScanNow) {
-    return 'Ottimo, ho i dettagli necessari. Ti mostro subito le migliori opportunità che ho individuato per te.';
-  }
-
-  const fluffPattern =
-    /(se vuoi|quando vuoi|appena vuoi|dimmi pure la prossima domanda|posso affinare|ti aiuto subito|posso aiutarti|fammi sapere|se ti va|quando preferisci|allora|ottimo|perfetto,|in ogni caso)/i;
-
-  const compact = sentences.filter((sentence) => {
-    if (!sentence) return false;
-    if (fluffPattern.test(sentence) && !sentence.includes('?')) return false;
-    return true;
-  });
-
-  const finalSentences: string[] = [];
-  let hasQuestionInText = false;
-  for (const sentence of compact) {
-    const normalized = normalizeForMatch(sentence);
-    if (!normalized) continue;
-    const isQuestion = sentence.includes('?');
-    if (isQuestion && hasQuestionInText) continue;
-    if (isQuestion) hasQuestionInText = true;
-    finalSentences.push(sentence);
-    if (finalSentences.length >= 2) break;
-  }
-
-  const joinedBeforeHint = finalSentences.join(' ').trim();
-  const hasDataRequestPattern = /(dimmi|indicami|mi dai|mi dici|confermi|serve|per filtrare|per capire|sapresti dirmi|puoi dirmi)/i.test(joinedBeforeHint);
-  
-  if (!hasQuestionInText && questionHint && finalSentences.length < 2 && !hasDataRequestPattern) {
-    // Check if the generated text already contains the concept of the questionHint
-    const qhNorm = normalizeForMatch(questionHint);
-    const textNorm = normalizeForMatch(joinedBeforeHint);
-    const keywords = qhNorm.split(' ').filter(w => w.length > 4);
-    const alreadyAsked = keywords.length > 0 && keywords.every(kw => textNorm.includes(kw));
-
-    if (!alreadyAsked) {
-      finalSentences.push(questionHint);
-    }
-  }
-
-  const joined = finalSentences.join(' ').trim();
-  if (!joined && questionHint) return questionHint;
-  if (!joined) return 'Dammi un dettaglio in più per restringere il campo e individuare i match migliori.';
-  // No more aggressive truncation. Let the LLM be expressive within reasonable bounds.
-  if (joined.length > 400) {
-    const short = joined.slice(0, 400);
-    const end = Math.max(short.lastIndexOf('.'), short.lastIndexOf('?'), short.lastIndexOf('!'));
-    return end >= 150 ? short.slice(0, end + 1).trim() : `${short.replace(/[.,;:\s]+$/g, '').trim()}.`;
-  }
-  return joined;
-}
-
-type AiGenerationResult = {
-  text: string | null;
-  source: 'openai' | 'disabled' | 'budget' | 'error';
-};
-
-async function generateAssistantTextWithOpenAI(args: {
-  userMessage: string;
-  session: Session;
-  profile: UserProfile;
-  nextStep: Step;
-  recap: string | null;
-  attempt: number;
-  questionHint: string | null;
-  shouldScanNow: boolean;
-  scanReady: boolean;
-  isGreetingOnly: boolean;
-  isFirstTouch: boolean;
-  qaMode: boolean;
-  questionLike: boolean;
-  smallTalk: boolean;
-  isOffTopic?: boolean;
-  ambiguities?: string[];
-  avoidReply?: string | null;
-  groundedContext?: string | null;
-  strategicFeedback?: string;
-   mental_model?: string | null;
-   strategic_note?: string | null;
-   hypotheses?: string[] | null;
-   risk_assessment?: string | null;
-   success_probability?: number | null;
-   strategic_synthesis?: string | null;
-   commercial_pulse?: string | null;
-   expert_nugget?: string | null;
-   execution_roadmap?: string[] | null;
-   normative_deep_dive?: string | null;
- }): Promise<AiGenerationResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { text: null, source: 'disabled' };
-  if (!(await canUsePaidAI())) return { text: null, source: 'budget' };
-
-  const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
-
-  const {
-    userMessage,
-    session,
-    profile,
-    nextStep,
-    recap,
-    attempt,
-    questionHint,
-    shouldScanNow,
-    scanReady,
-    isGreetingOnly,
-    isFirstTouch,
-    qaMode,
-    questionLike,
-    smallTalk,
-    isOffTopic,
-    ambiguities,
-    avoidReply,
-     groundedContext,
-     strategicFeedback,
-     mental_model,
-     strategic_note,
-     hypotheses,
-     risk_assessment,
-     success_probability,
-     strategic_synthesis,
-     commercial_pulse,
-     expert_nugget,
-     execution_roadmap,
-     normative_deep_dive
-   } = args;
-  const knowledgeContext = buildKnowledgeContextFromRules(userMessage, profile);
-  const profileSummary = summarizeProfileForPrompt(profile);
-  const lastAssistant = [...(session.recentTurns ?? [])].reverse().find((t) => t.role === 'assistant')?.text ?? null;
-
-  const system = [
-    'BNDO Architect V7. Singolarità Finanza Agevolata (Italia).',
-    'Sei un advisor senior (commi, leggi, DL 19/2024, DNSH).',
-    '⚠️ CONCISIONE ESTREMA (max 25 parole). Niente preamboli. Vai al punto.',
-    '',
-    args.groundedContext ? `🎯 FONTE: ${args.groundedContext}` : null,
-    strategicFeedback ? `🔍 MERCATO: ${strategicFeedback}` : null,
-    mental_model ? `🧠 MODELLO: ${mental_model}` : null,
-    strategic_note ? `💡 NOTA: ${strategic_note}` : null,
-    hypotheses && hypotheses.length > 0 ? `🕵️ IPOTESI: ${hypotheses.join(', ')}` : null,
-    risk_assessment ? `⚠️ RISCHI: ${risk_assessment}` : null,
-    success_probability !== undefined && success_probability !== null ? `📈 SUCCESS: ${success_probability}%` : null,
-    strategic_synthesis ? `🔮 SINTESI PROGETTUALE: "${strategic_synthesis}".` : null,
-    execution_roadmap && execution_roadmap.length > 0 ? `🏗️ ROADMAP ESECUTIVA: ${execution_roadmap.join(' → ')}.` : null,
-    normative_deep_dive ? `⚖️ DETTAGLIO NORMATIVO (ONNISCIENZA): "${normative_deep_dive}".` : null,
-    commercial_pulse ? `🎭 MENTOR PULSE: L'utente è "${commercial_pulse}".` : null,
-    expert_nugget ? `💎 EXPERT NUGGET: "${expert_nugget}".` : null,
-    '',
-    '🛡️ SCAN CONSTRAINT:',
-    shouldScanNow 
-      ? 'Comunica con entusiasmo che stai attivando il motore di ricerca di precisione e che ora vedrà i risultati esatti. NON FARE ALTRE DOMANDE.' 
-      : 'NON parlare di ricerca o risultati finché il profilo non è strategicamente pronto. Concentrati sulla consulenza e sul completamento dei dati mancanti.',
-    '',
-    'TUTTI I SUCCESSIVI: vai diritto al merito.'
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const missingHint =
-    nextStep === 'location'
-      ? 'Regione (Comune opzionale)'
-      : nextStep === 'activityType'
-        ? needsFounderEligibilityData(profile)
-          ? 'eta e stato occupazionale del proponente'
-          : profile.businessExists === null
-            ? 'attivita gia attiva o da costituire'
-            : 'tipo di realta (PMI/startup/professionista/ETS)'
-        : nextStep === 'fundingGoal'
-          ? 'cosa vuoi finanziare (obiettivo concreto)'
-          : nextStep === 'ateco'
-            ? 'codice ATECO (anche 2 cifre) o descrizione attivita'
-            : nextStep === 'sector'
-              ? 'settore principale di attivita'
-              : nextStep === 'employees'
-                ? 'numero addetti'
-                : nextStep === 'budget'
-                  ? 'budget/investimento indicativo'
-                  : nextStep === 'contributionPreference'
-                    ? 'preferenza forma contributo (fondo perduto, finanziamento, indifferente)'
-                    : nextStep === 'preScanConfirm'
-                      ? 'CONFERMA PRE-SCAN: chiedi se c\u2019\u00e8 altro da specificare (budget, forma contributo, dimensione) prima di avviare la ricerca bandi'
-                      : nextStep === 'contactEmail'
-                        ? 'email di contatto'
-                        : nextStep === 'contactPhone'
-                          ? 'numero di telefono'
-                          : 'nessuno';
-
-    // Build explicit list of already-known fields so the AI never re-asks them
-    const knownFields: string[] = [];
-    if (profile.location?.region) knownFields.push(`regione=${profile.location.region}`);
-    if (profile.businessExists === true) knownFields.push('impresa_attiva=sì');
-    if (profile.businessExists === false) knownFields.push('impresa_da_costituire=sì');
-    if (profile.activityType) knownFields.push(`tipo_attività=${profile.activityType}`);
-    if (profile.fundingGoal) knownFields.push(`obiettivo=${profile.fundingGoal}`);
-    if (profile.sector) knownFields.push(`settore=${profile.sector}`);
-    if (profile.contributionPreference) knownFields.push(`preferenza_contributo=${profile.contributionPreference}`);
-    if (profile.requestedContributionEUR) knownFields.push(`budget=${profile.requestedContributionEUR}`);
-    if (profile.employees) knownFields.push(`dipendenti=${profile.employees}`);
-    if (profile.age) knownFields.push(`età=${profile.age}`);
-    if (profile.ageBand) knownFields.push(`fascia_età=${profile.ageBand}`);
-    if (profile.ateco) knownFields.push(`ateco=${profile.ateco}`);
-
-    const user = [
-    `Messaggio utente: ${JSON.stringify(userMessage)}`,
-    `Greeting-only: ${isGreetingOnly ? 'si' : 'no'}`,
-    `Primo contatto: ${isFirstTouch ? 'si' : 'no'}`,
-    `Utente in modalita domande prima del profiling: ${wantsQuestionsFirst(userMessage) ? 'si' : 'no'}`,
-    `Q&A mode attiva: ${qaMode ? 'si' : 'no'}`,
-    `Messaggio e domanda: ${questionLike ? 'si' : 'no'}`,
-    `Messaggio e small-talk: ${smallTalk ? 'si' : 'no'}`,
-    '',
-    lastAssistant ? `Ultima risposta assistente (non ripeterla): ${lastAssistant}` : null,
-    '',
-    `Profilo attuale (JSON): ${JSON.stringify(profile)}`,
-    profileSummary ? `Profilo sintetico: ${profileSummary}` : null,
-    knownFields.length > 0 ? `CAMPI GIÀ NOTI (NON ri-chiedere MAI): ${knownFields.join(', ')}` : null,
-    `Step corrente: ${session.step}`,
-    `Prossimo step consigliato: ${nextStep} (manca: ${missingHint})`,
-    `Tentativo su questo step: ${attempt}`,
-    recap ? `Recap breve (se utile): ${recap}` : null,
-    questionHint ? `Domanda suggerita: ${questionHint}` : null,
-    '',
-    knowledgeContext ? `Contesto specialistico BNDO:\n${knowledgeContext}` : null,
-    '',
-    `Scan ready: ${scanReady ? 'si' : 'no'} | Avvio scan ora: ${shouldScanNow ? 'si' : 'no'}`
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  const history = (session.recentTurns ?? [])
-    .slice(-16)
-    .map((t) => `${t.role === 'user' ? 'Utente' : 'Assistente'}: ${t.text}`)
-    .join('\n');
-
-  const body = {
-    model,
-    input: [
-      {
-        type: 'message',
-        role: 'developer',
-        content: [{ type: 'input_text', text: system }]
-      },
-      {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: history ? `${user}\n\nContesto recente:\n${history}` : user }]
-      }
-    ],
-    temperature: 0.45,
-    max_output_tokens: 600
-  } as const;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7500);
-    try {
-      const res = await fetch(OPENAI_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) return { text: null, source: 'error' };
-      const usage = extractUsageTokens(json);
-      await addPaidAIUsage(usage.input, usage.output);
-      return { text: extractOpenAIText(json), source: 'openai' };
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch {
-    return { text: null, source: 'error' };
-  }
-}
-
-const IT_REGIONS = [
-  'Abruzzo',
-  'Basilicata',
-  'Calabria',
-  'Campania',
-  'Emilia-Romagna',
-  'Friuli-Venezia Giulia',
-  'Lazio',
-  'Liguria',
-  'Lombardia',
-  'Marche',
-  'Molise',
-  'Piemonte',
-  'Puglia',
-  'Sardegna',
-  'Sicilia',
-  'Toscana',
-  'Trentino-Alto Adige',
-  'Umbria',
-  "Valle d'Aosta",
-  'Veneto'
-] as const;
-
-const REGION_DEMONYM_MAP: Array<{ region: (typeof IT_REGIONS)[number]; tokens: string[] }> = [
-  { region: 'Abruzzo', tokens: ['abruzzese', 'abruzzesi'] },
-  { region: 'Basilicata', tokens: ['lucano', 'lucana', 'lucani', 'lucane', 'basilicatese', 'basilicatesi'] },
-  { region: 'Calabria', tokens: ['calabrese', 'calabresi'] },
-  { region: 'Campania', tokens: ['campano', 'campana', 'campani', 'campane'] },
-  { region: 'Emilia-Romagna', tokens: ['emiliano', 'emiliana', 'romagnolo', 'romagnola'] },
-  { region: 'Friuli-Venezia Giulia', tokens: ['friulano', 'friulana', 'giuliano', 'giuliana'] },
-  { region: 'Lazio', tokens: ['laziale', 'laziali'] },
-  { region: 'Liguria', tokens: ['ligure', 'liguri'] },
-  { region: 'Lombardia', tokens: ['lombardo', 'lombarda', 'lombardi', 'lombarde'] },
-  { region: 'Marche', tokens: ['marchigiano', 'marchigiana'] },
-  { region: 'Molise', tokens: ['molisano', 'molisana'] },
-  { region: 'Piemonte', tokens: ['piemontese', 'piemontesi'] },
-  { region: 'Puglia', tokens: ['pugliese', 'pugliesi'] },
-  { region: 'Sardegna', tokens: ['sardo', 'sarda', 'sardi', 'sarde'] },
-  { region: 'Sicilia', tokens: ['siciliano', 'siciliana', 'siciliani', 'siciliane'] },
-  { region: 'Toscana', tokens: ['toscano', 'toscana'] },
-  { region: 'Trentino-Alto Adige', tokens: ['trentino', 'altoatesino', 'altoatesina'] },
-  { region: 'Umbria', tokens: ['umbro', 'umbra'] },
-  { region: "Valle d'Aosta", tokens: ['valdostano', 'valdostana'] },
-  { region: 'Veneto', tokens: ['veneto', 'veneta', 'veneti', 'venete'] },
-];
-
-function emptyProfile(): UserProfile {
-  return {
-    activityType: null,
-    businessExists: null,
-    sector: null,
-    ateco: null,
-    atecoAnswered: false,
-    location: { region: null, municipality: null },
-    locationNeedsConfirmation: false,
-    age: null,
-    ageBand: null,
-    employmentStatus: null,
-    legalForm: null,
-    employees: null,
-    revenueOrBudgetEUR: null,
-    requestedContributionEUR: null,
-    budgetAnswered: false,
-    fundingGoal: null,
-    contributionPreference: null,
-    contactEmail: null,
-    contactPhone: null,
-    teamMajority: null,
-    agricultureStatus: null,
-    tech40: null,
-    professionalRegister: null,
-    isThirdSector: null,
-    propertyStatus: null,
-    foundationYear: null,
-    annualTurnover: null,
-    isInnovative: null,
-    slotSource: {}
-  };
-}
-
-function isProfileEmpty(p: UserProfile) {
-  return (
-    !p.activityType &&
-    p.businessExists === null &&
-    !p.sector &&
-    !p.ateco &&
-    p.atecoAnswered === false &&
-    !p.location?.region &&
-    !p.location?.municipality &&
-    !p.locationNeedsConfirmation &&
-    p.age === null &&
-    !p.ageBand &&
-    !p.employmentStatus &&
-    !p.legalForm &&
-    p.employees === null &&
-    p.revenueOrBudgetEUR === null &&
-    p.requestedContributionEUR === null &&
-    p.budgetAnswered === false &&
-    !p.fundingGoal &&
-    !p.contributionPreference &&
-    !p.contactEmail &&
-    !p.contactPhone &&
-    (!p.slotSource || Object.keys(p.slotSource).length === 0)
-  );
-}
-
-function isGenericFundingGoal(text: string) {
-  const n = normalizeForMatch(text);
-  if (!n) return true;
-  const words = n.split(' ').filter(w => w.length >= 3);
-  
-  // Se contiene parole ad alto valore semantico non è generico
-  const specificTerms = [
-    'ristruttur', 'macchinar', 'attrezz', 'software', 'digital', 'capannone', 
-    'energia', 'fotovolta', 'assunz', 'formaz', 'export', 'internaz', 
-    'brevett', 'ricerca', 'sviluppo', 'marketing', 'pubblicit', 'mezzi', 'veicoli',
-    'sito', 'e-commerce', 'alberghier', 'turism', 'ristorazione', 'bar'
-  ];
-  
-  if (words.some(w => specificTerms.some(t => w.includes(t)))) return false;
-  
-  if (words.length <= 1) return true;
-  
-  const generic = [
-    'bando', 'bandi', 'finanziamento', 'finanziamenti', 'contributo', 'contributi',
-    'agevolazione', 'agevolazioni', 'investimento', 'investimenti', 'spese',
-    'progetto', 'attivita', 'impresa', 'azienda', 'fondo perduto', 'aiuto', 'aiuti',
-    'aprire', 'avviare', 'nuova', 'nuove'
-  ];
-  
-  return words.every(w => generic.includes(w));
-}
-
-function hasTopicSignal(profile: UserProfile) {
-  const ateco = (profile.ateco ?? '').trim();
-  const hasAtecoDigits = /\d{2}/.test(ateco);
-  if (hasAtecoDigits) return true;
-  if (profile.sector && profile.sector.trim().length >= 3) return true;
-  if (profile.fundingGoal && profile.fundingGoal.trim().length >= 6 && !isGenericFundingGoal(profile.fundingGoal)) return true;
-  return false;
-}
-
-function hasPrecisionSignal(profile: UserProfile) {
-  return Boolean(
-    profile.budgetAnswered ||
-      profile.contributionPreference ||
-      profile.atecoAnswered ||
-      profile.sector ||
-      profile.employees !== null ||
-      profile.requestedContributionEUR !== null ||
-      ((profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35') &&
-        Boolean(profile.employmentStatus))
-  );
-}
-
-function hasAgeSignal(profile: UserProfile) {
-  return profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35';
-}
-
-function needsFounderEligibilityData(profile: UserProfile) {
-  return profile.businessExists === false && (!hasAgeSignal(profile) || !profile.employmentStatus);
-}
-
-const SOUTH_PRIORITY_REGIONS = new Set(['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia']);
-
-type ScanMissingSignal = 'fundingGoal' | 'location' | 'businessContext' | 'founderEligibility' | 'topicPrecision';
-type ScanAdaptiveReadiness = {
-  ready: boolean;
-  missingSignals: ScanMissingSignal[];
-  southYouthStartupPriority: boolean;
-};
-
-function isSouthYouthStartupPriorityProfile(profile: UserProfile) {
-  if (profile.businessExists !== false) return false;
-  const regionRaw = profile.location?.region?.trim() ?? '';
-  if (!regionRaw) return false;
-  const region = IT_REGIONS.find((entry) => normalizeForMatch(entry) === normalizeForMatch(regionRaw)) ?? regionRaw;
-  if (!SOUTH_PRIORITY_REGIONS.has(region)) return false;
-  const age = profile.age ?? null;
-  const youthByAge = age !== null && age >= 18 && age <= 35;
-  const youthByBand = profile.ageBand === 'under35';
-  if (!youthByAge && !youthByBand) return false;
-  const employmentNorm = normalizeForMatch(profile.employmentStatus ?? '');
-  return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
-}
-
-function hasBusinessContext(profile: UserProfile) {
-  return profile.businessExists !== null || Boolean(profile.activityType?.trim());
-}
-
-function isScanReadyAdaptive(profile: UserProfile): ScanAdaptiveReadiness {
-  const missingSignals: ScanMissingSignal[] = [];
-  const southYouthStartupPriority = isSouthYouthStartupPriorityProfile(profile);
-
-  const goalText = profile.fundingGoal?.trim() ?? '';
-  const goalIsGeneric = goalText ? isGenericFundingGoal(goalText) : true;
-  const hasRegion = Boolean(profile.location?.region?.trim()) && !profile.locationNeedsConfirmation;
-  const hasContext = hasBusinessContext(profile);
-
-  if (!goalText) missingSignals.push('fundingGoal');
-  if (!hasRegion) missingSignals.push('location');
-  if (!hasContext) missingSignals.push('businessContext');
-  if (profile.businessExists === false && needsFounderEligibilityData(profile)) missingSignals.push('founderEligibility');
-
-  const hasTopic = hasTopicSignal(profile);
-  const hasPrecision = hasPrecisionSignal(profile);
-
-  // LOGICA PROATTIVA: 
-  // Se non è generico e abbiamo i 3 pilastri (Cosa, Dove, Chi), siamo pronti.
-  const corePilarsOk = Boolean(goalText && !goalIsGeneric && hasRegion && hasContext);
-  
-  // Se è generico, serve almeno un segnale di precisione (budget o settore o ateco)
-  const genericWithPrecisionOk = Boolean(goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority));
-
-  if (!corePilarsOk && !genericWithPrecisionOk) {
-      if (!missingSignals.includes('topicPrecision')) {
-          missingSignals.push('topicPrecision');
-      }
-  }
-
-  const isReady = corePilarsOk || missingSignals.length === 0;
-
-  return {
-    ready: isReady,
-    missingSignals: corePilarsOk ? [] : missingSignals,
-    southYouthStartupPriority,
-  };
-}
-
-
-function questionForStepWithProfile(step: Step, profile: UserProfile, seed: string, attempt: number) {
-  if (step === 'location' && profile.locationNeedsConfirmation && profile.location?.region) {
-    return `In quale regione ha sede il progetto?`;
-  }
-
-  if (step === 'activityType' && hasBusinessContext(profile) && needsFounderEligibilityData(profile)) {
-    return questionForFounderEligibility(seed, attempt);
-  }
-
-  return questionFor(step, seed, attempt);
-}
-
-/**
- * getNextStep V2: usa il Profile Completeness Engine V2 (5 pilastri rigorosi).
- * Restituisce il prossimo step che deve chiedere il bot.
- *
- * Sequenza tipica:
- *   fundingGoal → activityType → location → sector → (budget|contributionPreference|founderData)
- *   → preScanConfirm → (utente risponde) → ready
- */
-function getNextStep(profile: UserProfile): Step {
-  // Priorità massima: location ambigua da confermare
-  if (profile.locationNeedsConfirmation && profile.location?.region) return 'location';
-
-  const completeness = evaluateProfileCompleteness(profile as unknown as import('@/lib/conversation/types').UserProfile);
-
-  // Se è strong_ready: scan può partire subito (step ready)
-  if (completeness.level === 'strong_ready') return 'ready';
-
-  // Se è hard_scan_ready: chiediamo la domanda di conferma
-  if (completeness.level === 'hard_scan_ready') return 'preScanConfirm';
-
-  // Altrimenti: chiediamo il prossimo campo mancante in ordine di priorità
-  const nextField = completeness.nextPriorityField;
-  if (!nextField) return 'ready'; // fallback estremo
-
-  switch (nextField) {
-    case 'location':
-    case 'locationConfirmation':
-      return 'location';
-    case 'businessContext':
-      return 'activityType';
-    case 'fundingGoal':
-      return 'fundingGoal';
-    case 'sector':
-      return 'sector';
-    case 'legalForm':
-      return 'legalForm';
-    case 'founderData':
-      return 'activityType'; // chiediamo età/occupazione nello stesso step
-    case 'budgetOrPreference':
-      // Chiediamo prima la preferenza contributo (fondo perduto vs finanziamento)
-      // poi il budget se non risponde a quella
-      if (!profile.contributionPreference) return 'contributionPreference';
-      return 'budget';
-    default:
-      return 'budget';
-  }
-}
-
-function fallbackStepAfterStall(step: Step, profile: UserProfile): Step {
-  if (step === 'activityType') {
-    if (needsFounderEligibilityData(profile)) return 'activityType';
-    if (profile.businessExists === null) {
-      if (!profile.location?.region || profile.locationNeedsConfirmation) return 'location';
-      if (!profile.fundingGoal) return 'fundingGoal';
-      if (!profile.sector) return 'sector';
-      return 'budget';
-    }
-    return 'fundingGoal';
-  }
-  if (step === 'fundingGoal') {
-    if (profile.businessExists === null) return 'activityType';
-    if (!profile.location?.region || profile.locationNeedsConfirmation) return 'location';
-    if (!profile.sector) return 'sector';
-  }
-  if (step === 'location') {
-    if (profile.businessExists === null) return 'activityType';
-    if (needsFounderEligibilityData(profile)) return 'activityType';
-    if (!profile.fundingGoal) return 'fundingGoal';
-  }
-  if (step === 'sector') {
-    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
-    if (!profile.contributionPreference) return 'contributionPreference';
-  }
-  if (step === 'budget') {
-    if (!profile.sector) return 'sector';
-    if (!profile.contributionPreference) return 'contributionPreference';
-  }
-  if (step === 'contributionPreference') {
-    if (!profile.sector) return 'sector';
-    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
-  }
-  if (step === 'ateco') {
-    if (!profile.sector) return 'sector';
-    if (!profile.budgetAnswered && profile.requestedContributionEUR === null) return 'budget';
-  }
-  return step;
-}
-
-function scanReadinessReasonForStep(step: Step, profile: UserProfile): string {
-  if (step === 'ready') return 'ready';
-  if (step === 'location') return 'missing:location';
-  if (step === 'fundingGoal') return 'missing:fundingGoal';
-  if (step === 'activityType') {
-    return needsFounderEligibilityData(profile) ? 'missing:founderEligibility' : 'missing:businessContext';
-  }
-  return 'missing:topicPrecision';
-}
-
-function readSessionCookie(): Session | null {
+function readConversationCookie() {
   const raw = cookies().get(COOKIE_NAME)?.value ?? null;
   if (!raw) return null;
-  try {
-    const json = Buffer.from(raw, 'base64url').toString('utf8');
-    const parsed = JSON.parse(json) as Session;
-    if (!parsed?.userProfile) return null;
-    return parsed;
-  } catch {
-    return null;
+  if (raw.startsWith('conv_')) return raw;
+
+  if (isLikelySessionPayloadCookie(raw)) {
+    const migrated = decodeLegacySessionCookie(raw);
+    if (migrated) {
+      upsertSession(migrated);
+      return migrated.conversationId;
+    }
   }
+
+  try {
+    const decoded = decodeURIComponent(raw);
+    const parsed = JSON.parse(decoded) as { conversationId?: string };
+    if (parsed.conversationId && parsed.conversationId.startsWith('conv_')) return parsed.conversationId;
+  } catch {
+    // Ignore malformed cookie payload
+  }
+  return null;
 }
 
-function writeSessionCookie(session: Session) {
-  const json = JSON.stringify(session);
-  const value = Buffer.from(json, 'utf8').toString('base64url');
-  cookies().set(COOKIE_NAME, value, {
+function writeConversationCookie(conversationId: string) {
+  cookies().set(COOKIE_NAME, conversationId, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -930,893 +206,7 @@ function writeSessionCookie(session: Session) {
   });
 }
 
-function hasCriticalRecapDelta(prev: UserProfile, next: UserProfile) {
-  if (normalizeForMatch(prev.location?.region ?? '') !== normalizeForMatch(next.location?.region ?? '')) return true;
-  if ((prev.businessExists ?? null) !== (next.businessExists ?? null)) return true;
-  if ((prev.age ?? null) !== (next.age ?? null)) return true;
-  if (normalizeForMatch(prev.employmentStatus ?? '') !== normalizeForMatch(next.employmentStatus ?? '')) return true;
-  return false;
-}
-
-function parseEmployees(message: string): number | null {
-  const lowered = message.toLowerCase();
-  if (/\bsolo io\b|\bda solo\b|\bda sola\b/.test(lowered)) return 1;
-  if (/\bnessun\b|\bzero\b/.test(lowered)) return 0;
-  const m = lowered.match(/(\d{1,6})/);
-  if (!m) return null;
-  const n = Number.parseInt(m[1]!, 10);
-  if (!Number.isFinite(n) || n < 0 || n > 500000) return null;
-  return n;
-}
-
-function messageMentionsEmployees(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  if (/\b\d{1,6}\b/.test(n) && n.split(' ').length <= 2) return true; // "8" / "10"
-  return (
-    n.includes('dipendent') ||
-    n.includes('addett') ||
-    n.includes('personale') ||
-    n.includes('collaborator') ||
-    n.includes('team') ||
-    n.includes('siamo in') ||
-    n.includes('siamo') && /\b\d{1,4}\b/.test(n)
-  );
-}
-
-function parseBusinessExistsFromMessage(message: string): boolean | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-
-  if (
-    /(non ho (una |un )?(impresa|azienda|attivita)|da costituire|da aprire|devo aprire|devo avviare|voglio avviare|vorrei avviare|voglio aprire|vorrei aprire|sto avviando|sto aprendo|nuova attivita|nuova impresa|startup|autoimpiego|non e ancora attiva|ancora non esiste|non l ho ancora aperta|devo aprirla|da aprire|da costituire|nuova attivita|non e ancora attiva|non l ho ancora aperta)/.test(
-      n
-    )
-  ) {
-    return false;
-  }
-
-  if (
-    /(gia attiva|già attiva|gia esistente|già esistente|impresa attiva|azienda attiva|attivita attiva|attivita avviata|ho gia un attivita|ho partita iva|ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|sono titolare|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva|operativa|gia operativa|attiva|gia attiva|ho gia l azienda|azienda attiva|impresa attiva|siamo gia operativi|societa attiva)/.test(
-      n,
-    )
-  ) {
-    return true;
-  }
-
-  return null;
-}
-
-function parseAge(message: string): number | null {
-  const lowered = message.toLowerCase();
-  const match =
-    lowered.match(/\bho\s+(\d{2})\s+anni\b/) ??
-    lowered.match(/\b(\d{2})\s+anni\b/) ??
-    lowered.match(/\beta(?:')?\s*(?:di)?\s*(\d{2})\b/);
-  if (!match?.[1]) return null;
-  const age = Number.parseInt(match[1], 10);
-  if (!Number.isFinite(age) || age < 16 || age > 100) return null;
-  return age;
-}
-
-function parseAgeBand(message: string): UserProfile['ageBand'] {
-  const lowered = normalizeForMatch(message);
-  if (!lowered) return null;
-  if (/\bunder\s*35\b|\bu35\b|meno di 35|sotto i 35|<\s*35|giovane\b/.test(lowered)) return 'under35';
-  if (/\bover\s*35\b|oltre 35|piu di 35|sopra i 35|>\s*35/.test(lowered)) return 'over35';
-  return null;
-}
-
-function detectRegionByDemonym(message: string): string | null {
-  const norm = normalizeForMatch(message);
-  if (!norm) return null;
-  for (const entry of REGION_DEMONYM_MAP) {
-    if (entry.tokens.some((token) => ` ${norm} `.includes(` ${normalizeForMatch(token)} `))) {
-      return entry.region;
-    }
-  }
-  return null;
-}
-
-type RegionSignal = { region: string; source: 'explicit' | 'demonym' };
-
-function detectRegionSignal(message: string): RegionSignal | null {
-  const norm = normalizeForMatch(message);
-  for (const r of IT_REGIONS) {
-    const rn = normalizeForMatch(r);
-    if (` ${norm} `.includes(` ${rn} `)) return { region: r, source: 'explicit' };
-  }
-  const demonymRegion = detectRegionByDemonym(message);
-  if (demonymRegion) return { region: demonymRegion, source: 'demonym' };
-  return null;
-}
-
-function parseEmploymentStatus(message: string): string | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-  if (/(disoccupat|senza lavoro|non occupat)/.test(n)) return 'disoccupato';
-  if (/inoccupat/.test(n)) return 'inoccupato';
-  if (/\bneet\b/.test(n)) return 'neet';
-  if (/student/.test(n)) return 'studente';
-  if (/(occupat|dipendent|lavoro dipendente|a tempo)/.test(n)) return 'occupato';
-  if (/(autonom|partita iva|libero professionista)/.test(n)) return 'autonomo';
-  return null;
-}
-
-function parseLegalForm(message: string): string | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-  if (/\bsrls\b/.test(n)) return 'SRLS';
-  if (/\bsrl\b/.test(n)) return 'SRL';
-  if (/\bspa\b/.test(n)) return 'SPA';
-  if (/\bsnc\b/.test(n)) return 'SNC';
-  if (/\bsas\b/.test(n)) return 'SAS';
-  if (/\bcooperativ/.test(n)) return 'Cooperativa';
-  if (/\bditta individuale\b/.test(n)) return 'Ditta individuale';
-  return null;
-}
-
-function parseBudgetEUR(message: string): number | null {
-  const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!lowered) return null;
-
-  // Ignore ages and similar demographic values ("ho 29 anni").
-  if (/\b\d{1,3}\s+anni\b/.test(lowered) || /\beta(?:')?\s*(?:di)?\s*\d{1,3}\b/.test(lowered)) {
-    return null;
-  }
-
-  // Capture a number with optional decimal and optional multiplier (k/m).
-  const m = lowered.match(/(\d+(?:[.,]\d+)?)(?:\s*)(k|m|mila|milioni|milione)?/i);
-  if (!m) return null;
-
-  const rawNum = m[1]!.replace(/\./g, '').replace(',', '.'); // 50.000 -> 50000 ; 1,2 -> 1.2
-  const base = Number.parseFloat(rawNum);
-  if (!Number.isFinite(base) || base < 0) return null;
-
-  const hasBudgetSignal =
-    /\b(budget|investiment|spesa|fatturat|ricav|euro|eur|contribut|finanziament|importo|capitale)\b/.test(lowered) ||
-    /\b\d+\s*(k|m|mila|milioni|milione)\b/.test(lowered) ||
-    (/^\s*\d+(?:[.,]\d+)?\s*$/.test(lowered) && base >= 1000);
-  if (!hasBudgetSignal) return null;
-
-  const mult = (m[2] ?? '').toLowerCase();
-  if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
-  if (mult === 'm' || mult === 'milione' || mult === 'milioni') return Math.round(base * 1_000_000);
-  return Math.round(base);
-}
-
-function parseRequestedContributionEUR(message: string): number | null {
-  const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!lowered) return null;
-
-  const hasRequestSignal =
-    /\b(ho bisogno|mi serve|mi servono|vorrei ottenere|richiedo|richiesta|contributo|agevolazione|fondi)\b/.test(lowered);
-  if (!hasRequestSignal) return null;
-
-  return parseBudgetEUR(message);
-}
-
-function messageMentionsBudget(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    n.includes('budget') ||
-    n.includes('fatturat') ||
-    n.includes('ricav') ||
-    n.includes('investiment') ||
-    n.includes('spesa') ||
-    n.includes('euro') ||
-    n.includes('eur') ||
-    /\b\d+(\s*)k\b/.test(n) ||
-    /\b\d+(\s*)m\b/.test(n) ||
-    n.includes('mila') ||
-    n.includes('milion')
-  );
-}
-
-function parseRegionAndMunicipality(message: string): { 
-  region: string | null; 
-  municipality: string | null; 
-  investmentRegion?: string | null 
-} {
-  const cleaned = message.trim();
-  const norm = normalizeForMatch(cleaned);
-  
-  // Advanced detection for "Headquarters in X but investment in Y"
-  const hqKeywords = ['sede', 'uffici', 'operiamo', 'attivi', 'partenza'];
-  const investKeywords = ['investo', 'investiment', 'apro', 'apertura', 'intervento', 'progetto', 'nuova'];
-  
-  if (cleaned.includes('ma') || cleaned.includes('pero') || cleaned.includes('tuttavia') || (hqKeywords.some(k => norm.includes(k)) && investKeywords.some(k => norm.includes(k)))) {
-    // Split attempt
-    const hqMatch = cleaned.match(new RegExp(`(?:${hqKeywords.join('|')})(?:\\s+a|\\s+in)?\\s+([A-Z][a-z]+(?:-[A-Z][a-z]+)?)`, 'i'));
-    const investMatch = cleaned.match(new RegExp(`(?:${investKeywords.join('|')})(?:\\s+a|\\s+in)?\\s+([A-Z][a-z]+(?:-[A-Z][a-z]+)?)`, 'i'));
-    
-    if (hqMatch?.[1] && investMatch?.[1]) {
-      const hqRegion = canonicalizeRegion(hqMatch[1]);
-      const investRegion = canonicalizeRegion(investMatch[1]);
-      if (hqRegion && investRegion && hqRegion !== investRegion) {
-        return { region: hqRegion, municipality: null, investmentRegion: investRegion };
-      }
-    }
-  }
-
-  const regionSignal = detectRegionSignal(cleaned);
-  const explicitRegionHit =
-    IT_REGIONS.find((r) => normalizeForMatch(r) === norm) ??
-    IT_REGIONS.find((r) => normalizeForMatch(r).includes(norm) || norm.includes(normalizeForMatch(r))) ??
-    (regionSignal?.source === 'explicit' ? regionSignal.region : null);
-  const demonymRegion = detectRegionByDemonym(cleaned);
-  const regionHit =
-    explicitRegionHit ??
-    demonymRegion ??
-    null;
-
-  if (cleaned.includes(',')) {
-    const parts = cleaned.split(',').map((p) => p.trim()).filter(Boolean);
-    const a = parts[0] ?? '';
-    const b = parts[1] ?? '';
-    const aIsRegion = IT_REGIONS.some((r) => normalizeForMatch(r) === normalizeForMatch(a));
-    const bIsRegion = IT_REGIONS.some((r) => normalizeForMatch(r) === normalizeForMatch(b));
-    if (aIsRegion && b) return { region: a, municipality: b };
-    if (bIsRegion && a) return { region: b, municipality: a };
-  }
-
-  if (regionHit) return { region: regionHit, municipality: null };
-  return { region: null, municipality: null };
-}
-
-function detectRegionAnywhere(message: string): string | null {
-  return detectRegionSignal(message)?.region ?? null;
-}
-
-function userIsStatingOwnLocation(message: string) {
-  const n = normalizeForMatch(message);
-  // Heuristics: first person + location verbs, or explicit "regione:".
-  return (
-    n.includes('regione') ||
-    n.includes('sono in') ||
-    n.includes('siamo in') ||
-    n.includes('operiamo in') ||
-    n.includes('sede in') ||
-    n.includes('ho sede') ||
-    n.includes('mi trovo in') ||
-    n.includes('mi trovo a') ||
-    n.includes('azienda in') ||
-    n.includes('attivita in') ||
-    Boolean(detectRegionByDemonym(message))
-  );
-}
-
-function extractAtecoFromMessage(message: string): string | null {
-  const raw = message ?? '';
-  const norm = normalizeForMatch(raw);
-  const hasAtecoKeyword =
-    norm.includes('ateco') ||
-    norm.includes('codice ateco') ||
-    norm.includes('codice attivita') ||
-    norm.includes('cod attivita');
-
-  // Prefer codes near the keyword "ateco".
-  const idx = norm.indexOf('ateco');
-  const window = idx >= 0 ? raw.slice(Math.max(0, idx - 120), Math.min(raw.length, idx + 220)) : raw;
-  // Safe extraction:
-  // - if user writes a dotted code (es. 62.01), accept it always
-  // - if no dotted code, accept short numeric formats only when ATECO is explicitly mentioned
-  const dotted = /\b(\d{2})\.(\d{1,2})(?:\.(\d{1,2}))?\b/;
-  const m = window.match(dotted) ?? (hasAtecoKeyword ? window.match(/\b(\d{2})(?:\.(\d{1,2}))?(?:\.(\d{1,2}))?\b/) : null);
-  if (!m) return null;
-  const a = m[1];
-  const b = m[2];
-  const c = m[3];
-  if (a && b && c) return `${a}.${b.padStart(2, '0')}.${c.padStart(2, '0')}`;
-  if (a && b) return `${a}.${b.padStart(2, '0')}`;
-  return a ?? null;
-}
-
-function parseActivityType(message: string): string | null {
-  const v = normalizeForMatch(message);
-  if (!v) return null;
-
-  if (v.includes('startup')) return 'Startup';
-
-  if (
-    v.includes('costituir') ||
-    v.includes('da costituire') ||
-    v.includes('da aprire') ||
-    v.includes('non ho attivita') ||
-    v.includes('devo aprire') ||
-    v.includes('devo avviare') ||
-    v.includes('voglio avviare') ||
-    v.includes('vorrei avviare') ||
-    v.includes('voglio aprire') ||
-    v.includes('vorrei aprire') ||
-    v.includes('sto avviando') ||
-    v.includes('sto aprendo') ||
-    v.includes('avviare') ||
-    v.includes('aprire attivita') ||
-    v.includes('avvio attivita') ||
-    v.includes('nuova attivita') ||
-    v.includes('non e ancora attiva') ||
-    v.includes('ancora non esiste') ||
-    v.includes('non l ho ancora aperta') ||
-    v.includes('devo aprirla')
-  ) {
-    return 'Da costituire';
-  }
-  if (
-    /(ho un impresa|ho una impresa|ho un azienda|ho una azienda|abbiamo un impresa|abbiamo una azienda|azienda attiva|impresa attiva|attivita attiva|attivita avviata|gia attiva|già attiva|gia esistente|già esistente|impresa agricola|azienda agricola|operativa|gia operativa|già operativa|attiva|esiste gia|esiste già|ho gia l azienda|ho già l azienda|siamo gia operativi|siamo già operativi|societa attiva|società attiva)/.test(
-      v,
-    )
-  ) {
-    return 'PMI';
-  }
-  if (v.includes('pmi') || v.includes('piccola') || v.includes('media impresa')) return 'PMI';
-  if (v.includes('srl') || v.includes('s r l') || v.includes('spa') || v.includes('s p a') || v.includes('snc') || v.includes('s a s')) return 'PMI';
-  if (v.includes('professionista') || v.includes('libero professionista') || v.includes('partita iva')) return 'Professionista';
-  if (v.includes('associazione') || v.includes('ets') || v.includes('terzo settore') || v.includes('onlus')) return 'ETS/Associazione';
-  return null;
-}
-
-function extractSectorFromMessage(message: string): string | null {
-  const raw = message.trim();
-  if (raw.length < 3) return null;
-
-  const n = normalizeForMatch(raw);
-  const known = [
-    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
-    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b'] },
-    { sector: 'ristorazione', hints: ['ristorazione', 'ristorante', 'bar', 'pizzeria', 'food'] },
-    { sector: 'commercio', hints: ['commercio', 'negozio', 'retail', 'ecommerce', 'e commerce'] },
-    { sector: 'manifattura', hints: ['manifattura', 'industria', 'produzione', 'fabbrica'] },
-    { sector: 'artigianato', hints: ['artigianato', 'artigiano', 'bottega'] },
-    { sector: 'edilizia', hints: ['edilizia', 'edile', 'costruzioni', 'cantiere'] },
-    { sector: 'pesca', hints: ['pesca', 'ittico', 'acquacoltura'] },
-    { sector: 'logistica', hints: ['logistica', 'magazzino', 'supply chain'] },
-    { sector: 'trasporti', hints: ['trasporti', 'autotrasporto', 'mobilita'] },
-    { sector: 'ICT', hints: ['ict', 'software', 'saas', 'digitale', 'ai', 'intelligenza artificiale', 'cybersecurity'] },
-    { sector: 'servizi', hints: ['servizi', 'consulenza', 'professionale'] },
-    { sector: 'sanita', hints: ['sanita', 'sanitario', 'medico', 'healthcare'] },
-    { sector: 'formazione', hints: ['formazione', 'didattica', 'academy'] },
-    { sector: 'cultura', hints: ['cultura', 'museo', 'museale', 'spettacolo'] },
-    { sector: 'energia', hints: ['energia', 'energetico', 'fotovoltaico', 'rinnovabile', 'efficientamento'] },
-    { sector: 'moda', hints: ['moda', 'fashion', 'abbigliamento'] },
-    { sector: 'design', hints: ['design', 'arredo', 'interior'] },
-  ];
-  for (const entry of known) {
-    if (entry.hints.some((hint) => ` ${n} `.includes(` ${normalizeForMatch(hint)} `))) return entry.sector;
-  }
-
-  const m = raw.match(/settore\s*[:\-]?\s*([^\n,;.]{3,80})/i);
-  if (m?.[1]) return m[1].trim();
-
-  return null;
-}
-
-function isAffirmativeConfirmation(message: string): boolean {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return /\b(si|sì|ok|confermo|esatto|corretto|va bene|proprio li|proprio li)\b/.test(n);
-}
-
-function extractFundingGoalFromMessage(message: string): string | null {
-  const raw = message.trim();
-  if (raw.length < 8) return null;
-  const n = normalizeForMatch(raw);
-
-  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
-
-  const humanConsultantOnly =
-    /\b(consulen|persona|umano|ricontatt|richiam|farmi chiam|telefon|parlare con)\b/.test(n) &&
-    !hasConcreteSignal;
-
-  if (humanConsultantOnly) return null;
-
-  const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
-  const hit = triggers.find((t) => n.includes(t));
-
-  if (hit) {
-    const idx = n.indexOf(hit);
-    if (idx >= 0) {
-        const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
-        const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
-        if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
-    }
-  }
-  
-  // if no trigger but starts with "bando per " or "contributi per "
-  const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
-  if (prefixMatch) {
-    const startIdx = n.indexOf(prefixMatch[0]) + prefixMatch[0].length;
-    const cleaned = raw.slice(startIdx).trim();
-    if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
-  }
-
-  // Fallback: if it has a concrete signal, take the whole message
-  if (hasConcreteSignal && raw.split(' ').length >= 3) {
-      return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
-  }
-
-  return null;
-}
-
-function hasConcreteObjectiveSignal(message: string): boolean {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return /\b(finanz|invest|acquist|realizz|svilupp|ammodern|digitalizz|ristruttur|espander|assunz|aprire|avviare|avvio|apertura|startup|autoimpiego|fotovolta|macchinar|software|ecommerce|export|internazionalizz)\b/.test(
-    n,
-  );
-}
-
-function isQuestionLike(message: string) {
-  const t = message.trim();
-  if (!t) return false;
-  if (t.includes('?')) return true;
-  const n = normalizeForMatch(t);
-  return (
-    n.startsWith('come ') ||
-    n.startsWith('cosa ') ||
-    n.startsWith('quali ') ||
-    n.startsWith('quanto ') ||
-    n.startsWith('quando ') ||
-    n.startsWith('posso ') ||
-    n.startsWith('mi conviene') ||
-    n.includes('differenza tra') ||
-    n.includes('che cos') ||
-    n.includes('requisiti') ||
-    n.includes('spese ammiss') ||
-    n.includes('a sportello') ||
-    n.includes('de minimis')
-  );
-}
-
-function isSmallTalkOnly(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  const compact = n.replace(/\s+/g, ' ').trim();
-  const small = [
-    'ok',
-    'okay',
-    'va bene',
-    'perfetto',
-    'bene',
-    'grazie',
-    'grazie mille',
-    'ok grazie',
-    'capito',
-    'chiaro',
-    'ciao',
-    'salve'
-  ];
-  if (small.includes(compact)) return true;
-  return compact.length <= 3;
-}
-
-function isGreeting(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    n === 'ciao' ||
-    n === 'salve' ||
-    n.includes('buongiorno') ||
-    n.includes('buonasera') ||
-    n.includes('buon pomeriggio') ||
-    n.includes('hey') ||
-    n.includes('ehi')
-  );
-}
-
-function isConversationalIntent(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    n.includes('possiamo prima parlare') ||
-    n.includes('parliamo prima') ||
-    n.includes('prima parliamo') ||
-    n.includes('spiegami meglio') ||
-    n.includes('fammi capire') ||
-    n.includes('non ho capito')
-  );
-}
-
-function wantsQuestionsFirst(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    (n.includes('domand') && (n.includes('prima') || n.includes('qualche'))) ||
-    n.includes('parlare prima') ||
-    n.includes('prima di tutto')
-  );
-}
-
-function wantsToProceedToMatching(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    n.includes('procediamo') ||
-    n.includes('andiamo avanti') ||
-    n.includes('passiamo al matching') ||
-    n.includes('facciamo matching') ||
-    n.includes('trova bandi') ||
-    n.includes('scanner bandi')
-  );
-}
-
-function wantsHumanConsultant(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-  return (
-    (n.includes('consulente') && (n.includes('umano') || n.includes('persona') || n.includes('vero'))) ||
-    n.includes('parlare con un consulente') ||
-    n.includes('voglio parlare con un consulente') ||
-    n.includes('farmi chiamare') ||
-    n.includes('ricontattare') ||
-    n.includes('contatto telefonico')
-  );
-}
-
-function parseEmail(message: string): string | null {
-  const m = message.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
-  return m?.[0]?.toLowerCase() ?? null;
-}
-
-function normalizePhone(raw: string): string | null {
-  let v = raw.trim();
-  if (!v) return null;
-  v = v.replace(/[^\d+]/g, '');
-  if (v.startsWith('00')) v = `+${v.slice(2)}`;
-  if (!v.startsWith('+') && /^\d+$/.test(v)) {
-    // Assume Italian local/international number without +.
-    v = v;
-  }
-  const digitsOnly = v.replace(/\D/g, '');
-  if (digitsOnly.length < 8 || digitsOnly.length > 15) return null;
-  if (v.startsWith('+')) return `+${digitsOnly}`;
-  return digitsOnly;
-}
-
-function parsePhone(message: string): string | null {
-  const m = message.match(/(\+?\d[\d\s().-]{6,}\d)/);
-  if (!m?.[1]) return null;
-  return normalizePhone(m[1]);
-}
-
-function shouldAttemptStepAnswer(step: Step, message: string, isNewSession = false) {
-  const lowered = message.toLowerCase();
-  if (!message.trim()) return false;
-  if (wantsToProceedToMatching(message)) return false;
-
-  if (step === 'location') return Boolean(parseRegionAndMunicipality(message).region || detectRegionAnywhere(message));
-  if (step === 'budget') return Boolean(parseBudgetEUR(message) !== null || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
-  if (step === 'contactEmail') return Boolean(parseEmail(message));
-  if (step === 'contactPhone') return Boolean(parsePhone(message));
-  if (step === 'activityType') return Boolean(parseActivityType(message));
-  
-  if (step === 'fundingGoal') {
-    if (isNewSession) return Boolean(extractFundingGoalFromMessage(message));
-    return true; // if we explicitly asked for the goal, we are more permissive
-  }
-  if (step === 'sector') return Boolean(extractSectorFromMessage(message));
-  if (step === 'ateco') return Boolean(extractAtecoFromMessage(message) || /\b(non so|n\/a|na|non disponibile|non saprei|boh)\b/.test(lowered));
-  if (step === 'employees') return Boolean(parseEmployees(message) !== null);
-  if (step === 'contributionPreference') return Boolean(parseContributionPreference(message));
-  return false;
-}
-
-function isExplicitAnswerForStep(step: Step, message: string) {
-  const n = normalizeForMatch(message);
-  if (!n) return false;
-
-  if (step === 'fundingGoal') {
-    if (extractFundingGoalFromMessage(message)) return true;
-    return /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi)\b/.test(
-      n
-    );
-  }
-
-  return shouldAttemptStepAnswer(step, message);
-}
-
-function genericQuestionReply(message: string) {
-  const n = normalizeForMatch(message);
-  if (!n || (!isQuestionLike(message) && !message.includes('?'))) return null;
-  return 'Certo. Ti rispondo in modo pratico su requisiti, tempistiche e scelta del bando più adatto al tuo caso.';
-}
-
-function getNextHandoffStep(profile: UserProfile): Step {
-  if (!profile.fundingGoal) return 'fundingGoal';
-  if (!profile.activityType) return 'activityType';
-  if (!profile.location.region) return 'location';
-  if (!profile.budgetAnswered) return 'budget';
-  if (!profile.contactEmail) return 'contactEmail';
-  if (!profile.contactPhone) return 'contactPhone';
-  return 'ready';
-}
-
-function profileRecap(profile: UserProfile) {
-  const bits: string[] = [];
-  const r = profile.location?.region ?? null;
-  const m = profile.location?.municipality ?? null;
-  if (r && m) bits.push(`${r} (${m})`);
-  else if (r) bits.push(r);
-
-  if (profile.activityType) bits.push(profile.activityType);
-  if (profile.businessExists === true) bits.push('attivita gia avviata');
-  if (profile.businessExists === false) bits.push('nuova attivita da avviare');
-
-  const goal = (profile.fundingGoal ?? '').trim();
-  if (goal) bits.push(goal.length > 80 ? `${goal.slice(0, 80).trim()}…` : goal);
-
-  const sector = (profile.sector ?? '').trim();
-  if (sector) bits.push(`settore ${sector}`);
-
-  const ateco = (profile.ateco ?? '').trim();
-  if (ateco && /\d{2}/.test(ateco)) bits.push(`ATECO ${ateco}`);
-  if (profile.age !== null) bits.push(`${profile.age} anni`);
-  if (profile.employmentStatus) bits.push(profile.employmentStatus);
-  if (profile.legalForm) bits.push(profile.legalForm);
-
-  return bits.length ? `Ok, mi segno: ${bits.join(' · ')}.` : null;
-}
-
-function answerFinanceQuestion(message: string): string | null {
-  const faq = answerFaq(message);
-  if (faq) return faq;
-
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-
-  if (n.includes('resto al sud')) {
-    return 'Resto al Sud sostiene avvio o sviluppo di nuove attività nelle aree ammesse, con mix tra contributo e finanziamento. Se mi dai regione e obiettivo, ti dico subito se sei compatibile.';
-  }
-
-  if (n.includes('autoimpiego') || (n.includes('centro') && n.includes('nord'))) {
-    return 'Autoimpiego Centro-Nord è una misura per nuove attività nelle regioni ammesse. Conta la coerenza tra territorio, profilo del proponente e spese previste.';
-  }
-
-  if (n.includes('differenza') && (n.includes('fondo perduto') || n.includes('contributo'))) {
-    return "Fondo perduto: quota che non restituisci. Finanziamento agevolato: prestito con condizioni migliori; voucher e credito d'imposta sono strumenti mirati su spese specifiche.";
-  }
-
-  if (n.includes('ateco') && (n.includes('cos') || n.includes('che') || n.includes('trovo') || n.includes('dove'))) {
-    return "Il codice ATECO identifica l'attività economica principale. Se non lo conosci, descrivimi cosa fai e ti propongo il codice più probabile.";
-  }
-
-  if (n.includes('de minimis')) {
-    return 'Il de minimis è un tetto di aiuti pubblici su 3 esercizi. Per capire la tua capienza devo sapere se hai già ricevuto contributi negli ultimi 3 anni.';
-  }
-
-  if (n.includes('a sportello')) {
-    return 'A sportello: conta l\'ordine di invio, quindi preparazione anticipata. A graduatoria: conta il punteggio del progetto entro una finestra temporale.';
-  }
-
-  if (n.includes('spese ammiss')) {
-    return 'Le spese ammissibili dipendono dal bando: in genere investimenti, digitalizzazione, consulenze e talvolta personale/opere. Se mi dai il nome del bando, ti rispondo in modo preciso.';
-  }
-
-  const hasFinanceKeywords =
-    n.includes('bando') ||
-    n.includes('contribut') ||
-    n.includes('agevol') ||
-    n.includes('fondo') ||
-    n.includes('voucher') ||
-    n.includes('credito') ||
-    n.includes('incentiv') ||
-    n.includes('finanziamento');
-
-  // Do not return generic help message if it's a discovery turn (handled by extraction)
-  if (hasFinanceKeywords && !/\?$/.test(n) && !isQuestionLike(message)) return null;
-
-  if (hasFinanceKeywords) return 'Ti aiuto volentieri a trovare il bando giusto. Dimmi cosa vuoi finanziare e in quale regione.';
-
-  return null;
-}
-
-function parseContributionPreference(message: string): ContributionPreference | null {
-  const n = normalizeForMatch(message);
-  if (!n) return null;
-  if (n.includes('fondo perduto')) return 'fondo_perduto';
-  if (n.includes('agevolato') || n.includes('finanziamento')) return 'finanziamento_agevolato';
-  if (n.includes('credito imposta') || n.includes('credito d imposta')) return 'credito_imposta';
-  if (n.includes('voucher')) return 'voucher';
-  if (n.includes('entrambi') || n.includes('misto') || n.includes('tutti')) return 'misto';
-  if (n.includes('non importa') || n.includes('qualsiasi')) return 'non_importa';
-  return null;
-}
-
-function isSouthYouthStartupProfile(args: {
-  businessExists: boolean | null;
-  region: string | null;
-  age: number | null;
-  ageBand: UserProfile['ageBand'];
-  employmentStatus: string | null;
-}) {
-  if (args.businessExists !== false) return false;
-  if (!args.region || !SOUTH_PRIORITY_REGIONS.has(args.region)) return false;
-  const under35 = (args.age !== null && args.age <= 35) || args.ageBand === 'under35';
-  if (!under35) return false;
-  const employmentNorm = normalizeForMatch(args.employmentStatus ?? '');
-  return /(disoccupat|inoccupat|neet|working poor|senza lavoro|non occupat)/.test(employmentNorm);
-}
-
-function computeScanHash(p: UserProfile) {
-  const bits = [
-    p.businessExists,
-    p.location?.region,
-    p.fundingGoal,
-    p.sector,
-    p.budgetAnswered ? p.revenueOrBudgetEUR : null,
-    p.ageBand,
-    p.employmentStatus
-  ];
-  return bits.map(String).join('|');
-}
-
-export async function POST(request: Request) {
-  const rate = checkRateLimit(request, { keyPrefix: 'conversation', windowMs: 60_000, max: 25 });
-  if (!rate.ok) {
-    return NextResponse.json(
-      { error: 'Stai inviando troppi messaggi. Attendi qualche istante.' },
-      { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } }
-    );
-  }
-
-  try {
-    const body = await request.json();
-    const { message, interactionId: rawInteractionId } = payloadSchema.parse(body);
-    const trimmed = message.trim();
-    const interactionId = rawInteractionId ?? `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-
-    const session = readSessionCookie() ?? {
-      step: 'fundingGoal' as Step,
-      userProfile: emptyProfile(),
-      askedCounts: {},
-      lastAskedStep: null,
-      recentTurns: [],
-      qaMode: false
-    };
-
-    // Persist user message immediately so the next turn "remembers" even with streaming.
-    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
-    const lastTurn = turns[turns.length - 1] ?? null;
-    if (!(lastTurn?.role === 'user' && lastTurn.text === trimmed)) {
-      turns.push({ role: 'user', text: trimmed });
-    }
-    session.recentTurns = safeSliceTurns(turns, 16); // Buffer set to match AI context limit
-    (session as any).pendingInteractionId = interactionId;
-    writeSessionCookie(session);
-
-    let profile = session.userProfile;
-    let profileMemory = session.profileMemory ?? emptyProfileMemory();
-    let profileProgressedThisTurn = false;
-
-    // --- STREAMING ORCHESTRATION ---
-    const historyForOrchestrator = (session.recentTurns ?? [])
-      .slice(-16) // Increased from 8 to 16
-      .map(t => ({ role: t.role, text: t.text }));
-
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          let lastMetadata: any = null;
-          
-          for await (const chunk of runStreamingChat(trimmed, session.userProfile as UserProfile, historyForOrchestrator)) {
-            if (chunk.type === 'metadata') {
-              lastMetadata = chunk.content;
-              
-              // Process final state for metadata delivery
-              const profile = lastMetadata.mergedProfile;
-              const scanReadiness = evaluateScanReadiness(profile);
-              const scanReady = scanReadiness.ready;
-              const hardScanReady = scanReadiness.hardScanReady;
-              const softScanReady = scanReadiness.softScanReady;
-              const adaptiveReadiness = isScanReadyAdaptive(profile);
-              const autoReady = scanReady || adaptiveReadiness.ready;
-              const scanHash = (hardScanReady || softScanReady || adaptiveReadiness.ready) ? computeScanHash(profile) : null;
-              const scanIntentRequested =
-                lastMetadata.finalAction === 'run_scan' ||
-                lastMetadata.finalAction === 'refine_after_scan' ||
-                lastMetadata.intent === 'scan_ready' ||
-                lastMetadata.intent === 'discovery';
-              
-              const shouldScanNow = Boolean(
-                scanIntentRequested &&
-                ((autoReady && (scanHash !== session.lastScanHash || lastMetadata.intent === 'scan_ready' || lastMetadata.intent === 'discovery')) ||
-                 (session.lastAskedStep === 'preScanConfirm' && hardScanReady))
-              );
-
-              const nextStep = shouldScanNow ? 'ready' : getNextStep(profile);
-              const mode = inferMode({
-                 handoffRequested: lastMetadata.finalAction === 'handoff_human',
-                 shouldScanNow,
-                 qaModeActive: lastMetadata.intent === 'general_qa' || lastMetadata.intent === 'measure_question'
-              });
-
-              const meta = withConversationMeta({
-                userProfile: profile,
-                step: nextStep,
-                assistantText: lastMetadata.response_text || "",
-                readyToScan: shouldScanNow,
-                mode,
-                action: shouldScanNow ? 'run_scan' : lastMetadata.finalAction,
-                aiSource: 'openai',
-                needsClarification: !shouldScanNow && lastMetadata.finalAction === 'ask_clarification',
-                nextQuestionField: nextBestFieldFromStep(nextStep as Step),
-                profileCompletenessScore: profileCompletenessScore(normalizeProfile(profile), scanReadiness.missingSignals),
-                scanReadinessReason: scanReadinessReasonForStep(nextStep as Step, profile),
-                scanHash: shouldScanNow ? scanHash : null,
-                strategicFeedback: lastMetadata.strategicFeedback
-              });
-
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'metadata', content: { ...meta, interactionId } })}\n\n`)
-              );
-            } else {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-            }
-          }
-        } catch (err) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: 'Errore nello streaming' })}\n\n`));
-        } finally {
-          controller.close();
-        }
-      }
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      }
-    });
-
-  } catch (e) {
-    if (e instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Payload non valido.' }, { status: 422 });
-    }
-    console.error('Conversation Error:', e);
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'Errore conversazione.' }, { status: 500 });
-  }
-}
-
-export async function PUT(request: Request) {
-  try {
-    const body = await request.json();
-    const { interactionId, assistantText, userProfile, step, lastScanHash } = commitSchema.parse(body);
-
-    const session = readSessionCookie();
-    if (!session) return NextResponse.json({ ok: false, error: 'Sessione non trovata.' }, { status: 404 });
-
-    if ((session as any).lastCommittedInteractionId === interactionId) {
-      return NextResponse.json({ ok: true });
-    }
-
-    session.userProfile = userProfile as UserProfile;
-    session.step = step as Step;
-    if (typeof lastScanHash !== 'undefined') session.lastScanHash = lastScanHash ?? null;
-
-    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
-    const lastTurn = turns[turns.length - 1] ?? null;
-    if (!(lastTurn?.role === 'assistant' && lastTurn.text === assistantText)) {
-      turns.push({ role: 'assistant', text: assistantText });
-    }
-    session.recentTurns = safeSliceTurns(turns, 16);
-
-    (session as any).lastCommittedInteractionId = interactionId;
-    (session as any).pendingInteractionId = null;
-    writeSessionCookie(session);
-
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof z.ZodError) {
-      return NextResponse.json({ ok: false, error: 'Payload non valido.' }, { status: 422 });
-    }
-    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'Errore commit.' }, { status: 500 });
-  }
-}
-
-export async function DELETE() {
+function deleteConversationCookie() {
   cookies().set(COOKIE_NAME, '', {
     httpOnly: true,
     sameSite: 'lax',
@@ -1824,92 +214,269 @@ export async function DELETE() {
     path: '/',
     maxAge: 0
   });
-  return NextResponse.json({ ok: true });
 }
 
-function applyAnswer(profile: UserProfile, step: Step, message: string): { profile: UserProfile; error: string | null } {
-  const next = { ...profile };
-  const lowered = message.toLowerCase().trim();
+function deleteRateCookie() {
+  cookies().set(RATE_COOKIE, '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 0
+  });
+}
 
-  if (step === 'activityType') {
-    if (hasBusinessContext(profile) && needsFounderEligibilityData(profile)) {
-      const age = parseAge(message);
-      const ageBand = parseAgeBand(message);
-      const employment = parseEmploymentStatus(message);
-      if (age !== null) next.age = age;
-      if (ageBand !== null) next.ageBand = ageBand;
-      if (employment !== null) next.employmentStatus = employment;
-      if (age !== null || ageBand !== null || employment !== null) {
-        return { profile: next, error: null };
-      }
-    }
-    const act = parseActivityType(message);
-    if (!act) return { profile, error: "Non ho capito se l'attività è già attiva o da aprire. Puoi chiarire?" };
-    next.activityType = act;
-    next.businessExists = parseBusinessExistsFromMessage(message);
-  } else if (step === 'sector') {
-    const s = extractSectorFromMessage(message);
-    if (!s) return { profile, error: "Qual è il settore principale di attività (es. agricoltura, turismo, software)?" };
-    next.sector = s;
-  } else if (step === 'ateco') {
-    const a = extractAtecoFromMessage(message);
-    if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
-        next.atecoAnswered = true;
-        return { profile: next, error: null };
-    }
-    if (!a) return { profile, error: "Puoi indicarmi il codice ATECO o descrivere meglio cosa fa l'azienda?" };
-    next.ateco = a;
-    next.atecoAnswered = true;
-  } else if (step === 'location') {
-    const loc = parseRegionAndMunicipality(message);
-    const anywhere = detectRegionAnywhere(message);
-    const finalRegion = loc.region ?? anywhere;
-    if (!finalRegion) return { profile, error: "In quale regione ha sede l'attività o il progetto?" };
-    next.location = { region: finalRegion, municipality: loc.municipality };
-    next.locationNeedsConfirmation = false;
-  } else if (step === 'employees') {
-    const e = parseEmployees(message);
-    if (e === null) return { profile, error: "Quanti dipendenti o addetti ha l'azienda? Indica un numero indicativo." };
-    next.employees = e;
-  } else if (step === 'fundingGoal') {
-    const goal = extractFundingGoalFromMessage(message);
-    if (!goal) {
-      const n = normalizeForMatch(message);
-      const hasActionVerbs = /(voglio|vorrei|cerco|finanziare|bando|contributo|spese|acquisto|aprire|avviare|devo)/.test(n);
-      
-      if (!hasActionVerbs) {
-        return { profile, error: "Cosa vuoi finanziare in concreto con il bando? (es. macchinari, software, assunzioni, ristrutturazione)" };
-      }
+function ensureConversationId(provided?: string | null) {
+  const byPayload = provided?.trim();
+  if (byPayload && byPayload.startsWith('conv_')) return byPayload;
+  const byCookie = readConversationCookie();
+  if (byCookie) return byCookie;
+  return `conv_${crypto.randomUUID()}`;
+}
 
-      const isTooShort = message.split(' ').length < 3 && message.length < 15;
-      if (isTooShort) return { profile, error: "Puoi dirmi in modo un po' più specifico cosa vorresti finanziare?" };
-      
-      next.fundingGoal = message.trim();
-    } else {
-      next.fundingGoal = goal;
-    }
-  } else if (step === 'budget') {
-    if (/\b(non so|non saprei|boh|na|n\/a|non disponibile)\b/.test(lowered)) {
-        next.budgetAnswered = true;
-        return { profile: next, error: null };
-    }
-    const b = parseBudgetEUR(message);
-    if (b === null) return { profile, error: "Qual è l'importo indicativo dell'investimento? (es. 50.000 euro)" };
-    next.revenueOrBudgetEUR = b;
-    next.budgetAnswered = true;
-  } else if (step === 'contributionPreference') {
-    const cp = parseContributionPreference(message);
-    if (!cp) return { profile, error: "Preferisci fondo perduto, finanziamento agevolato o ti interessano entrambi?" };
-    next.contributionPreference = cp;
-  } else if (step === 'contactEmail') {
-    const email = parseEmail(message);
-    if (!email) return { profile, error: "Indica una mail valida per ricevere il riepilogo." };
-    next.contactEmail = email;
-  } else if (step === 'contactPhone') {
-    const phone = parsePhone(message);
-    if (!phone) return { profile, error: "Indica un numero di telefono valido per essere ricontattato." };
-    next.contactPhone = phone;
+export async function POST(request: Request) {
+  const csrf = rejectCrossSiteMutation(request);
+  if (csrf) return csrf;
+
+  const memoryRate = checkRateLimit(request, { keyPrefix: 'conversation', windowMs: 60_000, max: 25 });
+  if (!memoryRate.ok) {
+    return NextResponse.json(
+      { error: 'Stai inviando troppi messaggi. Attendi qualche istante.' },
+      { status: 429, headers: { 'Retry-After': String(memoryRate.retryAfterSec) } }
+    );
   }
 
-  return { profile: next, error: null };
+  const cookieRate = checkCookieRateLimit();
+  if (!cookieRate.ok) {
+    return NextResponse.json(
+      { error: 'Stai inviando troppi messaggi. Attendi qualche istante.' },
+      { status: 429, headers: { 'Retry-After': String(cookieRate.retryAfterSec) } }
+    );
+  }
+
+  try {
+    const parsed = payloadSchema.parse(await request.json());
+    const trimmedMessage = parsed.message.trim();
+    const interactionId = parsed.interactionId ?? `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const conversationId = ensureConversationId(parsed.conversationId ?? null);
+    writeConversationCookie(conversationId);
+
+    const session = ensureSession(conversationId);
+    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
+    const lastTurn = turns[turns.length - 1] ?? null;
+    if (!(lastTurn?.role === 'user' && lastTurn.text === trimmedMessage)) {
+      turns.push({ role: 'user', text: trimmedMessage });
+    }
+
+    const focusGrantId = parsed.focusedGrantId?.trim() || null;
+    const focusGrantTitle = parsed.focusedGrantTitle?.trim() || null;
+    const shouldForceGrantFocus = Boolean(parsed.focusGrantContext && (focusGrantId || focusGrantTitle));
+    const seededUserProfile = shouldForceGrantFocus
+      ? ({
+          ...(session.userProfile ?? {}),
+          activeMeasureId: focusGrantId ?? (session.userProfile?.activeMeasureId ?? null),
+          activeMeasureTitle: focusGrantTitle ?? (session.userProfile?.activeMeasureTitle ?? null),
+        } as UserProfile)
+      : (session.userProfile as UserProfile);
+
+    const seededSession = {
+      ...session,
+      userProfile: seededUserProfile,
+      recentTurns: safeSliceTurns(turns, 24),
+      updatedAt: new Date().toISOString(),
+      conversationSummary: buildRollingSummary({
+        profile: seededUserProfile,
+        turns: safeSliceTurns(turns, 24)
+      })
+    } as Session;
+    (seededSession as any).pendingInteractionId = interactionId;
+    upsertSession(seededSession);
+
+    const historyForOrchestrator = safeSliceTurns(turns, 24).map((turn) => ({ role: turn.role, text: turn.text }));
+    const encoder = new TextEncoder();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          let finalAssistantText = '';
+          for await (const chunk of runStreamingChat(trimmedMessage, seededUserProfile, historyForOrchestrator, {
+            strictFocusedGrant: shouldForceGrantFocus,
+          })) {
+            if (chunk.type === 'metadata') {
+              const rawMeta = chunk.content ?? {};
+              const mergedProfile = rawMeta.mergedProfile as UserProfile;
+              const scanReadiness = evaluateScanReadiness(mergedProfile);
+              const adaptiveReadiness = evaluateAdaptiveScanReadiness(mergedProfile);
+              const scanHash = scanReadiness.hardScanReady || adaptiveReadiness.ready ? computeScanHash(mergedProfile) : null;
+              const scanIntentRequested =
+                rawMeta.finalAction === 'run_scan' ||
+                rawMeta.finalAction === 'refine_after_scan' ||
+                rawMeta.intent === 'scan_ready' ||
+                rawMeta.intent === 'discovery';
+              const technicalQaTurn = rawMeta.intent === 'measure_question' || rawMeta.intent === 'general_qa';
+
+              const shouldScanNow = Boolean(
+                scanIntentRequested &&
+                  !technicalQaTurn &&
+                  (scanReadiness.ready || adaptiveReadiness.ready || (session.lastAskedStep === 'preScanConfirm' && scanReadiness.hardScanReady)) &&
+                  (scanHash !== session.lastScanHash || rawMeta.intent === 'scan_ready' || rawMeta.intent === 'discovery')
+              );
+
+              const nextStep = shouldScanNow ? 'ready' : nextStepFromProfile(mergedProfile);
+              const mode = inferMode({
+                handoffRequested: rawMeta.finalAction === 'handoff_human',
+                shouldScanNow,
+                qaModeActive: technicalQaTurn
+              });
+
+              const finalMeta = withConversationMeta({
+                userProfile: mergedProfile,
+                step: nextStep,
+                assistantText: rawMeta.response_text || '',
+                readyToScan: shouldScanNow,
+                mode,
+                action: shouldScanNow ? 'run_scan' : rawMeta.finalAction,
+                aiSource: rawMeta.response_text ? 'openai' : 'error',
+                needsClarification: !shouldScanNow && rawMeta.finalAction === 'ask_clarification',
+                nextQuestionField: nextBestFieldFromStep(nextStep),
+                profileCompletenessScore: profileCompletenessScore(normalizeProfile(mergedProfile), scanReadiness.missingSignals),
+                scanReadinessReason: scanReadinessReasonForStep(nextStep, mergedProfile),
+                scanHash: shouldScanNow ? scanHash : null,
+                strategicFeedback: rawMeta.strategicFeedback,
+                interactionId,
+                conversationId,
+                modelUsed: rawMeta.modelUsed,
+                routingReason: rawMeta.routingReason,
+                confidence: rawMeta.confidence,
+                citations: rawMeta.citations ?? [],
+                estimatedWithWarning: Boolean(rawMeta.estimatedWithWarning),
+                factSource: rawMeta.factSource,
+                groundingStatus: rawMeta.groundingStatus
+              });
+
+              finalAssistantText = String(finalMeta.assistantText || finalAssistantText);
+              const updatedSession = getSession(conversationId) ?? session;
+              const updatedTurns = Array.isArray(updatedSession.recentTurns) ? [...updatedSession.recentTurns] : [];
+              if (finalAssistantText) {
+                const last = updatedTurns[updatedTurns.length - 1];
+                if (!(last?.role === 'assistant' && last.text === finalAssistantText)) {
+                  updatedTurns.push({ role: 'assistant', text: finalAssistantText });
+                }
+              }
+              const streamedSession = {
+                ...updatedSession,
+                userProfile: mergedProfile,
+                step: nextStep,
+                qaMode: technicalQaTurn,
+                lastAskedStep: nextStep === 'ready' ? updatedSession.lastAskedStep ?? null : nextStep,
+                recentTurns: safeSliceTurns(updatedTurns, 24),
+                conversationSummary: buildRollingSummary({
+                  profile: mergedProfile,
+                  turns: safeSliceTurns(updatedTurns, 24),
+                  intent: rawMeta.intent ?? null,
+                  action: shouldScanNow ? 'run_scan' : rawMeta.finalAction
+                }),
+                updatedAt: new Date().toISOString()
+              } as Session;
+              (streamedSession as any).pendingInteractionId = interactionId;
+              upsertSession(streamedSession);
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'metadata', content: finalMeta })}\n\n`));
+            } else if (chunk.type === 'text') {
+              finalAssistantText += String(chunk.content ?? '');
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: chunk.content ?? '' })}\n\n`));
+            } else if (chunk.type === 'thinking') {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'thinking', content: Boolean(chunk.content) })}\n\n`));
+            } else if (chunk.type === 'error') {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ type: 'error', content: String(chunk.content ?? 'Errore conversazione.') })}\n\n`)
+              );
+            }
+          }
+        } catch (error) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'error', content: publicError(error, 'Errore nella generazione della risposta.') })}\n\n`
+            )
+          );
+        } finally {
+          controller.close();
+        }
+      }
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive'
+      }
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: 'Payload non valido.' }, { status: 422 });
+    }
+    return NextResponse.json({ error: publicError(error, 'Errore conversazione.') }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  const csrf = rejectCrossSiteMutation(request);
+  if (csrf) return csrf;
+
+  try {
+    const payload = commitSchema.parse(await request.json());
+    const conversationId = ensureConversationId(payload.conversationId ?? null);
+    const session = getSession(conversationId);
+    if (!session) return NextResponse.json({ ok: false, error: 'Sessione non trovata.' }, { status: 404 });
+
+    if ((session as any).lastCommittedInteractionId === payload.interactionId) {
+      return NextResponse.json({ ok: true, conversationId });
+    }
+
+    const turns = Array.isArray(session.recentTurns) ? [...session.recentTurns] : [];
+    const lastTurn = turns[turns.length - 1] ?? null;
+    if (!(lastTurn?.role === 'assistant' && lastTurn.text === payload.assistantText)) {
+      turns.push({ role: 'assistant', text: payload.assistantText });
+    }
+
+    const nextSession: Session = {
+      ...session,
+      conversationId,
+      userProfile: payload.userProfile as UserProfile,
+      step: payload.step as Step,
+      lastScanHash: typeof payload.lastScanHash !== 'undefined' ? payload.lastScanHash ?? null : session.lastScanHash ?? null,
+      recentTurns: safeSliceTurns(turns, 24),
+      conversationSummary:
+        payload.summarySnapshot && payload.summarySnapshot.trim()
+          ? payload.summarySnapshot.trim()
+          : buildRollingSummary({
+              profile: payload.userProfile as UserProfile,
+              turns: safeSliceTurns(turns, 24)
+            }),
+      updatedAt: new Date().toISOString()
+    } as Session;
+    (nextSession as any).lastCommittedInteractionId = payload.interactionId;
+    (nextSession as any).pendingInteractionId = null;
+
+    upsertSession(nextSession);
+    writeConversationCookie(conversationId);
+    return NextResponse.json({ ok: true, conversationId });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ ok: false, error: 'Payload non valido.' }, { status: 422 });
+    }
+    return NextResponse.json({ ok: false, error: publicError(error, 'Errore commit.') }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  const csrf = rejectCrossSiteMutation(request);
+  if (csrf) return csrf;
+
+  const conversationId = readConversationCookie();
+  if (conversationId) deleteSession(conversationId);
+  deleteConversationCookie();
+  deleteRateCookie();
+  return NextResponse.json({ ok: true });
 }

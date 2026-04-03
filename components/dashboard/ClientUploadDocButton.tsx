@@ -6,11 +6,13 @@ import { useRouter } from 'next/navigation';
 export function ClientUploadDocButton({
   applicationId,
   requirementKey,
-  documentLabel
+  documentLabel,
+  onUploadComplete
 }: {
   applicationId: string;
   requirementKey?: string;
   documentLabel: string;
+  onUploadComplete?: () => void;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -36,6 +38,7 @@ export function ClientUploadDocButton({
 
       setDone(true);
       router.refresh();
+      onUploadComplete?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload fallito.');
     } finally {

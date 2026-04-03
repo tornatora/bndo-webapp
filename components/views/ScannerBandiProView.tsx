@@ -5,14 +5,20 @@ import { BandiFormView } from '@/components/views/BandiFormView';
 export function ScannerBandiProView({
   initialGrantId = null,
   onGrantSelect,
-  onGrantDetail
+  onGrantDetail,
+  embedded,
+  guestMobileSafe = false
 }: {
   initialGrantId?: string | null;
   onGrantSelect?: (grantId: string) => void;
   onGrantDetail?: (grantId: string) => void;
+  embedded?: boolean;
+  guestMobileSafe?: boolean;
 }) {
+  const shellClassName = guestMobileSafe ? 'scanner-pro-shell scanner-pro-shell-guest' : 'scanner-pro-shell';
+
   return (
-    <main className="w-full px-4 pb-10 md:px-8">
+    <main className={shellClassName}>
       <BandiFormView initialGrantId={initialGrantId} onGrantSelect={onGrantSelect} onGrantDetail={onGrantDetail} />
     </main>
   );

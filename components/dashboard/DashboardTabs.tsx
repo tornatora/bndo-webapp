@@ -49,6 +49,16 @@ function DashboardIcon({ name }: { name: DashboardShellItem['icon'] }) {
       </svg>
     );
   }
+  if (name === 'catalogo_bandi') {
+    return (
+      <svg {...common}>
+        <path
+          {...stroke}
+          d="M12 20s-6.5-3.9-8.4-7.6C2.2 9.9 3.3 7 5.9 6.2A4.7 4.7 0 0 1 12 8.4a4.7 4.7 0 0 1 6.1-2.2c2.6.8 3.7 3.7 2.3 6.2C18.5 16.1 12 20 12 20Z"
+        />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <path {...stroke} d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />

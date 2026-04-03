@@ -47,10 +47,28 @@ type SendQuizSubmissionAlertEmailInput = {
   phone: string | null;
   quizType: string | null;
   practiceTitle: string | null;
-  eligibility: 'eligible' | 'not_eligible';
+  eligibility: 'eligible' | 'not_eligible' | 'needs_review';
   submittedAtIso: string;
   adminLink: string;
+  answers?: Record<string, string | number | boolean | null | undefined>;
 };
+
+function formatQuizAnswerLines(
+  answers: Record<string, string | number | boolean | null | undefined> | undefined
+) {
+  if (!answers) return [] as Array<{ question: string; answer: string }>;
+
+  return Object.entries(answers)
+    .filter(([key]) => !String(key).startsWith('_'))
+    .map(([key, value]) => ({
+      question: String(key).trim() || 'Domanda',
+      answer:
+        value === null || value === undefined || String(value).trim() === ''
+          ? 'N/D'
+          : String(value).trim()
+    }))
+    .slice(0, 60);
+}
 
 export async function sendOnboardingCredentialsEmail(
   input: SendOnboardingCredentialsEmailInput
@@ -349,7 +367,13 @@ export async function sendQuizSubmissionAlertEmail(
     : submittedAt.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const quizLabel = input.quizType || 'Quiz requisiti';
   const practiceLabel = input.practiceTitle || 'N/D';
-  const eligibilityLabel = input.eligibility === 'eligible' ? 'Idoneo' : 'Non idoneo';
+  const eligibilityLabel =
+    input.eligibility === 'eligible'
+      ? 'Idoneo'
+      : input.eligibility === 'needs_review'
+      ? 'Da approfondire'
+      : 'Non idoneo';
+  const answerRows = formatQuizAnswerLines(input.answers);
   const subject = `Nuova risposta quiz: ${input.fullName} (${eligibilityLabel})`;
 
   const text = [
@@ -362,6 +386,11 @@ export async function sendQuizSubmissionAlertEmail(
     `Pratica collegata: ${practiceLabel}`,
     `Esito: ${eligibilityLabel}`,
     `Data e ora: ${submittedAtLabel}`,
+    '',
+    'Risposte quiz:',
+    ...(answerRows.length > 0
+      ? answerRows.map((row) => `- ${row.question}: ${row.answer}`)
+      : ['- Nessuna risposta disponibile.']),
     '',
     `Apri in admin: ${input.adminLink}`
   ].join('\n');
@@ -378,6 +407,23 @@ export async function sendQuizSubmissionAlertEmail(
         <p style="margin:0 0 6px;"><strong>Pratica collegata:</strong> ${escapeHtml(practiceLabel)}</p>
         <p style="margin:0 0 6px;"><strong>Esito:</strong> ${escapeHtml(eligibilityLabel)}</p>
         <p style="margin:0;"><strong>Data e ora:</strong> ${escapeHtml(submittedAtLabel)}</p>
+      </div>
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <p style="margin:0 0 8px;"><strong>Risposte quiz</strong></p>
+        <ul style="margin:0;padding-left:18px;">
+          ${
+            answerRows.length > 0
+              ? answerRows
+                  .map(
+                    (row) =>
+                      `<li style="margin:0 0 6px;"><strong>${escapeHtml(row.question)}:</strong> ${escapeHtml(
+                        row.answer
+                      )}</li>`
+                  )
+                  .join('')
+              : '<li style="margin:0;">Nessuna risposta disponibile.</li>'
+          }
+        </ul>
       </div>
       <a href="${escapeHtml(input.adminLink)}" style="display:inline-block;background:#0a2540;color:#ffffff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:600;">Apri risposta in admin</a>
       <p style="margin:16px 0 0;font-size:12px;color:#5f7388;">Team BNDO</p>

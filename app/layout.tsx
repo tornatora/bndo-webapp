@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Suspense } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,11 +19,17 @@ export const viewport: Viewport = {
 };
 
 import { CookieBanner } from '@/components/ui/CookieBanner';
+import { ClientTelemetry } from '@/components/system/ClientTelemetry';
+import { ViewportSync } from '@/components/system/ViewportSync';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="it">
       <body className="antialiased">
+        <ViewportSync />
+        <Suspense fallback={null}>
+          <ClientTelemetry />
+        </Suspense>
         {children}
         <CookieBanner />
       </body>

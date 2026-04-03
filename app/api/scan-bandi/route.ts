@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchIncentiviDocs, mergeIncentiviDocs, INCENTIVI_SOLR_ENDPOINT } from '@/lib/matching/fetchIncentiviShared';
+import { mergeIncentiviDocs } from '@/lib/matching/fetchIncentiviShared';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import { STRATEGIC_SCANNER_DOCS } from '@/lib/strategicScannerDocs';
@@ -10,7 +10,8 @@ import {
   computeEconomicReliability,
   sanitizeUnreliableEconomicLabels,
 } from '@/lib/matching/economicReliability';
-import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { loadDatasetHealthStatus, loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { loadActiveGrantUniverse } from '@/lib/matching/activeGrantIndex';
 import { buildAtecoSearchQueries, matchAtecoStructured } from '@/lib/matching/atecoTaxonomy';
 import { buildRefineQuestionV3 } from '@/lib/matching/refineQuestion';
 import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
@@ -28,9 +29,13 @@ const INCENTIVI_BASE_URL = 'https://www.incentivi.gov.it';
 const ITALY_REGION_COUNT = 20;
 const DEFAULT_SCANNER_API_BASE_URL = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3301';
 const SCANNER_API_BASE_URL = (process.env.SCANNER_API_BASE_URL || DEFAULT_SCANNER_API_BASE_URL).replace(/\/+$/, '');
-const SCANNER_API_EMAIL = process.env.SCANNER_API_EMAIL || 'demo@grants.local';
-const SCANNER_API_PASSWORD = process.env.SCANNER_API_PASSWORD || 'Admin123!';
-const SCANNER_API_ENABLED = process.env.SCANNER_API_ENABLED !== 'false' && Boolean(SCANNER_API_BASE_URL);
+const SCANNER_API_EMAIL = process.env.SCANNER_API_EMAIL?.trim() || '';
+const SCANNER_API_PASSWORD = process.env.SCANNER_API_PASSWORD?.trim() || '';
+const SCANNER_API_ENABLED =
+  process.env.SCANNER_API_ENABLED !== 'false' &&
+  Boolean(SCANNER_API_BASE_URL) &&
+  Boolean(SCANNER_API_EMAIL) &&
+  Boolean(SCANNER_API_PASSWORD);
 const SCANNER_API_TIMEOUT_MS = Number.parseInt(process.env.SCANNER_API_TIMEOUT_MS || '14000', 10);
 
 const REGION_DEFS: Array<{ canonical: string; aliases: string[] }> = [
@@ -1951,7 +1956,7 @@ async function scanViaScannerApi(args: {
   const profilePriorityRules = southYouthStartupPriorityRules(southYouthStartupProfile);
   const pinnedStrategicTitles = southYouthStartupProfile ? ['resto al sud', 'fusese', 'oltre nuove imprese a tasso zero'] : [];
 
-  const chatStrictEnabled = channel === 'chat' && strictness === 'high';
+  const chatStrictEnabled = strictness === 'high';
   const strictFiltered = chatStrictEnabled ? applyExpertStrictCandidateFilter(mappedAll, strictContext) : mappedAll;
   const targetAmount = scannerProfile.targetAmount ?? scannerProfile.plannedInvestment ?? null;
   const precisionFiltered = chatStrictEnabled
@@ -2100,6 +2105,87 @@ function buildRefineQuestion(args: {
     return 'Indicami investimento totale e contributo desiderato (anche stima) per filtrare solo bandi realistici.';
   }
   return null; // Don't ask generic follow-ups if profile is complete enough
+}
+
+type DecisionProfileMeta = {
+  knownFields: string[];
+  inferredFields: string[];
+  missingFields: string[];
+  missingCriticalFields: string[];
+  contradictions: string[];
+  confidenceByField: Record<string, number>;
+  sourceByField: Record<string, 'explicit' | 'inferred' | 'derived'>;
+};
+
+function buildDecisionProfileMeta(profile: NormalizedMatchingProfile): DecisionProfileMeta {
+  const knownFields: string[] = [];
+  const inferredFields: string[] = [];
+  const missingFields: string[] = [];
+  const missingCriticalFields: string[] = [];
+  const contradictions: string[] = [];
+  const confidenceByField: Record<string, number> = {};
+  const sourceByField: Record<string, 'explicit' | 'inferred' | 'derived'> = {};
+
+  const setField = (
+    field: string,
+    isKnown: boolean,
+    confidence: number,
+    source: 'explicit' | 'inferred' | 'derived' = 'explicit',
+  ) => {
+    if (isKnown) knownFields.push(field);
+    else missingFields.push(field);
+    confidenceByField[field] = confidence;
+    sourceByField[field] = source;
+  };
+
+  const hasRegion = Boolean(profile.region);
+  const hasApplicantType = Boolean(profile.activityType) || typeof profile.businessExists === 'boolean';
+  const hasBusinessStage = typeof profile.businessExists === 'boolean';
+  const hasGoal = Boolean(profile.fundingGoal);
+  const hasSector = Boolean(profile.sector) || profile.atecoDigits.length > 0;
+  const hasBudgetSignal = profile.budget !== null || profile.requestedContribution !== null;
+  const hasEmployment = Boolean(profile.employmentStatus);
+  const hasAgeSignal = profile.age !== null || Boolean(profile.ageBand);
+
+  setField('territory_region', hasRegion, hasRegion ? 0.95 : 0.2);
+  setField('applicant_type', hasApplicantType, hasApplicantType ? 0.9 : 0.35);
+  setField('business_stage', hasBusinessStage, hasBusinessStage ? 0.9 : 0.3);
+  setField('project_goal_primary', hasGoal, hasGoal ? 0.86 : 0.25);
+  setField('sector_primary', hasSector, hasSector ? 0.88 : 0.25);
+  setField('investment_budget_band', hasBudgetSignal, hasBudgetSignal ? 0.82 : 0.2);
+  setField('employment_status_if_relevant', hasEmployment, hasEmployment ? 0.72 : 0.2);
+  setField('age_band', hasAgeSignal, hasAgeSignal ? 0.72 : 0.2, profile.ageBand && profile.age === null ? 'derived' : 'explicit');
+
+  if (profile.age !== null && profile.ageBand) {
+    if ((profile.age <= 35 && profile.ageBand === 'over35') || (profile.age > 35 && profile.ageBand === 'under35')) {
+      contradictions.push('age_vs_age_band');
+    }
+  }
+  if (profile.businessExists === false && typeof profile.annualTurnover === 'number' && profile.annualTurnover > 0) {
+    contradictions.push('new_business_with_turnover');
+  }
+  if (profile.businessExists === false && profile.activityType && /srl|spa|snc|sas|cooperativa/i.test(profile.activityType)) {
+    contradictions.push('new_business_with_structured_legal_form');
+  }
+
+  if (!hasRegion) missingCriticalFields.push('territory_region');
+  if (!hasApplicantType) missingCriticalFields.push('applicant_type');
+  if (!hasGoal) missingCriticalFields.push('project_goal_primary');
+  if (!hasSector) missingCriticalFields.push('sector_primary');
+
+  if (profile.ageBand && profile.age === null) {
+    inferredFields.push('age_band');
+  }
+
+  return {
+    knownFields,
+    inferredFields,
+    missingFields,
+    missingCriticalFields,
+    contradictions,
+    confidenceByField,
+    sourceByField,
+  };
 }
 
 function normalizeForMatch(value: string) {
@@ -4317,6 +4403,14 @@ export async function POST(req: Request) {
   }
 
   try {
+    const datasetHealth = await loadDatasetHealthStatus().catch(() => ({
+      datasetVersion: null,
+      datasetFreshnessHours: null,
+      coverageStatus: 'degraded' as const,
+      lastRunAt: null,
+      alerts: [] as string[],
+    }));
+
     const rawBody = await req.json();
     const parsedPayload = payloadSchema.safeParse(rawBody);
     const parsed = parsedPayload.success
@@ -4389,8 +4483,6 @@ export async function POST(req: Request) {
     const isInnovative = typeof rawProfile.isInnovative === 'boolean' ? rawProfile.isInnovative : null;
     const foundationYear = cleanNumber(rawProfile.foundationYear);
 
-    const fundingGoalSignalQuery = fundingGoal ? tokenizeKeywords(normalizeForMatch(fundingGoal)).slice(0, 4).join(' ') || null : null;
-
     const bookingBase = process.env.NEXT_PUBLIC_BOOKING_URL?.trim() || '/prenota';
 
     const scannerProfile = buildScannerProfilePayload({
@@ -4441,8 +4533,27 @@ export async function POST(req: Request) {
       isInnovative,
       foundationYear,
     };
+    const decisionProfileMeta = buildDecisionProfileMeta(normalizedProfile);
     const matchingVersion = process.env.MATCHING_ENGINE_V4?.trim() === 'false' ? 'v3' : 'v4';
+    const engineVersion = 'scan-v4-unified';
     const profilePriorityApplied = caseProfileResolution.activeCaseIds.length > 0;
+    const profileHash = [
+      region,
+      sector,
+      fundingGoal,
+      ateco,
+      activityType,
+      contributionPreference,
+      scannerProfile.businessExists,
+      scannerProfile.plannedInvestment,
+      scannerProfile.targetAmount,
+      ageBand,
+      employmentStatus,
+    ]
+      .map((entry) => String(entry ?? '').trim())
+      .join('|');
+    const activeUniverse = await loadActiveGrantUniverse();
+    const universeCount = activeUniverse.universeCount;
 
     if (SCANNER_API_ENABLED && mode !== 'fast') {
       try {
@@ -4569,7 +4680,16 @@ export async function POST(req: Request) {
         return NextResponse.json({
           phase: 'full',
           matchingVersion,
+          engineVersion,
+          profileHash,
           profilePriorityApplied,
+          datasetVersion: datasetHealth.datasetVersion,
+          datasetFreshnessHours: datasetHealth.datasetFreshnessHours,
+          coverageStatus: datasetHealth.coverageStatus,
+          universeCount,
+          consideredCount: scannerResultsRaw.length,
+          excludedHardCount: scannerResultsRaw.filter((item) => item.hardStatus === 'not_eligible').length,
+          decisionProfileMeta,
           explanation: scannerExplanation,
           results: scannerResultsWithBooking,
           nearMisses: scannerNearMissesWithBooking,
@@ -4597,47 +4717,12 @@ export async function POST(req: Request) {
       const snapshot = await loadHybridDatasetDocs();
       return snapshot.docs;
     };
-
-    if (mode === 'fast') {
-      docs = await loadFallbackDocs();
-    } else {
-      try {
-        if (keyword && userRegionCanonical) {
-          const queryCandidates = Array.from(
-            new Set(
-              [
-                keyword,
-                [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null].filter(Boolean).join(' '),
-                fundingGoal,
-                [fundingGoal, userRegionCanonical].filter(Boolean).join(' '),
-                fundingGoalSignalQuery,
-                [fundingGoalSignalQuery, userRegionCanonical].filter(Boolean).join(' '),
-                atecoQuery,
-                [sector, fundingGoal].filter(Boolean).join(' '),
-              ]
-                .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-                .filter((entry) => entry.length >= 3),
-            ),
-          );
-          const results = await Promise.allSettled(queryCandidates.map((query) => fetchIncentiviDocs(query, 180, 6500)));
-          docs = mergeIncentiviDocs(
-            ...results
-              .filter((entry): entry is PromiseFulfilledResult<IncentiviDoc[]> => entry.status === 'fulfilled')
-              .map((entry) => entry.value),
-          );
-        } else {
-          docs = await fetchIncentiviDocs(keyword, 240, 8500);
-        }
-      } catch {
-        docs = await loadFallbackDocs();
-      }
-    }
-
+    docs = activeUniverse.docs;
     if (docs.length === 0) {
       docs = await loadFallbackDocs();
+      docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
+      docs = filterClosedCalls(docs);
     }
-    docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
-    docs = filterClosedCalls(docs);
 
     // --- Unified Pipeline scoring overlay ---
     const unifiedResult = runUnifiedPipeline({
@@ -5020,6 +5105,7 @@ export async function POST(req: Request) {
       if (!entry.economicReliable) acc.economicReliability = (acc.economicReliability ?? 0) + 1;
       return acc;
     }, {});
+    const excludedHardCount = mapped.filter((entry) => !entry.hardEligibilityPassed || entry.result.hardStatus === 'not_eligible').length;
     const openAndRegionStrict = mapped.filter(
       (x) =>
         x.isOpen &&
@@ -5192,7 +5278,7 @@ export async function POST(req: Request) {
       ...southYouthStartupPriorityRules(southYouthStartupProfile),
     ];
     const sortedBase = dedupeCandidatesByTitle(sortCandidatesForDisplay(candidates, pinnedStrategicTitlesUnique, profilePriorityRules));
-    const expertStrictEnabled = strictness === 'high' || (channel === 'chat' && strictness !== 'standard');
+    const expertStrictEnabled = strictness === 'high';
     const strictSorted = expertStrictEnabled ? applyExpertStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
     const targetAmount = requestedContribution ?? budget ?? null;
     const precisionSorted = expertStrictEnabled
@@ -5377,7 +5463,7 @@ export async function POST(req: Request) {
     const fitEngineResult = runUnifiedPipeline({
       profile: normalizedProfile,
       grants: items as unknown as IncentiviDoc[],
-      options: { channel: 'chat', strictness: 'high', maxResults: 8 },
+      options: { channel: 'scanner', strictness: 'high', maxResults: 8 },
     });
     const actionPlan = composeActionPlan(fitEngineResult, normalizedProfile);
     const explanationBase = buildExplanation({
@@ -5398,7 +5484,16 @@ export async function POST(req: Request) {
     return NextResponse.json({
       phase: mode,
       matchingVersion,
+      engineVersion,
+      profileHash,
       profilePriorityApplied,
+      datasetVersion: datasetHealth.datasetVersion,
+      datasetFreshnessHours: datasetHealth.datasetFreshnessHours,
+      coverageStatus: datasetHealth.coverageStatus,
+      universeCount,
+      consideredCount: mapped.length,
+      excludedHardCount,
+      decisionProfileMeta,
       explanation,
       results: itemsRegionSafe,
       nearMisses: nearMissesRegionSafe,

@@ -29,6 +29,9 @@ const statusText: Record<MatchCardItem['hardStatus'], string> = {
   not_eligible: 'Non idoneo',
 };
 
+const buildDashboardGrantDetailHref = (grantId: string) =>
+  `/dashboard/new-practice?mode=detail&grantId=${encodeURIComponent(grantId)}&source=scanner`;
+
 const formatDate = (value: string | null, fallback: string) => {
   if (!value) return fallback;
   const date = new Date(value);
@@ -366,7 +369,7 @@ export function GrantCardPro({
               Dettagli Bando
             </button>
           ) : (
-            <Link href={`/grants/${item.grantId}`} className="result-btn result-btn--primary">
+            <Link href={buildDashboardGrantDetailHref(item.grantId)} className="result-btn result-btn--primary">
               Dettagli Bando
             </Link>
           )}

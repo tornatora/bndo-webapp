@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { ADMIN_URL, APP_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
@@ -123,10 +123,11 @@ export async function POST(request: NextRequest) {
       ? await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle()
       : await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
-    const isOps = Boolean(signedProfile?.role && hasOpsAccess(signedProfile.role));
+    const isAdmin = Boolean(signedProfile?.role && hasAdminAccess(signedProfile.role));
+    const isConsultant = Boolean(signedProfile?.role && hasConsultantAccess(signedProfile.role));
 
     if (mode === 'admin') {
-      if (isOps) {
+      if (isAdmin) {
         const safeTarget = resolveSafeRedirect(nextParam, adminDefault, allowedHosts, adminBaseUrl);
         return NextResponse.redirect(safeTarget, { status: 303 });
       }
@@ -135,12 +136,17 @@ export async function POST(request: NextRequest) {
       return redirectWithError('Questo account non ha accesso admin', 'admin', adminDefault.toString(), baseUrls);
     }
 
-    if (isOps) {
+    if (isAdmin) {
       return NextResponse.redirect(adminDefault, { status: 303 });
+    }
+    if (isConsultant) {
+      const consultantDefault = buildAbsoluteUrl(appBaseUrl, '/consultant');
+      const safeConsultantTarget = resolveSafeRedirect(nextParam, consultantDefault, allowedHosts, appBaseUrl);
+      return NextResponse.redirect(safeConsultantTarget, { status: 303 });
     }
   }
 
-  const userDefault = buildAbsoluteUrl(appBaseUrl, '/dashboard');
+  const userDefault = buildAbsoluteUrl(appBaseUrl, '/dashboard/pratiche');
   const safeUserTarget = resolveSafeRedirect(nextParam, userDefault, allowedHosts, appBaseUrl);
   return NextResponse.redirect(safeUserTarget, { status: 303 });
 }

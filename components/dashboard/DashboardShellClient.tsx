@@ -67,6 +67,16 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
       </svg>
     );
   }
+  if (name === 'catalogo_bandi') {
+    return (
+      <svg {...common}>
+        <path
+          {...stroke}
+          d="M12 20s-6.5-3.9-8.4-7.6C2.2 9.9 3.3 7 5.9 6.2A4.7 4.7 0 0 1 12 8.4a4.7 4.7 0 0 1 6.1-2.2c2.6.8 3.7 3.7 2.3 6.2C18.5 16.1 12 20 12 20Z"
+        />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <path {...stroke} d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
@@ -81,9 +91,17 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarUserMenuOpen, setSidebarUserMenuOpen] = useState(false);
   const [topbarUserMenuOpen, setTopbarUserMenuOpen] = useState(false);
+  const [navReady, setNavReady] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const logoutUrl = buildLogoutPath(resolveAssistantHomeUrl());
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(() => {
+      setNavReady(true);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: any) {
@@ -159,7 +177,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
           </button>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Voci dashboard">
+        <nav className={navReady ? 'sidebar-nav sidebar-nav-ready' : 'sidebar-nav sidebar-nav-boot'} aria-label="Voci dashboard">
           {items.map(renderShellItem)}
         </nav>
 

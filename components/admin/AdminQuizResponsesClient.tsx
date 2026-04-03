@@ -255,6 +255,8 @@ function SubmissionDetails({ submission: sub }: { submission: QuizSubmission }) 
     : submittedAt.toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
   const questions = useMemo(() => getQuizQuestions(sub.bando_type), [sub.bando_type]);
   const answersRecord = useMemo(() => safeAnswersRecord(sub.answers as unknown as Json), [sub.answers]);
+  const blockedStep = typeof answersRecord._blocked_from_step === 'string' ? answersRecord._blocked_from_step : null;
+  const blockedQuestion = typeof answersRecord._blocked_question === 'string' ? answersRecord._blocked_question : null;
 
   const rows = useMemo(() => {
     const knownIds = new Set(questions.map(q => q.id));
@@ -284,6 +286,23 @@ function SubmissionDetails({ submission: sub }: { submission: QuizSubmission }) 
       <div style={{ marginBottom: 10, fontSize: 12, color: '#64748B', fontWeight: 600 }}>
         Inviato il: {submittedAtLabel}
       </div>
+      {sub.eligibility === 'not_eligible' && blockedQuestion ? (
+        <div
+          style={{
+            marginBottom: 10,
+            fontSize: 13,
+            color: '#991B1B',
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            borderRadius: 8,
+            padding: '8px 10px',
+            fontWeight: 600
+          }}
+        >
+          Domanda bloccante: {blockedQuestion} in quanto con questa caratteristica non puoi partecipare al bando in questione.
+          {blockedStep ? ` (${blockedStep})` : ''}
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <div style={{ color: '#94A3B8', fontSize: 13 }}>Nessuna risposta disponibile.</div>
       ) : (

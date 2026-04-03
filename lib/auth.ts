@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess } from '@/lib/roles';
 import { ADMIN_URL } from '@/lib/site-urls';
 import { createClient } from '@/lib/supabase/server';
 
@@ -52,11 +52,27 @@ export const requireUserProfile = cache(async () => {
 export async function requireOpsProfile() {
   const { user, profile } = await requireUserProfile();
 
-  if (!hasOpsAccess(profile.role)) {
+  if (!hasAdminAccess(profile.role)) {
     const logoutUrl = new URL('/api/auth/logout', `${ADMIN_URL}/`);
     logoutUrl.searchParams.set('redirect', '/login?mode=admin&error=Serve un account admin');
     redirect(logoutUrl.toString());
   }
 
+  return { user, profile };
+}
+
+export async function requireConsultantProfile() {
+  const { user, profile } = await requireUserProfile();
+  if (!hasConsultantAccess(profile.role)) {
+    redirect('/login?error=Serve%20un%20account%20consulente');
+  }
+  return { user, profile };
+}
+
+export async function requireOpsOrConsultantProfile() {
+  const { user, profile } = await requireUserProfile();
+  if (!hasAdminAccess(profile.role) && !hasConsultantAccess(profile.role)) {
+    redirect('/login?error=Accesso%20non%20consentito');
+  }
   return { user, profile };
 }

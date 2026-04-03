@@ -1,3 +1,9 @@
+import {
+  buildUnifiedScanRequestBody,
+  selectUnifiedScanMode,
+  selectUnifiedScanStrictness,
+} from '@/lib/matching/scanRequestPolicy';
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_SCANNER_API_BASE_URL || '').replace(
   /\/+$/,
   ''
@@ -210,7 +216,7 @@ function hasStrongMatchingContext(profile: LocalScannerProfile): boolean {
 }
 
 function chooseMatchingMode(profile: LocalScannerProfile): 'fast' | 'full' {
-  return hasStrongMatchingContext(profile) ? 'full' : 'fast';
+  return selectUnifiedScanMode(profile);
 }
 
 function getRequirementValue(requirements: string[] | undefined, prefixes: string[]): string | null {
@@ -374,7 +380,10 @@ function toLegacyProfile(body: unknown): LocalScannerProfile {
   };
 }
 
-async function runLocalMatching(mode: 'fast' | 'full' = 'fast'): Promise<LocalMatchLatestResponse> {
+async function runLocalMatching(
+  mode: 'fast' | 'full' = 'fast',
+  strictness: 'standard' | 'high' = 'standard',
+): Promise<LocalMatchLatestResponse> {
   const profile = readStorage<LocalScannerProfile>(LOCAL_PROFILE_KEY);
   if (!profile) {
     throw new ApiError(400, 'Profilo scanner mancante. Compila il form prima di avviare la ricerca.');
@@ -387,7 +396,14 @@ async function runLocalMatching(mode: 'fast' | 'full' = 'fast'): Promise<LocalMa
     phase?: 'fast' | 'full';
   }>(`${baseUrl}/api/scan-bandi`, {
     method: 'POST',
-    body: JSON.stringify({ userProfile: profile, mode, channel: 'scanner', strictness: 'high' })
+    body: JSON.stringify(
+      buildUnifiedScanRequestBody({
+        userProfile: profile,
+        mode,
+        channel: 'scanner',
+        strictness,
+      }),
+    ),
   });
 
   const latest: LocalMatchLatestResponse = {
@@ -527,12 +543,21 @@ export async function apiRequest<T>(
 
   if (path === '/api/v1/matching/run' && method === 'POST') {
     const profile = readStorage<LocalScannerProfile>(LOCAL_PROFILE_KEY);
+    const rawStrictness =
+      body && typeof body === 'object' && !Array.isArray(body)
+        ? (body as Record<string, unknown>).strictness
+        : undefined;
     const requestedMode =
       body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>).mode === 'full'
         ? 'full'
         : null;
-    const selectedMode = requestedMode ?? (profile ? chooseMatchingMode(profile) : 'fast');
-    const latest = await runLocalMatching(selectedMode);
+    const selectedMode = selectUnifiedScanMode(profile, requestedMode);
+    const selectedStrictness = selectUnifiedScanStrictness(
+      profile,
+      selectedMode,
+      rawStrictness === 'high' || rawStrictness === 'standard' ? rawStrictness : null,
+    );
+    const latest = await runLocalMatching(selectedMode, selectedStrictness);
     return ({ run: latest.run } as unknown) as T;
   }
 

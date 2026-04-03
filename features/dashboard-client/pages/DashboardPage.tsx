@@ -1,12 +1,11 @@
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
 import { hasOpsAccess } from '@/lib/roles';
-import { PracticeRequestPanel } from '@/components/dashboard/PracticeRequestPanel';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { DashboardStatsClient } from '@/components/dashboard/DashboardStatsClient';
 import { DashboardApplicationsClient } from '@/components/dashboard/DashboardApplicationsClient';
-import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import { computeProgressBar, computeDerivedProgressKey, extractProgressFromNotes, progressBadge } from '@/lib/admin/practice-progress';
 
 type ApplicationRow = {
@@ -26,7 +25,7 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect('/login?next=/dashboard');
+    redirect('/login?next=/dashboard/pratiche');
   }
 
   const { profile } = await requireUserProfile();
@@ -86,7 +85,7 @@ export default async function DashboardPage() {
       tender: tenderMap.get(app.tender_id) ?? null
     })) ?? [];
   const applicationIds = typedApplications.map((a) => a.id);
-  const { data: docs } = applicationIds.length
+  const { data: docsRaw } = applicationIds.length
     ? await supabase
         .from('application_documents')
         .select('application_id, file_name, requirement_key')
@@ -94,6 +93,25 @@ export default async function DashboardPage() {
         .order('created_at', { ascending: false })
         .limit(500)
     : { data: [] as Array<{ application_id: string; file_name: string; requirement_key: string | null }> };
+  let docs =
+    (docsRaw ?? []) as Array<{ application_id: string; file_name: string; requirement_key: string | null }>;
+
+  if (applicationIds.length && hasRealServiceRoleKey()) {
+    try {
+      const admin = getSupabaseAdmin();
+      const { data: adminDocs } = await admin
+        .from('application_documents')
+        .select('application_id, file_name, requirement_key')
+        .in('application_id', applicationIds)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if ((adminDocs ?? []).length >= docs.length) {
+        docs = (adminDocs ?? []) as Array<{ application_id: string; file_name: string; requirement_key: string | null }>;
+      }
+    } catch {
+      // Best-effort fallback for company-wide document visibility.
+    }
+  }
 
   const { data: dynamicRequirements } = applicationIds.length
     ? await supabase
@@ -165,7 +183,7 @@ export default async function DashboardPage() {
     const checklist =
       appRequirements.length > 0
         ? computeDocumentChecklistFromRequirements(application.id, appRequirements, appDocs)
-        : computeDocumentChecklist(application.id, title, appDocs);
+        : [];
     const missingCount = checklist.filter((c) => !c.uploaded).length;
     const uploadedCount = appDocs.length;
 
@@ -187,18 +205,6 @@ export default async function DashboardPage() {
     };
   });
 
-  const supabaseAdmin = getSupabaseAdmin();
-  const { data: latestQuiz } = await supabaseAdmin
-    .from('quiz_submissions')
-    .select('eligibility, bando_type, created_at')
-    .eq('email', profile.email.toLowerCase())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const quizCompleted = Boolean(latestQuiz);
-  const quizEligible = latestQuiz?.eligibility === 'eligible';
-
   return (
     <>
       <div className="welcome-section">
@@ -216,22 +222,13 @@ export default async function DashboardPage() {
       </div>
 
       {typedApplications.length === 0 ? (
-        <PracticeRequestPanel
-          quizCompleted={quizCompleted}
-          quizEligible={quizEligible}
-          quizType={latestQuiz?.bando_type ?? null}
-          quizCompletedAt={latestQuiz?.created_at ?? null}
-        />
-      ) : null}
-
-      {typedApplications.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">📋</div>
           <p className="empty-text">Nessuna pratica disponibile al momento.</p>
         </div>
       ) : null}
 
-      <DashboardApplicationsClient initialCount={typedApplications.length} initialItems={initialItems} />
+      <DashboardApplicationsClient initialItems={initialItems} />
     </>
   );
 }

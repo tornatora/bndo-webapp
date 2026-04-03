@@ -1,6 +1,39 @@
 import { ClientsList, type ClientListItem } from '@/components/admin/ClientsList';
+import Link from 'next/link';
 import { getMockClients } from '@/lib/mock/data';
 import { createServerSupabaseClient, requireOpsProfile } from '@/shared/api';
+
+function ControlTowerIntro() {
+  return (
+    <section className="section-card">
+      <div className="section-title">
+        <span>🛰️</span>
+        <span>Pannello di controllo</span>
+      </div>
+      <div className="admin-item-sub" style={{ marginTop: 4 }}>
+        Da qui gestisci tutto: clienti, assegnazioni consulenti, incassi, monitoraggio attività e storico azioni.
+      </div>
+      <div className="admin-item-sub" style={{ marginTop: 10, lineHeight: 1.65 }}>
+        Accesso consulenti: usa il login standard su <strong>/login</strong> con account ruolo <strong>consultant</strong>. Dopo il login
+        entrano automaticamente nella dashboard <strong>/consultant</strong>.
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+        <Link className="btn-action secondary" href="/admin/assignments">
+          Assegnazioni consulenti
+        </Link>
+        <Link className="btn-action secondary" href="/admin/finance">
+          Finanza piattaforma
+        </Link>
+        <Link className="btn-action secondary" href="/admin/analytics">
+          Analytics & Funnel
+        </Link>
+        <Link className="btn-action secondary" href="/admin/audit">
+          Audit trail
+        </Link>
+      </div>
+    </section>
+  );
+}
 
 export default async function AdminPage() {
   const isMock = process.env.MOCK_BACKEND === 'true';
@@ -20,13 +53,16 @@ export default async function AdminPage() {
     }));
 
     return (
-      <section className="section-card">
-        <div className="section-title">
-          <span>👥</span>
-          <span>Clienti (Mock)</span>
-        </div>
-        <ClientsList initialClients={clients} />
-      </section>
+      <>
+        <ControlTowerIntro />
+        <section className="section-card">
+          <div className="section-title">
+            <span>👥</span>
+            <span>Clienti (Mock)</span>
+          </div>
+          <ClientsList initialClients={clients} />
+        </section>
+      </>
     );
   }
 
@@ -80,35 +116,41 @@ export default async function AdminPage() {
 
   if (clients.length === 0) {
     return (
+      <>
+        <ControlTowerIntro />
+        <section className="section-card">
+          <div className="section-title">
+            <span>👥</span>
+            <span>Clienti</span>
+          </div>
+
+          <div className="empty-state">
+            <div className="empty-icon">🗂️</div>
+            <p className="empty-text">Nessun cliente presente.</p>
+          </div>
+
+          <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#64748B', lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 800, color: '#0B1136', marginBottom: 8 }}>Dati di prova (locale)</div>
+            <div>1) Avvia l’app con `START-QUI.command`</div>
+            <div>2) Crea il cliente demo con `Crea-Cliente-Demo.command`</div>
+            <div>3) Aggiungi pratiche/documenti con `Crea-Pratiche-Documenti-Demo.command`</div>
+            <div style={{ marginTop: 8 }}>Se qualcosa non va, controlla `GET /api/health`.</div>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ControlTowerIntro />
       <section className="section-card">
         <div className="section-title">
           <span>👥</span>
           <span>Clienti</span>
         </div>
-
-        <div className="empty-state">
-          <div className="empty-icon">🗂️</div>
-          <p className="empty-text">Nessun cliente presente.</p>
-        </div>
-
-        <div style={{ marginTop: 14, fontSize: 13, fontWeight: 600, color: '#64748B', lineHeight: 1.6 }}>
-          <div style={{ fontWeight: 800, color: '#0B1136', marginBottom: 8 }}>Dati di prova (locale)</div>
-          <div>1) Avvia l’app con `START-QUI.command`</div>
-          <div>2) Crea il cliente demo con `Crea-Cliente-Demo.command`</div>
-          <div>3) Aggiungi pratiche/documenti con `Crea-Pratiche-Documenti-Demo.command`</div>
-          <div style={{ marginTop: 8 }}>Se qualcosa non va, controlla `GET /api/health`.</div>
-        </div>
+        <ClientsList initialClients={clients} />
       </section>
-    );
-  }
-
-  return (
-    <section className="section-card">
-      <div className="section-title">
-        <span>👥</span>
-        <span>Clienti</span>
-      </div>
-      <ClientsList initialClients={clients} />
-    </section>
+    </>
   );
 }

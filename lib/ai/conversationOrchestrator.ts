@@ -22,12 +22,16 @@ import { ChatDecisionModel, ChatAction } from './ChatDecisionModel';
 import { STRUCTURED_EXTRACTION_SYSTEM_PROMPT } from './structuredPrompt';
 import { UserFundingProfile } from '../../types/userFundingProfile';
 import { UserProfile } from '../conversation/types';
-import { evaluateScanReadiness, isStrongReady } from '../conversation/scanReadiness';
+import { evaluateScanReadiness } from '../conversation/scanReadiness';
 import { WebSearchService } from './webSearchEngine';
 import { evaluateProfileCompleteness } from '../conversation/profileCompleteness';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '../knowledge/regoleBandi';
-import { LEGAL_OMNISCIENCE } from '@/lib/knowledge/legalOmniscience';
-import { answerGroundedMeasureQuestion, detectMeasureIds } from '../knowledge/groundedMeasureAnswerer';
+import {
+    answerGroundedMeasureQuestion,
+    composeConsultantMeasureReply,
+    detectMeasureIds,
+    isClosedMeasureQuestion
+} from '../knowledge/groundedMeasureAnswerer';
 import { extractProfileFromMessage } from '../engines/profileExtractor';
 import { getChangedFields, evolveFundingGoal } from '../conversation/profileMemory';
 import { detectTurnIntent, isDiscoveryIntent, isQuestionLike } from '../conversation/intentRouter';
@@ -35,6 +39,93 @@ import { loadHybridDatasetDocs } from '../matching/datasetRepository';
 import { evaluateHardEligibility } from '../matching/eligibilityEngine';
 import { normalizeProfile } from '../matching/profileNormalizer';
 import { NormalizedMatchingProfile } from '../matching/types';
+
+const DEFAULT_SIMPLE_MODEL = 'gpt-4.1-mini';
+const DEFAULT_COMPLEX_MODEL = 'gpt-4o';
+const DEFAULT_EXTRACTION_MODEL = 'gpt-4o-mini';
+
+export type ChatCitation = {
+  title: string;
+  url: string;
+  sourceTier: 'official' | 'authoritative' | 'web';
+  publishedAt: string | null;
+  evidenceSnippet: string;
+};
+
+export type ModelRoutingDecision = {
+  modelUsed: string;
+  routingReason: string;
+  complexity: 'simple' | 'complex';
+};
+
+function resolveConversationModels() {
+    const configuredComplex = process.env.OPENAI_MODEL_COMPLEX?.trim() || DEFAULT_COMPLEX_MODEL;
+    const configuredSimple = process.env.OPENAI_MODEL_SIMPLE?.trim();
+    const legacySimple = process.env.OPENAI_MODEL?.trim();
+    const simpleModel = configuredSimple || (legacySimple && legacySimple !== configuredComplex ? legacySimple : DEFAULT_SIMPLE_MODEL);
+    const complexModel = configuredComplex;
+    const extractionModel = process.env.OPENAI_MODEL_EXTRACTION?.trim() || DEFAULT_EXTRACTION_MODEL;
+    return { simpleModel, complexModel, extractionModel };
+}
+
+export function selectModelForTurn(args: {
+    intent: ChatDecisionModel['intent'];
+    action: ChatAction;
+    message: string;
+    groundedContext: string | null;
+    citationsCount: number;
+    models?: { simpleModel: string; complexModel: string };
+}): ModelRoutingDecision {
+    const models = args.models ?? resolveConversationModels();
+    const norm = args.message.toLowerCase();
+    const technicalTokens =
+      /(requisit|ammissibil|normativ|de minimis|scadenz|aliquot|spesa|intensit|graduator|istruttori|document|ateco|invitalia|smart&start|resto al sud|sabatini|pnrr|credito d'imposta|transizione)/.test(
+        norm
+      );
+    const isComplexIntent = args.intent === 'measure_question' || args.intent === 'general_qa';
+    const needsDeepReasoning =
+      technicalTokens ||
+      Boolean(args.groundedContext) ||
+      args.citationsCount > 0 ||
+      args.action === 'answer_measure_question' ||
+      args.action === 'answer_general_qa';
+
+    if (isComplexIntent || needsDeepReasoning) {
+      return {
+        modelUsed: models.complexModel,
+        routingReason: isComplexIntent
+          ? 'Intent tecnico/QA su bando o misura'
+          : 'Richiesta con reasoning tecnico o fonti web',
+        complexity: 'complex'
+      };
+    }
+
+    return {
+      modelUsed: models.simpleModel,
+      routingReason: 'Turno banale/profiling leggero',
+      complexity: 'simple'
+    };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function computeConfidenceScore(args: {
+  intent: ChatDecisionModel['intent'];
+  action: ChatAction;
+  groundedContext: string | null;
+  citationsCount: number;
+  estimatedWithWarning: boolean;
+}) {
+  let score = 0.68;
+  if (args.intent === 'measure_question' || args.intent === 'general_qa') score += 0.05;
+  if (args.groundedContext) score += 0.08;
+  if (args.citationsCount > 0) score += Math.min(0.12, args.citationsCount * 0.03);
+  if (args.action === 'run_scan') score += 0.04;
+  if (args.estimatedWithWarning) score -= 0.12;
+  return Number(clamp(score, 0.35, 0.96).toFixed(2));
+}
 
 // ─── Strategic Feedback Generator ───────────────────────────────────────────
 
@@ -394,6 +485,8 @@ export interface OrchestratorResult {
     missing_fields: string[];
     ambiguities: string[];
     groundedContext: string | null;
+    factSource?: 'scanner_dataset' | 'faq' | 'mixed' | 'none';
+    groundingStatus?: 'grounded' | 'estimated_with_warning' | 'degraded' | 'none';
     response_text?: string;
     strategicFeedback?: string | null;
     activeMeasure?: { id: string | null; title: string | null };
@@ -427,6 +520,8 @@ export async function runTwoPassChat(
     currentMemory: Partial<UserProfile>,
     history?: { role: string; text: string }[]
 ): Promise<OrchestratorResult> {
+    const { extractionModel } = resolveConversationModels();
+
     // ── PASS 1: HEURISTIC EXTRACTION (sempre attivo) ──────────────────────────
     const heuristic = extractProfileFromMessage(userMessage);
     const updates: Partial<UserProfile> = {};
@@ -474,7 +569,10 @@ export async function runTwoPassChat(
     const isDiscovery = isDiscoveryIntent(userMessage);
 
     // Measure question check
-    const measureResponse = await answerGroundedMeasureQuestion(userMessage);
+    const measureResponse = await answerGroundedMeasureQuestion(userMessage, {
+      activeMeasureId: currentMemory.activeMeasureId ?? null,
+      activeMeasureTitle: currentMemory.activeMeasureTitle ?? null,
+    });
     let groundedContext: string | null = null;
     if (measureResponse && isQuestion) {
         groundedContext = measureResponse.text;
@@ -483,7 +581,7 @@ export async function runTwoPassChat(
                 mergedProfile: {
                     ...baseProfile,
                     activeMeasureId: measureResponse.measureId,
-                    activeMeasureTitle: detectMeasureIds(userMessage)[0]?.name ?? null
+                    activeMeasureTitle: measureResponse.measureName ?? detectMeasureIds(userMessage)[0]?.name ?? null
                 },
                 finalAction: 'answer_measure_question' as const,
                 intent: 'measure_question' as const,
@@ -493,13 +591,13 @@ export async function runTwoPassChat(
                 strategicFeedback: undefined,
                 activeMeasure: {
                     id: measureResponse.measureId,
-                    title: detectMeasureIds(userMessage)[0]?.name ?? null
+                    title: measureResponse.measureName ?? detectMeasureIds(userMessage)[0]?.name ?? null
                 }
             };
         }
         // If we found a measure in the question, lock it in the mergedProfile for Pass 4
         baseProfile.activeMeasureId = measureResponse.measureId;
-        baseProfile.activeMeasureTitle = detectMeasureIds(userMessage)[0]?.name ?? null;
+        baseProfile.activeMeasureTitle = measureResponse.measureName ?? detectMeasureIds(userMessage)[0]?.name ?? null;
     }
 
     // FAQ check
@@ -555,10 +653,15 @@ export async function runTwoPassChat(
 
     if (groundedContext && activeMeasure.id && (isDiscovery || isQuestion)) {
         try {
-            const searchResults = await WebSearchService.search(`${activeMeasure.title} news 2024 2025`);
-            if (searchResults && searchResults.length > 0) {
-                const searchContext = searchResults.map(r => `• ${r.title}: ${r.snippet} (Link: ${r.link})`).join('\n');
+            const searchOutcome = await WebSearchService.search(`${activeMeasure.title} requisiti scadenza aggiornamenti`);
+            if (searchOutcome.ok && searchOutcome.results.length > 0) {
+                const searchContext = searchOutcome.results
+                  .slice(0, 4)
+                  .map((result) => `• [${result.sourceTier.toUpperCase()}] ${result.title}: ${result.evidenceSnippet} (Link: ${result.url})`)
+                  .join('\n');
                 groundedContext = `[DATI WEB RECENTI]\n${searchContext}\n\n[DATI INTERNI]\n${groundedContext}`;
+            } else if (!searchOutcome.ok && searchOutcome.unavailableReason) {
+                groundedContext = `${groundedContext}\n\nNota fonti web: ${searchOutcome.unavailableReason}`;
             }
         } catch (searchError) {
             console.error('[Orchestrator] Search pass failed:', searchError);
@@ -598,7 +701,7 @@ export async function runTwoPassChat(
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+                model: extractionModel,
                 ...payload,
                 temperature: 0.0
             })
@@ -681,11 +784,16 @@ export async function runTwoPassChat(
 export async function* runStreamingChat(
     userMessage: string,
     currentMemory: Partial<UserProfile>,
-    history?: { role: string; text: string }[]
+    history?: { role: string; text: string }[],
+    options?: { strictFocusedGrant?: boolean }
 ): AsyncGenerator<{ type: 'text' | 'metadata' | 'error' | 'thinking'; content: any }> {
+    const { simpleModel, complexModel, extractionModel } = resolveConversationModels();
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+
     // 0. SIGNAL IMMEDIATE THINKING STATE: Formula 1 TTFT Goal
     yield { type: 'thinking', content: true };
 
+    const strictFocusedGrant = Boolean(options?.strictFocusedGrant);
     const intentData = detectTurnIntent({ message: userMessage, sessionQaMode: false });
     const isGreetingOnly = intentData.greeting && !intentData.discovery && !intentData.questionLike;
     
@@ -715,6 +823,8 @@ export async function* runStreamingChat(
           missing_fields: [],
           ambiguities: [],
           groundedContext: null,
+          factSource: 'none',
+          groundingStatus: 'none',
           strategicFeedback: undefined,
           activeMeasure: {
             id: currentMemory.activeMeasureId ?? null,
@@ -739,6 +849,105 @@ export async function* runStreamingChat(
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
         }
+    }
+
+    function sanitizeUserFacingMeasureText(text: string) {
+      return text
+        .replace(/https?:\/\/\S+/gi, '')
+        .replace(/\[[^\]]+]\((https?:\/\/[^)]+)\)/gi, '')
+        .replace(/\bforma aiuto:\s*/gi, '')
+        .replace(/\bcopertura indicativa:\s*/gi, '')
+        .replace(/\bstima forte bndo:\s*/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    }
+
+    function isClosedMeasurePrompt(msg: string) {
+      const n = msg.toLowerCase();
+      const asksClosed =
+        /\b(100|100%|tutto|interamente|fondo perduto|voucher|ammissibil|copre|posso|si puo|si può)\b/.test(n) &&
+        /\?/.test(msg);
+      return asksClosed;
+    }
+
+    function hasContradictingOpening(
+      question: string,
+      measure: { outcome?: string; factsSnapshot?: { coversUpTo100?: boolean | null } | null },
+      candidate: string
+    ) {
+      const lowerQuestion = question.toLowerCase();
+      const lowerReply = candidate.trim().toLowerCase();
+      const startsYes = lowerReply.startsWith('si.') || lowerReply.startsWith('sì.');
+      const startsNo = lowerReply.startsWith('no.');
+      const asks100 = /\b(100|100%)\b/.test(lowerQuestion) && /\bfondo perduto\b/.test(lowerQuestion);
+      if (!asks100) return false;
+
+      if (measure.outcome === 'no' && startsYes) return true;
+      if (measure.outcome !== 'no' && measure.factsSnapshot?.coversUpTo100 && startsNo) return true;
+      return false;
+    }
+
+    async function polishGroundedMeasureReply(args: {
+      question: string;
+      draft: string;
+      measure: { outcome?: string; measureName?: string | null; measureId?: string | null; factsSnapshot?: Record<string, unknown> | null };
+      citations: ChatCitation[];
+    }) {
+      if (!apiKey) return null;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3_400);
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: complexModel,
+            temperature: 0.25,
+            messages: [
+              {
+                role: 'system',
+                content: [
+                  'Sei un consulente senior BNDO di finanza agevolata.',
+                  'Riscrivi la risposta in italiano naturale, chiaro, molto pratico e umano.',
+                  'Mantieni SOLO i fatti presenti in DRAFT e FACTS. Non inventare numeri, condizioni, scadenze o vincoli.',
+                  'Non includere URL, fonti o riferimenti tecnici interni.',
+                  'Se la domanda è chiusa, apri con: "Sì.", "No." oppure "Dipende."',
+                  'Chiudi con una sola domanda utile per avanzare la verifica del caso reale.',
+                  'Formato: 1-2 paragrafi, massimo 8 frasi.',
+                ].join('\n'),
+              },
+              {
+                role: 'user',
+                content: [
+                  `DOMANDA: ${args.question}`,
+                  `DRAFT: ${args.draft}`,
+                  `FACTS: ${JSON.stringify(args.measure.factsSnapshot ?? {}, null, 2)}`,
+                  `OUTCOME: ${args.measure.outcome}`,
+                  `MISURA: ${args.measure.measureName ?? args.measure.measureId ?? 'n/d'}`,
+                  `WEB_CITATIONS_COUNT: ${args.citations.length}`,
+                ].join('\n\n'),
+              },
+            ],
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) return null;
+        const json = await response.json().catch(() => null);
+        const text = String(json?.choices?.[0]?.message?.content ?? '').trim();
+        if (!text) return null;
+        const sanitized = sanitizeUserFacingMeasureText(text);
+        if (!sanitized) return null;
+        if (hasContradictingOpening(args.question, args.measure, sanitized)) return null;
+        if (isClosedMeasurePrompt(args.question) && !/^(s(i|ì)\.|no\.|dipende\.)/i.test(sanitized)) return null;
+        return sanitized;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
 
     // PASS 1-3.5 (Deterministic + Knowledge) are fast; do not block TTFT on anything optional.
@@ -777,18 +986,51 @@ export async function* runStreamingChat(
     const isQuestion = intentData.questionLike;
     const isDiscovery = intentData.discovery;
 
-    const activeMeasure = {
+    let activeMeasure = {
         id: currentMemory.activeMeasureId ?? null,
         title: currentMemory.activeMeasureTitle ?? (detectMeasureIds(userMessage)[0]?.name ?? null)
     };
 
     // Knowledge (measure/FAQ) is valuable but must be timeboxed to keep TTFT low.
     const knowledgePromise = Promise.all([
-        answerGroundedMeasureQuestion(userMessage),
+        answerGroundedMeasureQuestion(userMessage, {
+          activeMeasureId: activeMeasure.id,
+          activeMeasureTitle: activeMeasure.title,
+        }),
         Promise.resolve(answerFaq(userMessage))
     ]);
-    const [measureAnswer, faqAnswer] = await withTimeout(knowledgePromise, 200, [null, null] as any);
+    const knowledgeTimeoutMs = strictFocusedGrant
+      ? 6_000
+      : intentData.measureQuestion || intentData.comparison
+        ? 5_200
+        : intentData.questionLike
+          ? 1_600
+          : 260;
+    let [measureAnswer, faqAnswer] = await withTimeout(knowledgePromise, knowledgeTimeoutMs, [null, null] as any);
+    // Hard guard: su domande misura non permettere fallback “vuoto” verso ramo LLM generico.
+    if ((intentData.measureQuestion || intentData.comparison || strictFocusedGrant) && !measureAnswer) {
+      measureAnswer = await withTimeout(
+        answerGroundedMeasureQuestion(userMessage, {
+          activeMeasureId: activeMeasure.id,
+          activeMeasureTitle: activeMeasure.title,
+        }),
+        4_500,
+        null as any,
+      );
+    }
+    if (measureAnswer?.measureId) {
+      activeMeasure = {
+        id: measureAnswer.measureId,
+        title: measureAnswer.measureName ?? activeMeasure.title ?? detectMeasureIds(userMessage)[0]?.name ?? null,
+      };
+    }
     const groundedContext = (measureAnswer?.text || faqAnswer || null) as string | null;
+    let factSource: 'scanner_dataset' | 'faq' | 'mixed' | 'none' =
+      (measureAnswer?.factSource as 'scanner_dataset' | 'faq' | 'mixed' | 'none' | undefined) ??
+      (faqAnswer ? 'faq' : 'none');
+    let groundingStatus: 'grounded' | 'estimated_with_warning' | 'degraded' | 'none' =
+      (measureAnswer?.groundingStatus as 'grounded' | 'estimated_with_warning' | 'degraded' | 'none' | undefined) ??
+      (groundedContext ? 'grounded' : 'none');
     const rulesContext = buildKnowledgeContextFromRules(userMessage, baseProfile as UserProfile);
 
     const memoryProfile: UserFundingProfile = {
@@ -811,20 +1053,151 @@ export async function* runStreamingChat(
         needs: []
     };
 
-    // ── PASS 4: LLM reply streaming (text-first) ─────────────
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) {
-        yield { type: 'thinking', content: false };
-        yield { type: 'text', content: "Connessione API assente." };
-        return;
-    }
-
-    const historyCtx = (history && history.length > 0)
-        ? `\n\nContesto della conversazione recente:\n${history.map(h => `${h.role === 'user' ? 'Utente' : 'Assistente'}: ${h.text}`).join('\n')}` 
-        : '';
-
     const completeness = evaluateProfileCompleteness(baseProfile as UserProfile);
     const scanReadiness = evaluateScanReadiness(baseProfile as UserProfile);
+
+    const directOnClosedQuestion = isClosedMeasureQuestion(userMessage);
+    const directOnAmbiguousMeasure = measureAnswer?.measureId === 'resto-al-sud-ambiguous';
+    const shouldServeGroundedMeasureDirectly = Boolean(
+      measureAnswer?.text &&
+        (
+          strictFocusedGrant ||
+          directOnClosedQuestion ||
+          directOnAmbiguousMeasure ||
+          intentData.comparison ||
+          !apiKey ||
+          intentData.measureQuestion
+        )
+    );
+
+    if (shouldServeGroundedMeasureDirectly) {
+      let citations: ChatCitation[] = [];
+      let estimatedWithWarning = groundingStatus === 'estimated_with_warning';
+
+      try {
+        const looksLikeSpecificBandoQuestion =
+          /(\bbando\b|resto al sud|invitalia|sabatini|smart&start|autoimpiego|de minimis|credito d[' ]imposta|transizione|pnrr|fondo perduto)/i.test(
+            userMessage
+          );
+        if (looksLikeSpecificBandoQuestion) {
+          const queryBase = (activeMeasure.title ?? '').trim() || userMessage.trim();
+          const searchOutcome = await withTimeout(
+            WebSearchService.search(`${queryBase} requisiti scadenza aggiornamenti`),
+            5_200,
+            {
+              ok: false,
+              query: queryBase,
+              results: [],
+              providersUsed: [],
+              unavailableReason: 'Timeout ricerca web'
+            }
+          );
+          if (searchOutcome.ok && searchOutcome.results.length > 0) {
+            citations = searchOutcome.results.slice(0, 6).map((result) => ({
+              title: result.title,
+              url: result.url,
+              sourceTier: result.sourceTier,
+              publishedAt: result.publishedAt,
+              evidenceSnippet: result.evidenceSnippet
+            }));
+            if (searchOutcome.warning) {
+              estimatedWithWarning = true;
+              if (groundingStatus === 'grounded') groundingStatus = 'estimated_with_warning';
+            }
+            if (factSource === 'none') factSource = 'scanner_dataset';
+          } else if (!searchOutcome.ok) {
+            estimatedWithWarning = true;
+            if (groundingStatus === 'grounded') groundingStatus = 'estimated_with_warning';
+          }
+        }
+      } catch {
+        estimatedWithWarning = true;
+      }
+
+      const draftResponseText = composeConsultantMeasureReply(
+        userMessage,
+        {
+          ...(measureAnswer as NonNullable<typeof measureAnswer>),
+          text: String(measureAnswer?.text ?? groundedContext ?? '').trim()
+        }
+      );
+      const polishedResponseText = await polishGroundedMeasureReply({
+        question: userMessage,
+        draft: draftResponseText,
+        measure: {
+          outcome: measureAnswer?.outcome,
+          measureName: measureAnswer?.measureName ?? null,
+          measureId: measureAnswer?.measureId ?? null,
+          factsSnapshot: measureAnswer?.factsSnapshot ?? null,
+        },
+        citations,
+      });
+      const responseText = sanitizeUserFacingMeasureText(polishedResponseText || draftResponseText);
+
+      yield { type: 'thinking', content: false };
+      const streamTokens = responseText.split(/(\s+)/).filter(Boolean);
+      for (const token of streamTokens) {
+        yield { type: 'text', content: token };
+      }
+
+      yield {
+        type: 'metadata',
+        content: {
+          mergedProfile: baseProfile,
+          finalAction: 'answer_measure_question' as const,
+          intent: 'measure_question' as const,
+          missing_fields: completeness.missingSignals,
+          ambiguities: [],
+          groundedContext: measureAnswer?.text ?? groundedContext,
+          factSource,
+          groundingStatus: estimatedWithWarning ? 'estimated_with_warning' : groundingStatus,
+          strategicFeedback: undefined,
+          activeMeasure,
+          response_text: responseText,
+          modelUsed: 'grounded-resolver',
+          routingReason: 'Risposta tecnica servita dal resolver unificato chat/scanner',
+          confidence: computeConfidenceScore({
+            intent: 'measure_question',
+            action: 'answer_measure_question',
+            groundedContext: measureAnswer?.text ?? groundedContext,
+            citationsCount: citations.length,
+            estimatedWithWarning
+          }),
+          citations,
+          estimatedWithWarning
+        }
+      };
+      return;
+    }
+
+    // ── PASS 4: LLM reply streaming (text-first) ─────────────
+    if (!apiKey) {
+        yield { type: 'thinking', content: false };
+        const fallbackText = "Connessione API assente.";
+        yield { type: 'text', content: fallbackText };
+        yield {
+          type: 'metadata',
+          content: {
+            mergedProfile: baseProfile,
+            finalAction: 'ask_clarification' as const,
+            intent: 'profiling' as const,
+            missing_fields: completeness.missingSignals,
+            ambiguities: [],
+            groundedContext: null,
+            factSource: 'none',
+            groundingStatus: 'degraded',
+            strategicFeedback: undefined,
+            activeMeasure,
+            response_text: fallbackText,
+            modelUsed: 'none',
+            routingReason: 'API key mancante',
+            confidence: 0.35,
+            citations: [],
+            estimatedWithWarning: true
+          }
+        };
+        return;
+    }
 
     const intent: ChatDecisionModel['intent'] =
         intentData.asksHumanConsultant
@@ -860,28 +1233,56 @@ export async function* runStreamingChat(
         : `Prossimo dato da chiedere (UNO): nessuno`;
 
     let webContext: string | null = null;
+    let citations: ChatCitation[] = [];
+    let estimatedWithWarning = false;
     try {
         const looksLikeSpecificBandoQuestion =
-            isQuestion &&
+            (isQuestion || intentData.measureQuestion || intentData.comparison) &&
             /(\bbando\b|resto al sud|invitalia|sabatini|smart&start|autoimpiego|de minimis|credito d[' ]imposta|transizione|pnrr|fondo perduto)/i.test(
                 userMessage
             );
         if (looksLikeSpecificBandoQuestion) {
             const queryBase = (activeMeasure.title ?? '').trim() || userMessage.trim();
-            const results = await withTimeout(
+            const searchTimeoutMs = intent === 'measure_question' || intent === 'general_qa' ? 5_200 : 1_400;
+            const searchOutcome = await withTimeout(
                 WebSearchService.search(`${queryBase} requisiti scadenza aggiornamenti`),
-                300,
-                []
+                searchTimeoutMs,
+                {
+                  ok: false,
+                  query: queryBase,
+                  results: [],
+                  providersUsed: [],
+                  unavailableReason: 'Timeout ricerca web'
+                }
             );
-            if (results.length > 0) {
-                webContext = results
-                    .slice(0, 2)
-                    .map((r) => `• ${r.title}: ${r.snippet}`)
+            if (searchOutcome.ok && searchOutcome.results.length > 0) {
+                citations = searchOutcome.results.map((result) => ({
+                  title: result.title,
+                  url: result.url,
+                  sourceTier: result.sourceTier,
+                  publishedAt: result.publishedAt,
+                  evidenceSnippet: result.evidenceSnippet
+                }));
+                webContext = searchOutcome.results
+                    .slice(0, 6)
+                    .map((result) => `• [${result.sourceTier.toUpperCase()}] ${result.title}: ${result.evidenceSnippet}`)
                     .join('\n');
+                if (searchOutcome.warning) {
+                  estimatedWithWarning = true;
+                }
+                if (factSource === 'faq') factSource = 'mixed';
+                else if (factSource === 'none') factSource = 'scanner_dataset';
+                groundingStatus = searchOutcome.warning ? 'estimated_with_warning' : 'grounded';
+            } else if (!searchOutcome.ok && searchOutcome.unavailableReason) {
+                webContext = `LIMITAZIONE RICERCA WEB: ${searchOutcome.unavailableReason}`;
+                estimatedWithWarning = true;
+                groundingStatus = 'degraded';
             }
         }
     } catch {
         webContext = null;
+        estimatedWithWarning = true;
+        groundingStatus = 'degraded';
     }
 
     const enhancedPrompt = [
@@ -889,11 +1290,16 @@ export async function* runStreamingChat(
         'CONTEXT RETENTION: Utilizza tutti i dettagli del profilo e della cronologia recente per dare risposte personalizzate. Ricorda SEMPRE quello che l\'utente ha già detto (es. regione, settore, obiettivo) e usalo per contestualizzare la risposta.',
         'INTELLIGENCE & VALUE: Non limitarti a raccogliere dati. Sei qui per capire il progetto. Se hai i dati base ma senti che fare "una domanda in più" (es. fatturato, dipendenti, età) può sbloccare bandi più precisi, FALA con garbo. Non avere fretta di lanciare lo scanner se la conversazione è ancora fertile.',
         'TONO: Professionale ma amichevole, caloroso, mai robotico o burocratico. Niente preamboli inutili.',
+        'STILE CONSULENZIALE OBBLIGATORIO: rispondi come un consulente umano senior. Evita etichette tecniche in output (es. "forma aiuto:", "copertura indicativa:", "stima forte BNDO:").',
+        'LINGUAGGIO: scrivi in italiano semplice e chiarissimo (livello utente non tecnico). Evita frasi complesse e parole burocratiche.',
+        'FORMATO: usa testo naturale in 1-2 paragrafi, senza elenchi puntati salvo richiesta esplicita dell’utente.',
+        'SE LA DOMANDA È CHIUSA (es. "è tutto a fondo perduto?"): apri sempre con "Sì." oppure "No." e poi spiega in modo chiaro e concreto.',
+        'FONTI: non mostrare mai URL o elenco fonti nella risposta all’utente. Integra invece una frase naturale tipo "abbiamo verificato fonti ufficiali e autorevoli".',
         `LUNGHEZZA: ${
             finalAction === 'ask_clarification'
                 ? '30–70 parole'
                 : intent === 'measure_question' || intent === 'general_qa'
-                    ? '100–250 parole'
+                    ? '6-8 frasi chiare (circa 90-180 parole)'
                     : '60–150 parole'
         }.`,
         groundedContext
@@ -912,8 +1318,6 @@ export async function* runStreamingChat(
 
 
     try {
-        const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o';
-
         const structuredExtractionPromise = (async () => {
             try {
                 const payload = buildExtractionPayload(userMessage, memoryProfile, history, groundedContext);
@@ -927,7 +1331,7 @@ export async function* runStreamingChat(
                             'Authorization': `Bearer ${apiKey}`
                         },
                         body: JSON.stringify({
-                            model: 'gpt-4o-mini', // extraction is perfectly handled by mini (fast and cheap)
+                            model: extractionModel,
                             ...payload,
                             temperature: 0.0
                         }),
@@ -971,11 +1375,15 @@ export async function* runStreamingChat(
 
           messages.push({ role: 'user', content: userContent });
 
-          // DYNAMIC MODEL SELECTION: 
-          // gpt-4o ONLY for technical/complex questions (QA/Measures)
-          // gpt-4o-mini for routine profiling, small talk, etc.
-          const isComplexIntent = intent === 'measure_question' || intent === 'general_qa';
-          const generatingModel = isComplexIntent ? 'gpt-4o' : 'gpt-4o-mini';
+          const routingDecision = selectModelForTurn({
+            intent,
+            action: finalAction,
+            message: userMessage,
+            groundedContext,
+            citationsCount: citations.length,
+            models: { simpleModel, complexModel }
+          });
+          const generatingModel = routingDecision.modelUsed;
 
           const response = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
@@ -984,7 +1392,7 @@ export async function* runStreamingChat(
                   'Authorization': `Bearer ${apiKey}`
               },
               body: JSON.stringify({
-                  model: process.env.OPENAI_MODEL?.trim() || generatingModel,
+                  model: generatingModel,
                   messages,
                   temperature: 0.45,
                   stream: true
@@ -1051,9 +1459,22 @@ export async function* runStreamingChat(
                   missing_fields: extraction?.missing_fields ?? completeness.missingSignals,
                   ambiguities: extraction?.ambiguities ?? [],
                   groundedContext,
+                  factSource,
+                  groundingStatus: estimatedWithWarning ? 'estimated_with_warning' : groundingStatus,
                   strategicFeedback, // Now populated
                   activeMeasure: mergedActiveMeasure,
-                  response_text: assistantText.trim()
+                  response_text: assistantText.trim(),
+                  modelUsed: generatingModel,
+                  routingReason: routingDecision.routingReason,
+                  confidence: computeConfidenceScore({
+                    intent,
+                    action: finalAction,
+                    groundedContext,
+                    citationsCount: citations.length,
+                    estimatedWithWarning
+                  }),
+                  citations: citations.slice(0, 6),
+                  estimatedWithWarning
               }
           };
         } finally {

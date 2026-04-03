@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchGrantDetail, fetchGrantExplainability, type GrantDetailRecord, type GrantExplainabilityRecord } from '@/lib/grants/details';
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
-import { generatePracticeQuizTemplateWithAI } from '@/lib/practices/llmQuizGenerator';
+import { buildDeterministicConditionalQuizQuestions, generatePracticeQuizTemplateWithAI } from '@/lib/practices/llmQuizGenerator';
 import type { Database } from '@/lib/supabase/database.types';
 
 export type PracticeSourceChannel = 'scanner' | 'chat' | 'direct' | 'admin';
@@ -28,7 +28,7 @@ export type PracticeQuizQuestion = {
   isRequired: boolean;
   validation: Record<string, unknown>;
   rule: {
-    kind: 'critical_boolean' | 'investment_range' | 'ateco_validation' | 'geographic_validation' | 'informational' | 'none';
+    kind: 'critical_boolean' | 'investment_range' | 'ateco_validation' | 'geographic_validation' | 'choice_in_set' | 'informational' | 'none';
     expected?: string | null;
   };
   metadata: Record<string, unknown>;
@@ -84,11 +84,265 @@ function readNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizeRuleToken(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function booleanLike(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  const token = normalizeRuleToken(value);
+  if (!token) return null;
+  if (['yes', 'si', 'true', '1', 'y', 'vero'].includes(token)) return true;
+  if (['no', 'false', '0', 'n', 'falso'].includes(token)) return false;
+  return null;
+}
+
+function normalizeChoiceAnswer(question: PracticeQuizQuestion, value: unknown): string {
+  const raw = normalizeRuleToken(value);
+  if (!raw) return '';
+  if (!Array.isArray(question.options) || question.options.length === 0) return raw;
+
+  for (const option of question.options) {
+    const optionValue = normalizeRuleToken(option.value);
+    const optionLabel = normalizeRuleToken(option.label);
+    if (raw === optionValue || raw === optionLabel) {
+      return optionValue || optionLabel || raw;
+    }
+  }
+  return raw;
+}
+
+function shouldApplyCriticalBooleanRule(question: PracticeQuizQuestion) {
+  if (question.rule.kind !== 'critical_boolean') return false;
+  const expectedRaw = normalizeRuleToken(question.rule.expected ?? '');
+  if (!expectedRaw) return false;
+
+  if (question.questionType === 'boolean') return true;
+  if (question.questionType !== 'single_select') return false;
+  if (!Array.isArray(question.options) || question.options.length === 0) return false;
+
+  const optionTokens = question.options
+    .flatMap((option) => [normalizeRuleToken(option.value), normalizeRuleToken(option.label)])
+    .filter(Boolean);
+
+  const expectedBoolean = booleanLike(expectedRaw);
+  const optionsAreBooleanLike = optionTokens.length > 0 && optionTokens.every((token) => booleanLike(token) !== null);
+  return expectedBoolean !== null && optionsAreBooleanLike;
+}
+
+function parseExpectedChoiceSet(value: string | null | undefined): Set<string> {
+  const token = normalizeRuleToken(value ?? '');
+  if (!token) return new Set();
+  return new Set(
+    token
+      .split(/[|,]/g)
+      .map((item) => normalizeRuleToken(item))
+      .filter(Boolean)
+  );
+}
+
+function readRuleStrength(question: PracticeQuizQuestion): 'hard' | 'soft' {
+  const raw =
+    question.metadata && typeof question.metadata === 'object'
+      ? (question.metadata as Record<string, unknown>).ruleStrength
+      : null;
+  const token = normalizeRuleToken(raw);
+  if (token === 'hard') return 'hard';
+  if (token === 'soft') return 'soft';
+
+  if (
+    question.rule.kind === 'critical_boolean' ||
+    question.rule.kind === 'choice_in_set' ||
+    question.rule.kind === 'ateco_validation' ||
+    question.rule.kind === 'geographic_validation'
+  ) {
+    return 'hard';
+  }
+  return 'soft';
+}
+
+type ShowIfRule = {
+  questionKey: string;
+  anyOf?: string[];
+  equals?: string;
+  noneOf?: string[];
+};
+
+function readShowIfRule(question: PracticeQuizQuestion): ShowIfRule | null {
+  if (!question.metadata || typeof question.metadata !== 'object') return null;
+  const raw = (question.metadata as Record<string, unknown>).showIf;
+  if (!raw || typeof raw !== 'object') return null;
+
+  const data = raw as Record<string, unknown>;
+  const questionKey = typeof data.questionKey === 'string' ? data.questionKey.trim() : '';
+  if (!questionKey) return null;
+
+  const anyOf = Array.isArray(data.anyOf)
+    ? data.anyOf.map((item) => normalizeRuleToken(item)).filter(Boolean)
+    : undefined;
+  const noneOf = Array.isArray(data.noneOf)
+    ? data.noneOf.map((item) => normalizeRuleToken(item)).filter(Boolean)
+    : undefined;
+  const equals = typeof data.equals === 'string' ? normalizeRuleToken(data.equals) : undefined;
+
+  return {
+    questionKey,
+    anyOf,
+    noneOf,
+    equals
+  };
+}
+
+function isQuestionVisibleForAnswers(
+  question: PracticeQuizQuestion,
+  answers: Record<string, unknown>,
+  questionByKey: Map<string, PracticeQuizQuestion>
+) {
+  const showIf = readShowIfRule(question);
+  if (!showIf) return true;
+
+  const parentQuestion = questionByKey.get(showIf.questionKey);
+  if (!parentQuestion) return true;
+
+  const rawAnswer = answers[showIf.questionKey];
+  if (rawAnswer === undefined || rawAnswer === null || rawAnswer === '') return false;
+
+  const normalizedAnswer = normalizeChoiceAnswer(parentQuestion, rawAnswer);
+  const normalizedBoolean = booleanLike(rawAnswer);
+  const normalizedToken =
+    normalizedAnswer ||
+    (normalizedBoolean === null ? '' : normalizedBoolean ? 'yes' : 'no') ||
+    normalizeRuleToken(rawAnswer);
+
+  if (!normalizedToken) return false;
+
+  if (showIf.equals && normalizedToken !== showIf.equals) return false;
+  if (showIf.anyOf && showIf.anyOf.length > 0 && !showIf.anyOf.includes(normalizedToken)) return false;
+  if (showIf.noneOf && showIf.noneOf.length > 0 && showIf.noneOf.includes(normalizedToken)) return false;
+
+  return true;
+}
+
+function hasWeakQuizShape(questions: PracticeQuizQuestion[]) {
+  if (questions.length < 5) return true;
+  const required = questions.filter((question) => question.isRequired);
+  const nonBooleanCount = required.filter((question) => question.questionType !== 'boolean').length;
+  if (nonBooleanCount < 2) return true;
+
+  const decisiveCount = required.filter((question) =>
+    ['critical_boolean', 'choice_in_set', 'investment_range', 'ateco_validation', 'geographic_validation'].includes(
+      question.rule.kind
+    )
+  ).length;
+  if (decisiveCount < 3) return true;
+
+  const distinctCategories = new Set(required.map((question) => categoryOfQuestion(question)));
+  if (distinctCategories.size < 3) return true;
+
+  const genericCount = required.filter((question) => {
+    const text = normalizeQuestionText(`${question.label} ${question.description ?? ''}`);
+    return /(il tuo profilo|puoi rispettare|coerente con il bando|requisiti base|confermi di|requisito tecnico più stringente)/.test(
+      text
+    );
+  }).length;
+  return genericCount >= Math.ceil(required.length * 0.6);
+}
+
 function firstSentence(value: string | null | undefined) {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return null;
   const [first] = trimmed.split(/(?<=[.!?])\s+/);
   return first || trimmed;
+}
+
+function normalizeQuestionText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function categoryOfQuestion(question: PracticeQuizQuestion): string {
+  const direct =
+    question.metadata && typeof question.metadata.category === 'string'
+      ? normalizeQuestionText(question.metadata.category)
+      : '';
+  if (direct) return direct;
+  const text = normalizeQuestionText(
+    `${question.questionKey} ${question.label} ${question.description ?? ''} ${question.reasoning ?? ''}`
+  );
+  if (/(beneficiar|richiedent|soggetto)/.test(text)) return 'beneficiari';
+  if (/(settor|ateco)/.test(text)) return 'settore';
+  if (/(region|territor|sede)/.test(text)) return 'territorio';
+  if (/(importo|investimento|budget|spesa)/.test(text)) return 'economico';
+  if (/(eta|under|over|giovan)/.test(text)) return 'eta';
+  if (/(occupaz|disoccup|inoccup|gol|contratto)/.test(text)) return 'occupazionale';
+  if (/(anni|anzianit|costituit)/.test(text)) return 'anzianita';
+  if (/(timeline|scadenz|termine)/.test(text)) return 'timeline';
+  return 'other';
+}
+
+function isDocumentationQuizQuestion(question: PracticeQuizQuestion) {
+  const category =
+    question.metadata && typeof question.metadata.category === 'string'
+      ? normalizeQuestionText(question.metadata.category)
+      : '';
+  const haystack = normalizeQuestionText(
+    [
+      question.questionKey,
+      question.label,
+      question.description ?? '',
+      question.reasoning ?? '',
+      category
+    ].join(' ')
+  );
+
+  if (!haystack) return false;
+  if (category.includes('document')) return true;
+  if (category.includes('allegat')) return true;
+  if (category.includes('doc')) return true;
+
+  return /(document|documentazione|documenti|allegat|visura|bilanc|business plan|piano impresa|preventiv|certificaz|isee|did|atto costitutivo|statuto)/.test(
+    haystack
+  );
+}
+
+function isLowSignalQuizQuestion(question: PracticeQuizQuestion) {
+  const text = normalizeQuestionText(
+    `${question.label} ${question.description ?? ''} ${question.reasoning ?? ''} ${question.questionKey}`
+  );
+  if (!text) return true;
+  if (
+    /(il tuo profilo|coerente con il bando|confermi di soddisfare questo requisito|requisito tecnico piu stringente|requisiti base)/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+  if ((question.label ?? '').trim().length < 10 || (question.label ?? '').trim().length > 150) return true;
+  return false;
+}
+
+function sanitizePracticeQuizQuestions(questions: PracticeQuizQuestion[]) {
+  const filtered = questions
+    .filter((question) => !isDocumentationQuizQuestion(question))
+    .filter((question) => !isLowSignalQuizQuestion(question))
+    .map((question) => ({
+      ...question,
+      label: String(question.label ?? '').trim(),
+      description: firstSentence(question.description),
+      reasoning: firstSentence(question.reasoning),
+    }));
+
+  const deduped = uniqBy(filtered, (question) => question.questionKey);
+  return deduped.slice(0, 8);
 }
 
 function uniqBy<T>(items: T[], getKey: (item: T) => string) {
@@ -291,18 +545,14 @@ async function buildRuntimeFlowFromApplication(client: AdminClient, applicationI
   let cachedQuestions: PracticeQuizQuestion[] | null = null;
   
   if (cachedTenderMetadata && Array.isArray(cachedTenderMetadata.ai_quiz_questions)) {
-    cachedQuestions = cachedTenderMetadata.ai_quiz_questions as PracticeQuizQuestion[];
+    cachedQuestions = sanitizePracticeQuizQuestions(cachedTenderMetadata.ai_quiz_questions as PracticeQuizQuestion[]);
+  }
+  if (cachedQuestions && hasWeakQuizShape(cachedQuestions)) {
+    cachedQuestions = null;
   }
   if (cachedQuestions && cachedQuestions.length > 0) {
-    // If the DB already has AI generated questions, we construct the template
-    const lowerText = [
-      grantCandidate?.detail.title ?? '',
-      grantCandidate?.detail.aidForm ?? '',
-      grantCandidate?.explainability.missingRequirements.join(' ') ?? '',
-      grantCandidate?.explainability.applySteps.join(' ') ?? ''
-    ].join(' ').toLowerCase();
-
-    const requirements = extractFallbackRequirements(grantCandidate!.detail, grantCandidate!.explainability, 'direct');
+    // If the DB already has AI generated questions, we construct the template.
+    const requirements = derivePracticeRequirementsFromGrant(grantCandidate!.detail, grantCandidate!.explainability, 'direct');
     
     template = {
       metadata: {},
@@ -376,123 +626,11 @@ function buildTemplateMetadata(detail: GrantDetailRecord, explainability: GrantE
 
 function buildFallbackPracticeQuizTemplate(detail: GrantDetailRecord, explainability: GrantExplainabilityRecord, sourceChannel: PracticeSourceChannel): PracticeFlowTemplate {
   const metadata = buildTemplateMetadata(detail, explainability);
-  const economic = metadata.economic as ReturnType<typeof extractEconomic>;
-  const beneficiaryHint = detail.beneficiaries.slice(0, 4).join(', ');
-  const sectorHint = detail.sectors.slice(0, 4).join(', ');
-  const missingRequirement = firstSentence(explainability.missingRequirements[0]);
+  const questions = sanitizePracticeQuizQuestions(
+    buildDeterministicConditionalQuizQuestions(detail, explainability)
+  );
 
-  const questions: PracticeQuizQuestion[] = uniqBy([
-    {
-      questionKey: 'beneficiary_fit',
-      label: 'Il tuo profilo rientra tra i beneficiari previsti dal bando?',
-      description: beneficiaryHint ? `Beneficiari indicati: ${beneficiaryHint}` : 'Conferma la coerenza del soggetto richiedente.',
-      reasoning: 'Verifica preliminare della corrispondenza tra la natura giuridica del richiedente e i soggetti ammessi dal bando.',
-      questionType: 'boolean',
-      options: [
-        { value: 'yes', label: 'Sì' },
-        { value: 'no', label: 'No' }
-      ],
-      isRequired: true,
-      validation: {},
-      rule: { kind: 'critical_boolean', expected: 'yes' },
-      metadata: { category: 'beneficiari' }
-    },
-    {
-      questionKey: 'sector_fit',
-      label: 'Il tuo settore / ATECO è coerente con il bando selezionato?',
-      description: sectorHint ? `Settori segnalati: ${sectorHint}` : 'Conferma la compatibilità del settore di attività.',
-      reasoning: 'Molti bandi limitano l’accesso a specifici codici ATECO. Questa domanda serve a prevenire l’esclusione per incompatibilità settoriale.',
-      questionType: 'boolean',
-      options: [
-        { value: 'yes', label: 'Sì' },
-        { value: 'no', label: 'No' }
-      ],
-      isRequired: true,
-      validation: {},
-      rule: { kind: 'critical_boolean', expected: 'yes' },
-      metadata: { category: 'settore' }
-    },
-    {
-      questionKey: 'investment_amount',
-      label: "Qual è l'investimento previsto per questa pratica?",
-      description:
-        economic.displayProjectAmountLabel ||
-        (economic.costMin || economic.costMax
-          ? `Range indicativo bando: ${[economic.costMin, economic.costMax].filter(Boolean).join(' - ')}`
-          : 'Inserisci l’importo complessivo stimato.'),
-      reasoning: 'L’importo dell’investimento determina l’ammissibilità e l’entità del contributo massimo concedibile.',
-      questionType: 'number',
-      options: [],
-      isRequired: true,
-      validation: {
-        min: economic.costMin,
-        max: economic.costMax ?? detail.budgetTotal ?? null,
-      },
-      rule: { kind: 'investment_range' },
-      metadata: { category: 'economico' }
-    },
-    {
-      questionKey: 'timeline_fit',
-      label: 'Riesci a candidarti entro le tempistiche utili del bando?',
-      description: detail.deadlineDate
-        ? `Scadenza indicativa: ${new Date(detail.deadlineDate).toLocaleDateString('it-IT')}`
-        : 'Conferma di riuscire a rispettare la finestra di candidatura.',
-      reasoning: 'Il rispetto dei termini di presentazione è una condizione di ammissibilità formale insuperabile.',
-      questionType: 'boolean',
-      options: [
-        { value: 'yes', label: 'Sì' },
-        { value: 'no', label: 'No' }
-      ],
-      isRequired: true,
-      validation: {},
-      rule: { kind: 'critical_boolean', expected: 'yes' },
-      metadata: { category: 'timeline' }
-    },
-    {
-      questionKey: 'key_requirement_fit',
-      label: 'Puoi rispettare il requisito chiave indicato per questo bando?',
-      description: missingRequirement ?? 'Conferma di poter soddisfare i requisiti chiave del bando.',
-      reasoning: 'Verifica della fattibilità rispetto alle condizioni specifiche più stringenti individuate dall’analisi tecnica.',
-      questionType: 'boolean',
-      options: [
-        { value: 'yes', label: 'Sì' },
-        { value: 'no', label: 'No' }
-      ],
-      isRequired: true,
-      validation: {},
-      rule: { kind: 'critical_boolean', expected: 'yes' },
-      metadata: { category: 'requisiti' }
-    },
-    detail.requiredDocuments?.length ? {
-      questionKey: 'documentation_fit',
-      label: 'Puoi confermare di avere tutta la documentazione minima richiesta?',
-      description: `Documenti necessari: ${detail.requiredDocuments.join(', ')}.`,
-      reasoning: 'La mancanza della documentazione minima comporta il rigetto immediato della domanda.',
-      questionType: 'boolean',
-      options: [
-        { value: 'yes', label: 'Sì' },
-        { value: 'no', label: 'No' }
-      ],
-      isRequired: true,
-      validation: {},
-      rule: { kind: 'critical_boolean', expected: 'yes' },
-      metadata: { category: 'documentazione' }
-    } : null,
-    {
-      questionKey: 'project_notes',
-      label: 'Aggiungi una nota utile per il consulente',
-      description: 'Facoltativa ma consigliata per velocizzare la verifica requisiti.',
-      reasoning: 'Le note permettono al consulente umano di inquadrare meglio il caso e suggerire varianti o altri bandi compatibili.',
-      questionType: 'text',
-      options: [],
-      isRequired: false,
-      validation: { maxLength: 800 },
-      rule: { kind: 'informational' },
-      metadata: { category: 'note' }
-    }
-  ].filter((q) => q !== null) as PracticeQuizQuestion[], (question) => question.questionKey);
-
-  const requirements = extractFallbackRequirements(detail, explainability, sourceChannel);
+  const requirements = derivePracticeRequirementsFromGrant(detail, explainability, sourceChannel);
 
   return {
     metadata,
@@ -501,7 +639,11 @@ function buildFallbackPracticeQuizTemplate(detail: GrantDetailRecord, explainabi
   };
 }
 
-function extractFallbackRequirements(detail: GrantDetailRecord, explainability: GrantExplainabilityRecord, sourceChannel: PracticeSourceChannel): PracticeDocumentRequirement[] {
+export function derivePracticeRequirementsFromGrant(
+  detail: GrantDetailRecord,
+  explainability: GrantExplainabilityRecord,
+  sourceChannel: PracticeSourceChannel
+): PracticeDocumentRequirement[] {
   const beneficiaryHint = detail.beneficiaries.slice(0, 4).join(', ');
   const sectorHint = detail.sectors.slice(0, 4).join(', ');
   
@@ -513,6 +655,37 @@ function extractFallbackRequirements(detail: GrantDetailRecord, explainability: 
     explainability.missingRequirements.join(' '),
     explainability.applySteps.join(' ')
   ].join(' ').toLowerCase();
+
+  const requiredDocsFromGrant = (detail.requiredDocuments ?? [])
+    .map((label) => String(label ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 16)
+    .map((label) => ({
+      requirementKey: `doc_${slugify(label) || 'documento'}`,
+      label,
+      description: 'Documento richiesto dal bando selezionato.',
+      isRequired: true,
+      sourceChannel,
+      metadata: { category: 'grant_specific', source: 'grant_required_documents' }
+    }));
+
+  const isRestoSud20 =
+    lowerText.includes('resto al sud 2.0') ||
+    lowerText.includes('resto al sud 20') ||
+    lowerText.includes('resto_sud_2_0') ||
+    lowerText.includes('resto-al-sud-2-0');
+  const isAutoimpiegoCentroNord =
+    lowerText.includes('autoimpiego centro nord') ||
+    lowerText.includes('autoimpiego-centro-nord') ||
+    lowerText.includes('autoimpiego_centro_nord') ||
+    lowerText.includes('oltre nuove imprese a tasso zero') ||
+    lowerText.includes('on - oltre nuove imprese');
+  const needsDidRequirement =
+    isRestoSud20 ||
+    isAutoimpiegoCentroNord ||
+    lowerText.includes('did') ||
+    lowerText.includes('disoccup') ||
+    lowerText.includes('inoccup');
 
   const requirements: PracticeDocumentRequirement[] = uniqBy([
     {
@@ -530,14 +703,6 @@ function extractFallbackRequirements(detail: GrantDetailRecord, explainability: 
       isRequired: true,
       sourceChannel,
       metadata: { category: 'identity' }
-    },
-    {
-      requirementKey: 'descrizione_progetto',
-      label: 'Descrizione sintetica del progetto',
-      description: 'Breve descrizione dell’iniziativa o investimento da presentare.',
-      isRequired: true,
-      sourceChannel,
-      metadata: { category: 'project' }
     },
     {
       requirementKey: 'preventivi_spesa',
@@ -567,7 +732,7 @@ function extractFallbackRequirements(detail: GrantDetailRecord, explainability: 
           metadata: { category: 'project' }
         }
       : null,
-    lowerText.includes('did') || lowerText.includes('disoccup')
+    needsDidRequirement
       ? {
           requirementKey: 'certificazione_did',
           label: 'Certificazione DID / stato occupazionale',
@@ -577,6 +742,8 @@ function extractFallbackRequirements(detail: GrantDetailRecord, explainability: 
           metadata: { category: 'occupational' }
         }
       : null
+    ,
+    ...requiredDocsFromGrant
   ].filter(Boolean) as PracticeDocumentRequirement[], (requirement) => requirement.requirementKey);
 
   return requirements;
@@ -969,30 +1136,45 @@ export async function ensurePracticeFlow(
   }
 
   const forceRefresh = tenderMeta.force_ai_refresh === true;
+  const cachedAiQuestions =
+    !forceRefresh && Array.isArray(tenderMeta.ai_quiz_questions)
+      ? sanitizePracticeQuizQuestions(tenderMeta.ai_quiz_questions as PracticeQuizQuestion[])
+      : [];
+  const shouldIgnoreCachedQuestions = cachedAiQuestions.length > 0 && hasWeakQuizShape(cachedAiQuestions);
 
   let questionsForTemplate: PracticeQuizQuestion[] = [];
   
-  if (!forceRefresh && tenderMeta.ai_quiz_questions && Array.isArray(tenderMeta.ai_quiz_questions) && tenderMeta.ai_quiz_questions.length > 0) {
-    questionsForTemplate = tenderMeta.ai_quiz_questions as PracticeQuizQuestion[];
+  if (!forceRefresh && !shouldIgnoreCachedQuestions && cachedAiQuestions.length > 0) {
+    questionsForTemplate = cachedAiQuestions;
   } else {
-    // Fetch specifically created AI questions with OpenAI
-    const generatedQuestions = await generatePracticeQuizTemplateWithAI(detail, explainability);
-    if (generatedQuestions && generatedQuestions.length > 0) {
-      questionsForTemplate = generatedQuestions;
-      // Cache the newly generated questions back to the DB so future applications for this tender skip OpenAI
-      tenderMeta.ai_quiz_questions = generatedQuestions;
-      // Clear the refresh flag after success
-      if (forceRefresh) {
-        delete tenderMeta.force_ai_refresh;
+    try {
+      // Fetch specifically created AI questions with OpenAI
+      const generatedQuestions = await generatePracticeQuizTemplateWithAI(detail, explainability);
+      const sanitizedGeneratedQuestions = sanitizePracticeQuizQuestions(generatedQuestions ?? []);
+      if (sanitizedGeneratedQuestions.length > 0) {
+        questionsForTemplate = sanitizedGeneratedQuestions;
+        // Cache the newly generated questions back to the DB so future applications for this tender skip OpenAI
+        tenderMeta.ai_quiz_questions = sanitizedGeneratedQuestions;
+        // Clear the refresh flag after success
+        if (forceRefresh) {
+          delete tenderMeta.force_ai_refresh;
+        }
+        await admin.from('tenders').update({ metadata: tenderMeta as any }).eq('id', tenderId);
+      } else {
+        // Ultimate fallback if OpenAI returns empty
+        questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
       }
-      await admin.from('tenders').update({ metadata: tenderMeta as any }).eq('id', tenderId);
-    } else {
+    } catch {
       // Ultimate fallback if OpenAI fails or times out
       questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
     }
   }
 
-  const requirements = extractFallbackRequirements(detail, explainability, args.sourceChannel);
+  if (questionsForTemplate.length === 0) {
+    questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
+  }
+
+  const requirements = derivePracticeRequirementsFromGrant(detail, explainability, args.sourceChannel);
   const template: PracticeFlowTemplate = {
     metadata: {},
     questions: questionsForTemplate,
@@ -1028,23 +1210,74 @@ export function evaluatePracticeQuiz(
   const normalizedAnswers = Object.fromEntries(
     Object.entries(answers).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])
   );
+  const questionByKey = new Map(template.questions.map((question) => [question.questionKey, question]));
 
   const notes: string[] = [];
   let criticalFailure = false;
   let needsReview = false;
 
   for (const question of template.questions) {
+    const isVisible = isQuestionVisibleForAnswers(question, normalizedAnswers, questionByKey);
+    if (!isVisible) {
+      continue;
+    }
+    const ruleStrength = readRuleStrength(question);
     const answer = normalizedAnswers[question.questionKey];
     if (question.isRequired && (answer === undefined || answer === null || answer === '')) {
-      notes.push(`Risposta mancante: ${question.label}`);
+      notes.push(`Risposta obbligatoria mancante: ${question.label}`);
       needsReview = true;
       continue;
     }
 
     if (question.rule.kind === 'critical_boolean') {
-      if (answer !== question.rule.expected) {
-        criticalFailure = true;
-        notes.push(`Requisito non soddisfatto: ${question.label}`);
+      if (!shouldApplyCriticalBooleanRule(question)) {
+        continue;
+      }
+
+      if (question.questionType === 'boolean') {
+        const answerBool = booleanLike(answer);
+        const expectedBool = booleanLike(question.rule.expected ?? null);
+        if (answerBool !== null && expectedBool !== null) {
+          if (answerBool !== expectedBool) {
+            if (ruleStrength === 'hard') {
+              criticalFailure = true;
+            } else {
+              needsReview = true;
+            }
+            notes.push(`Requisito ${ruleStrength === 'hard' ? 'non soddisfatto' : 'da approfondire'}: ${question.label}`);
+          }
+          continue;
+        }
+      }
+
+      const normalizedAnswer = normalizeChoiceAnswer(question, answer);
+      const normalizedExpected = normalizeChoiceAnswer(question, question.rule.expected ?? '');
+      if (!normalizedAnswer || !normalizedExpected) {
+        continue;
+      }
+      if (normalizedAnswer !== normalizedExpected) {
+        if (ruleStrength === 'hard') {
+          criticalFailure = true;
+        } else {
+          needsReview = true;
+        }
+        notes.push(`Requisito ${ruleStrength === 'hard' ? 'non soddisfatto' : 'da verificare'}: ${question.label}`);
+      }
+    }
+
+    if (question.rule.kind === 'choice_in_set') {
+      const normalizedAnswer = normalizeChoiceAnswer(question, answer);
+      const allowedSet = parseExpectedChoiceSet(question.rule.expected ?? null);
+      if (!normalizedAnswer || allowedSet.size === 0) {
+        continue;
+      }
+      if (!allowedSet.has(normalizedAnswer)) {
+        if (ruleStrength === 'hard') {
+          criticalFailure = true;
+        } else {
+          needsReview = true;
+        }
+        notes.push(`Requisito ${ruleStrength === 'hard' ? 'non soddisfatto' : 'da approfondire'}: ${question.label}`);
       }
     }
 
@@ -1054,16 +1287,24 @@ export function evaluatePracticeQuiz(
       const max = readNumber(question.validation.max);
       if (numeric === null) {
         needsReview = true;
-        notes.push('Importo investimento da verificare.');
+        notes.push(`Importo da verificare: ${question.label}`);
         continue;
       }
       if (min !== null && numeric < min) {
-        needsReview = true;
-        notes.push(`Importo inferiore al minimo indicativo (${min}).`);
+        if (ruleStrength === 'hard') {
+          criticalFailure = true;
+        } else {
+          needsReview = true;
+        }
+        notes.push(`Importo inferiore al minimo richiesto (${min}) su: ${question.label}.`);
       }
       if (max !== null && numeric > max) {
-        needsReview = true;
-        notes.push(`Importo superiore al massimale indicativo (${max}).`);
+        if (ruleStrength === 'hard') {
+          criticalFailure = true;
+        } else {
+          needsReview = true;
+        }
+        notes.push(`Importo superiore al massimale consentito (${max}) su: ${question.label}.`);
       }
     }
   }
@@ -1164,7 +1405,8 @@ export async function completePracticeQuiz(
     submissionId,
     completedAt,
     eligibility: evaluation.eligibility,
-    requirements: args.template.requirements
+    requirements: args.template.requirements,
+    reviewNotes: evaluation.notes
   };
 }
 
@@ -1213,6 +1455,25 @@ export async function loadPracticeFlowForApplication(
     if (runtimeFlow) return runtimeFlow;
   }
 
+  const mappedQuestions = (questions ?? []).map((question) => ({
+    questionKey: question.question_key,
+    label: question.label,
+    description: question.description,
+    reasoning: (question as any).reasoning ?? null,
+    questionType: question.question_type as PracticeQuizQuestionType,
+    options: ((question.options as PracticeQuizOption[] | null) ?? []),
+    isRequired: question.is_required,
+    validation: (question.validation as Record<string, unknown> | null) ?? {},
+    rule: (question.rule as any) ?? {},
+    metadata: (question.metadata as Record<string, unknown> | null) ?? {},
+  }));
+  const sanitizedQuestions = sanitizePracticeQuizQuestions(mappedQuestions);
+
+  if (mappedQuestions.length > 0 && sanitizedQuestions.length === 0) {
+    const runtimeFlow = await buildRuntimeFlowFromApplication(client, applicationId);
+    if (runtimeFlow) return runtimeFlow;
+  }
+
   return {
     applicationId: template.application_id,
     tenderId: template.tender_id,
@@ -1222,18 +1483,7 @@ export async function loadPracticeFlowForApplication(
     sourceChannel: template.source_channel as PracticeSourceChannel,
     templateId: template.id,
     metadata: (template.metadata as Record<string, unknown> | null) ?? {},
-    questions: (questions ?? []).map((question) => ({
-      questionKey: question.question_key,
-      label: question.label,
-      description: question.description,
-      reasoning: (question as any).reasoning ?? null,
-      questionType: question.question_type as PracticeQuizQuestionType,
-      options: ((question.options as PracticeQuizOption[] | null) ?? []),
-      isRequired: question.is_required,
-      validation: (question.validation as Record<string, unknown> | null) ?? {},
-      rule: (question.rule as any) ?? {},
-      metadata: (question.metadata as Record<string, unknown> | null) ?? {},
-    })),
+    questions: sanitizedQuestions,
     requirements: (requirements ?? []).map((requirement) => ({
       requirementKey: requirement.requirement_key,
       label: requirement.label,

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProgressBarPro as ProgressBar } from '@/components/views/ProgressBarPro';
+import GrantAiPopup from '@/components/views/GrantAiPopup';
 
 interface GrantDetail {
   id: string;
@@ -18,6 +19,8 @@ interface GrantDetail {
   sectors: string[];
   officialUrl: string;
   officialAttachments: string[];
+  description?: string | null;
+  requiredDocuments?: string[];
   requisitiHard: Record<string, unknown>;
   requisitiSoft: Record<string, unknown>;
   requisitiStrutturati: Record<string, unknown>;
@@ -47,7 +50,7 @@ const formatDate = (value: string | null, fallback: string) => {
 };
 
 const formatMoney = (value: number | null): string => {
-  if (value === null || !Number.isFinite(value) || value <= 0) return 'Dati economici in aggiornamento';
+  if (value === null || !Number.isFinite(value) || value <= 0) return 'In aggiornamento su fonte ufficiale';
   return `€ ${Math.round(value).toLocaleString('it-IT')}`;
 };
 
@@ -107,46 +110,188 @@ const parseCoverageRange = (
   };
 };
 
-const economicSummaryFromDetail = (detail: GrantDetail): { grantAmount: string; coverage: string; projectAmount: string } => {
+const PLACEHOLDER_PATTERNS = [
+  'da verificare',
+  'n/d',
+  'non disponibile',
+  'in aggiornamento',
+  'non indicato',
+  'not available',
+];
+
+const isPlaceholderValue = (value: string | null | undefined): boolean => {
+  if (!value) return true;
+  const normalized = normalizeText(value);
+  if (!normalized) return true;
+  return PLACEHOLDER_PATTERNS.some((token) => normalized.includes(token));
+};
+
+const cleanEconomicLabel = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return isPlaceholderValue(trimmed) ? null : trimmed;
+};
+
+type AidSemanticMode =
+  | 'fondo_perduto'
+  | 'interessi'
+  | 'finanziamento'
+  | 'garanzia'
+  | 'misto'
+  | 'non_specificato';
+
+const inferAidSemanticMode = (detail: GrantDetail): AidSemanticMode => {
+  const source = normalizeText([detail.aidForm, detail.aidIntensity, detail.description].filter(Boolean).join(' '));
+  if (!source) return 'non_specificato';
+
+  const hasFondoPerduto = /(fondo perduto|conto capitale|conto impianti|contributo diretto|voucher)/.test(source);
+  const hasInteressi = /(conto interess|abbattiment[oa] tasso|tasso agevolat|interessi passivi|contributo interessi|tasso d.?interesse)/.test(
+    source,
+  );
+  const hasFinanziamento = /(finanziamento agevolato|mutuo agevolato|prestito agevolato|credito agevolato)/.test(source);
+  const hasGaranzia = /(garanzia pubblica|fondo di garanzia|garanzia statale)/.test(source);
+
+  const activeModes = [hasFondoPerduto, hasInteressi, hasFinanziamento, hasGaranzia].filter(Boolean).length;
+  if (activeModes > 1) return 'misto';
+  if (hasFondoPerduto) return 'fondo_perduto';
+  if (hasInteressi) return 'interessi';
+  if (hasFinanziamento) return 'finanziamento';
+  if (hasGaranzia) return 'garanzia';
+  return 'non_specificato';
+};
+
+const parseMoneyToken = (value: string): number | null => {
+  const cleaned = value.replace(/\s+/g, '').replace(/€/g, '').replace(/[^0-9,.-]/g, '');
+  if (!cleaned) return null;
+  let normalized = cleaned;
+  if (cleaned.includes(',') && cleaned.includes('.')) {
+    normalized =
+      cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned.replace(/,/g, '');
+  } else if (cleaned.includes(',')) {
+    normalized = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    const dots = cleaned.match(/\./g)?.length ?? 0;
+    if (dots >= 1) normalized = cleaned.replace(/\./g, '');
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const extractMoneyRangeFromText = (value: string | null | undefined): { min: number | null; max: number | null } => {
+  if (!value) return { min: null, max: null };
+  const text = value.replace(/\s+/g, ' ');
+
+  const rangeMatch = text.match(
+    /da\s+([\d.,]+)\s*(?:€|euro)?\s*(?:fino\s*)?(?:a|ad)\s+([\d.,]+)\s*(?:€|euro)/i,
+  );
+  if (rangeMatch) {
+    const min = parseMoneyToken(rangeMatch[1]);
+    const max = parseMoneyToken(rangeMatch[2]);
+    if (min !== null || max !== null) {
+      return {
+        min: min !== null && max !== null ? Math.min(min, max) : min ?? max,
+        max: min !== null && max !== null ? Math.max(min, max) : max ?? min,
+      };
+    }
+  }
+
+  const upToMatches = Array.from(text.matchAll(/fino\s+(?:a|ad)?\s*([\d.,]+)\s*(?:€|euro)/gi))
+    .map((match) => parseMoneyToken(match[1]))
+    .filter((num): num is number => num !== null);
+  if (upToMatches.length > 0) {
+    return { min: null, max: Math.max(...upToMatches) };
+  }
+
+  const euroMatches = Array.from(text.matchAll(/([\d][\d.,]{2,})\s*(?:€|euro)/gi))
+    .map((match) => parseMoneyToken(match[1]))
+    .filter((num): num is number => num !== null);
+  if (euroMatches.length > 0) {
+    return { min: Math.min(...euroMatches), max: Math.max(...euroMatches) };
+  }
+
+  return { min: null, max: null };
+};
+
+const buildConciseDescription = (description: string | null | undefined): string | null => {
+  if (!description) return null;
+  const clean = description
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return null;
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!sentences.length) return `${clean.slice(0, 237).trim()}…`;
+
+  const userValueRegex =
+    /(finanzia|sostiene|agevola|copre|contribut|voucher|investiment|spes[ae]|imprese|beneficiar|attivita|progett|digital|innovaz|energia|export|internaz)/i;
+  const legalNoiseRegex =
+    /(decreto|circolare|regolamento|gazzetta|art\.|articolo|comma|ai sensi|d\.lgs|d\.l\.|ue\s*\d|202\d\/\d+)/i;
+
+  const preferred = sentences.filter((sentence) => userValueRegex.test(normalizeText(sentence)) && !legalNoiseRegex.test(normalizeText(sentence)));
+  const fallback = sentences.filter((sentence) => !legalNoiseRegex.test(normalizeText(sentence)));
+  const source = preferred.length > 0 ? preferred : fallback.length > 0 ? fallback : sentences;
+
+  const picked: string[] = [];
+  let used = 0;
+  for (const sentence of source) {
+    const normalizedSentence = sentence.replace(/\s+/g, ' ').trim();
+    if (!normalizedSentence) continue;
+    const nextLen = used + normalizedSentence.length + (picked.length ? 1 : 0);
+    if (nextLen > 280) break;
+    picked.push(normalizedSentence);
+    used = nextLen;
+    if (picked.length >= 2) break;
+  }
+
+  if (picked.length > 0) return picked.join(' ');
+  return `${source[0].slice(0, 277).trim()}…`;
+};
+
+const economicSummaryFromDetail = (
+  detail: GrantDetail,
+): { grantAmount: string; coverage: string; projectAmount: string; coverageTitle: string } => {
   const structuredEconomic =
     detail.requisitiStrutturati && typeof detail.requisitiStrutturati === 'object'
       ? (detail.requisitiStrutturati.economic as Record<string, unknown> | undefined)
       : undefined;
-  const displayAmountLabel =
-    typeof structuredEconomic?.displayAmountLabel === 'string' && structuredEconomic.displayAmountLabel.trim()
-      ? structuredEconomic.displayAmountLabel.trim()
-      : null;
-  const displayProjectAmountLabel =
-    typeof structuredEconomic?.displayProjectAmountLabel === 'string' && structuredEconomic.displayProjectAmountLabel.trim()
-      ? structuredEconomic.displayProjectAmountLabel.trim()
-      : null;
-  const displayCoverageLabel =
-    typeof structuredEconomic?.displayCoverageLabel === 'string' && structuredEconomic.displayCoverageLabel.trim()
-      ? structuredEconomic.displayCoverageLabel.trim()
-      : null;
+  const displayAmountLabel = cleanEconomicLabel(structuredEconomic?.displayAmountLabel);
+  const displayProjectAmountLabel = cleanEconomicLabel(structuredEconomic?.displayProjectAmountLabel);
+  const displayCoverageLabel = cleanEconomicLabel(structuredEconomic?.displayCoverageLabel);
 
   const grantMin = toNumeric(structuredEconomic?.grantMin);
   const grantMax = toNumeric(structuredEconomic?.grantMax);
   const costMin = toNumeric(structuredEconomic?.costMin);
   const costMax = toNumeric(structuredEconomic?.costMax);
   const budgetAllocation = toNumeric(structuredEconomic?.budgetAllocation);
-  const rawCoverageLabel =
-    displayCoverageLabel ||
-    (typeof structuredEconomic?.estimatedCoverageLabel === 'string' && structuredEconomic.estimatedCoverageLabel.trim()) ||
-    detail.aidIntensity ||
-    null;
-  const coverageRange = parseCoverageRange(rawCoverageLabel, structuredEconomic);
+  const estimatedCoverageLabel = cleanEconomicLabel(structuredEconomic?.estimatedCoverageLabel);
+  const aidIntensityLabel = cleanEconomicLabel(detail.aidIntensity);
+  const economicSourceText = [detail.description, displayCoverageLabel, estimatedCoverageLabel, aidIntensityLabel]
+    .map((entry) => String(entry ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const rawCoverageLabel = displayCoverageLabel || estimatedCoverageLabel || aidIntensityLabel || null;
+  const coverageRange = parseCoverageRange(rawCoverageLabel || economicSourceText, structuredEconomic);
+  const aidMode = inferAidSemanticMode(detail);
+  const isInterestOnlyMeasure = aidMode === 'interessi';
+  const isMixedMeasure = aidMode === 'misto';
+  const inferredProjectFromText = extractMoneyRangeFromText(detail.description);
   const inferredGrantFromCostMin =
     costMin !== null && coverageRange.min !== null ? (costMin * coverageRange.min) / 100 : null;
   const inferredGrantFromCostMax =
     costMax !== null && coverageRange.max !== null ? (costMax * coverageRange.max) / 100 : null;
 
-  let grantOutMin = grantMin ?? inferredGrantFromCostMin;
-  let grantOutMax = grantMax ?? inferredGrantFromCostMax;
-  if (grantOutMin === null && detail.budgetTotal && coverageRange.min !== null) {
+  let grantOutMin = isInterestOnlyMeasure ? null : grantMin ?? inferredGrantFromCostMin;
+  let grantOutMax = isInterestOnlyMeasure ? null : grantMax ?? inferredGrantFromCostMax;
+  if (grantOutMin === null && !isInterestOnlyMeasure && detail.budgetTotal && coverageRange.min !== null) {
     grantOutMin = (detail.budgetTotal * coverageRange.min) / 100;
   }
-  if (grantOutMax === null && detail.budgetTotal && coverageRange.max !== null) {
+  if (grantOutMax === null && !isInterestOnlyMeasure && detail.budgetTotal && coverageRange.max !== null) {
     grantOutMax = (detail.budgetTotal * coverageRange.max) / 100;
   }
 
@@ -155,26 +300,70 @@ const economicSummaryFromDetail = (detail: GrantDetail): { grantAmount: string; 
   );
   const hasOnlyTinyEconomicValues = values.length > 0 && Math.max(...values) < 5000;
 
+  const projectMin = costMin ?? inferredProjectFromText.min;
+  const projectMax = costMax ?? inferredProjectFromText.max;
+
   const computedGrantAmount =
-    !hasOnlyTinyEconomicValues
+    isInterestOnlyMeasure
+      ? 'Contributo calcolato sugli interessi del finanziamento (non fondo perduto diretto)'
+      : !hasOnlyTinyEconomicValues
       ? formatMoneyRange(grantOutMin, grantOutMax) ??
-        (detail.budgetTotal ? `Fino a ${formatMoney(detail.budgetTotal)}` : budgetAllocation ? `Fino a ${formatMoney(budgetAllocation)}` : 'Dati economici in aggiornamento')
+        (detail.budgetTotal
+          ? `Fino a ${formatMoney(detail.budgetTotal)}`
+          : budgetAllocation
+            ? `Fino a ${formatMoney(budgetAllocation)}`
+            : aidMode === 'finanziamento'
+              ? 'Importo finanziabile da definire con banca/ente gestore'
+              : aidMode === 'garanzia'
+                ? 'Importo garantibile legato al finanziamento richiesto'
+                : 'Importo contributo previsto dalla misura')
       : detail.budgetTotal
         ? `Fino a ${formatMoney(detail.budgetTotal)}`
         : budgetAllocation
           ? `Fino a ${formatMoney(budgetAllocation)}`
-          : 'Dati economici in aggiornamento';
-  const coverage = rawCoverageLabel || formatPercentRange(coverageRange.min, coverageRange.max) || 'Copertura in aggiornamento';
+          : 'Importo contributo previsto dalla misura';
+  const fallbackCoverageLabel =
+    formatPercentRange(coverageRange.min, coverageRange.max) ||
+    (detail.aidForm && normalizeText(detail.aidForm).includes('fondo perduto')
+      ? 'Fondo perduto previsto dal bando'
+      : 'Copertura prevista dalla misura');
+
+  const coverage = isInterestOnlyMeasure
+    ? rawCoverageLabel
+      ? `${rawCoverageLabel} (conto interessi, non fondo perduto)`
+        : fallbackCoverageLabel && !/copertura prevista dalla misura/i.test(fallbackCoverageLabel)
+        ? `${fallbackCoverageLabel} (conto interessi, non fondo perduto)`
+        : 'Aliquota interessi agevolata (non fondo perduto)'
+    : aidMode === 'finanziamento'
+      ? 'Finanziamento agevolato (non fondo perduto diretto)'
+      : aidMode === 'garanzia'
+        ? 'Garanzia pubblica su finanziamento (non contributo diretto)'
+        : aidMode === 'non_specificato'
+          ? rawCoverageLabel || 'Copertura prevista dalla misura'
+          : isMixedMeasure
+            ? rawCoverageLabel || fallbackCoverageLabel
+            : rawCoverageLabel || fallbackCoverageLabel;
+
+  const coverageTitle = isInterestOnlyMeasure
+    ? 'Aliquota contributo interessi'
+    : aidMode === 'finanziamento' || aidMode === 'garanzia'
+      ? 'Tipologia copertura'
+      : aidMode === 'non_specificato'
+        ? 'Copertura indicata in scheda'
+    : isMixedMeasure
+      ? '% copertura misura (fondo perduto + interessi)'
+      : '% fondo perduto / copertura';
   const computedProjectAmount = !hasOnlyTinyEconomicValues
-    ? formatMoneyRange(costMin, costMax) ?? (detail.budgetTotal ? `Fino a ${formatMoney(detail.budgetTotal)}` : 'Dati economici in aggiornamento')
+    ? formatMoneyRange(projectMin, projectMax) ??
+      (detail.budgetTotal ? `Fino a ${formatMoney(detail.budgetTotal)}` : 'Massimale progetto indicato in scheda')
     : detail.budgetTotal
       ? `Fino a ${formatMoney(detail.budgetTotal)}`
-      : 'Dati economici in aggiornamento';
+      : 'Massimale progetto indicato in scheda';
 
   const projectAmount = displayProjectAmountLabel || computedProjectAmount;
   const grantAmount = displayAmountLabel || computedGrantAmount || projectAmount;
 
-  return { grantAmount, coverage, projectAmount };
+  return { grantAmount, coverage, projectAmount, coverageTitle };
 };
 
 const buildConsultingLink = (grantId: string, grantTitle: string, officialUrl: string): string => {
@@ -294,12 +483,169 @@ const humanizeCriticalItem = (value: string): string => {
   return clean.endsWith('.') ? clean : `${clean}.`;
 };
 
+const toUniqueList = (items: Array<string | null | undefined>, limit = 6): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of items) {
+    const value = String(raw ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!value) continue;
+    const key = normalizeText(value);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= limit) break;
+  }
+  return out;
+};
+
+const getNestedValue = (root: unknown, path: string[]): unknown => {
+  let cursor: unknown = root;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) return null;
+    cursor = (cursor as Record<string, unknown>)[key];
+  }
+  return cursor;
+};
+
+const extractStructuredList = (root: unknown, paths: string[][], limit = 6): string[] => {
+  const collected: string[] = [];
+  for (const path of paths) {
+    const value = getNestedValue(root, path);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const line = String(item ?? '').trim();
+        if (line) collected.push(line);
+      }
+      continue;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const segments = value
+        .split(/[,;•·]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      collected.push(...segments);
+    }
+  }
+  return toUniqueList(collected, limit);
+};
+
+const DETAIL_NOISE_PATTERNS = [
+  'da verificare',
+  'non disponibile',
+  'n/d',
+  'in aggiornamento',
+  'non indicato',
+  'coerente con il bando',
+  'profilo compatibile',
+  'decreto',
+  'circolare',
+  'regolamento',
+  'gazzetta',
+  'art.',
+  'articolo',
+  'comma',
+  'ai sensi',
+  'd.lgs',
+  'd.l.',
+];
+
+const isUsefulDetailLine = (value: string | null | undefined): boolean => {
+  const line = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!line || line.length < 12) return false;
+  const norm = normalizeText(line);
+  if (!norm) return false;
+  if (DETAIL_NOISE_PATTERNS.some((token) => norm.includes(token))) return false;
+  if (/\bue[-\s]*\d{3,4}\/\d+\b/.test(norm)) return false;
+  if (/(n\.?\s*\d{3,}|prot\.?\s*\d{3,}|del\s+\d{1,2}\/\d{1,2}\/\d{2,4})/.test(norm)) return false;
+  return true;
+};
+
+const sanitizeGuideLine = (value: string): string => {
+  const clean = value
+    .replace(/\s+/g, ' ')
+    .replace(/\b(ATTENZIONE|NOTA|NB)\s*:\s*/gi, '')
+    .replace(/\s*\(\s*non disponibile[^)]*\)/gi, '')
+    .trim();
+  return ensureSentenceStart(clean);
+};
+
+const extractKeywordSentences = (
+  description: string | null | undefined,
+  keywordRegex: RegExp,
+  limit = 3,
+): string[] => {
+  if (!description) return [];
+  const clean = description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const picked = sentences.filter((sentence) => keywordRegex.test(normalizeText(sentence)));
+  return toUniqueList(picked.filter(isUsefulDetailLine), limit);
+};
+
+const flattenObjectText = (input: unknown, out: string[], depth = 0) => {
+  if (depth > 4 || input === null || input === undefined) return;
+  if (typeof input === 'string') {
+    const text = input.replace(/\s+/g, ' ').trim();
+    if (isUsefulDetailLine(text)) out.push(text);
+    return;
+  }
+  if (Array.isArray(input)) {
+    for (const item of input) flattenObjectText(item, out, depth + 1);
+    return;
+  }
+  if (typeof input === 'object') {
+    for (const value of Object.values(input as Record<string, unknown>)) {
+      flattenObjectText(value, out, depth + 1);
+    }
+  }
+};
+
+const hasNegativeHint = (value: string): boolean => {
+  const norm = normalizeText(value);
+  return /(non ammiss|non finanzi|inammiss|esclus|escluse|esclusi|vietat|non consentit|non eleggibil)/.test(norm);
+};
+
+const extractDocumentHints = (description: string | null | undefined): string[] => {
+  if (!description) return [];
+  const normalized = normalizeText(description);
+  if (!normalized) return [];
+
+  const hints: string[] = [];
+  const push = (condition: boolean, label: string) => {
+    if (condition) hints.push(label);
+  };
+
+  push(/documento identita|documenti identita|carta identita|passaporto/.test(normalized), "Documento d'identità");
+  push(/codice fiscale/.test(normalized), 'Codice fiscale');
+  push(/visura camerale|camera di commercio|cciaa/.test(normalized), 'Visura camerale aggiornata');
+  push(/bilancio|dichiarazion[ei] fiscali|modello unico|unico/.test(normalized), 'Bilanci o dichiarazioni fiscali');
+  push(/business plan|piano d.?impresa|piano economico/.test(normalized), 'Business plan / piano economico');
+  push(/preventiv|offert[ae] fornitor/i.test(normalized), 'Preventivi di spesa');
+  push(/durc/.test(normalized), 'DURC in corso di validità');
+  push(/atto costitutivo|statuto/.test(normalized), 'Atto costitutivo / statuto');
+  push(/pec/.test(normalized), 'Indirizzo PEC');
+  push(/firma digitale/.test(normalized), 'Firma digitale');
+  push(/titolo di disponibilita|contratto di locazione|comodato/.test(normalized), "Titolo disponibilità immobile");
+  push(/autorizzazioni|permess/i.test(normalized), 'Autorizzazioni / permessi richiesti');
+
+  return toUniqueList(hints, 8);
+};
+
 export function GrantDetailInlinePro({
   grantId,
-  sourceChannel = 'direct'
+  sourceChannel = 'direct',
+  onVerify,
+  onBack
 }: {
   grantId: string;
   sourceChannel?: 'scanner' | 'chat' | 'direct' | 'admin';
+  onVerify?: (grantId: string) => void;
+  onBack?: () => void;
 }) {
   const [detail, setDetail] = useState<GrantDetail | null>(null);
   const [explain, setExplain] = useState<Explainability | null>(null);
@@ -374,9 +720,15 @@ export function GrantDetailInlinePro({
           <h1 className="grant-detail-title">Dettaglio incentivo non disponibile</h1>
           <p className="grant-section-subtitle">{error}</p>
           <div className="grant-cta-row">
-            <a href="/" className="grant-cta-btn grant-cta-btn--solid">
-              Torna allo scanner
-            </a>
+            {onBack ? (
+              <button type="button" className="grant-cta-btn grant-cta-btn--solid" onClick={onBack}>
+                Torna allo scanner
+              </button>
+            ) : (
+              <Link href="/dashboard/scanner" className="grant-cta-btn grant-cta-btn--solid">
+                Torna allo scanner
+              </Link>
+            )}
           </div>
         </section>
       </div>
@@ -396,6 +748,12 @@ export function GrantDetailInlinePro({
   }
 
   const probability = Math.max(0, Math.min(100, Math.round(explain.probabilityScore || 0)));
+  const hasProbability = Number.isFinite(explain.probabilityScore) && explain.probabilityScore > 0;
+  const fallbackProbability = Math.max(
+    55,
+    Math.round(((explain.fitScore || 0) + (explain.completenessScore || 0) + (explain.eligibilityScore || 0)) / 3),
+  );
+  const displayedProbability = hasProbability ? probability : fallbackProbability;
   const consultingLink = buildConsultingLink(detail.id, detail.title, detail.officialUrl);
   const grantStatus = detail.availabilityStatus === 'incoming' ? 'In arrivo' : 'Aperto';
   const beneficiariesLabel = oneLine(detail.beneficiaries, 'Imprese');
@@ -408,14 +766,186 @@ export function GrantDetailInlinePro({
   const openingLabel = formatDate(detail.openingDate, 'Già aperto');
   const deadlineLabel = formatDate(detail.deadlineDate, 'A sportello');
   const economicSummary = economicSummaryFromDetail(detail);
+  const conciseDescription = buildConciseDescription(detail.description);
   const verifyRequirementsHref = `/dashboard/new-practice/quiz?grantId=${encodeURIComponent(detail.id)}&source=${encodeURIComponent(
     sourceChannel
   )}`;
   const whyFitItems = (explain.whyFit || []).filter(Boolean);
   const satisfiedItems = (explain.satisfiedRequirements || []).filter(Boolean);
   const missingItems = (explain.missingRequirements || []).filter(Boolean);
-  const positiveItems = (satisfiedItems.length > 0 ? satisfiedItems : whyFitItems).map(humanizePositiveItem).slice(0, 4);
-  const criticalItems = missingItems.map(humanizeCriticalItem).slice(0, 4);
+  const structuredCorpusRaw: string[] = [];
+  flattenObjectText(detail.requisitiStrutturati, structuredCorpusRaw);
+  flattenObjectText(detail.requisitiHard, structuredCorpusRaw);
+  flattenObjectText(detail.requisitiSoft, structuredCorpusRaw);
+  const structuredCorpus = toUniqueList(structuredCorpusRaw.filter(isUsefulDetailLine), 40);
+
+  const positiveItems = toUniqueList(
+    [
+      ...(satisfiedItems.length > 0 ? satisfiedItems : whyFitItems).map(humanizePositiveItem),
+      ...structuredCorpus
+        .filter(
+          (line) =>
+            /(ammess|beneficiar|destinatar|compatibil|coerent|prioritar|premial)/.test(normalizeText(line)) &&
+            !hasNegativeHint(line),
+        )
+        .map(ensureSentenceStart),
+    ],
+    4,
+  );
+  const criticalItems = toUniqueList(
+    [
+      ...missingItems.map(humanizeCriticalItem),
+      ...structuredCorpus
+        .filter((line) => /(requisit|obblig|deve|necessari|vincol|condizion)/.test(normalizeText(line)))
+        .map(ensureSentenceStart),
+    ],
+    5,
+  );
+  const financedStructured = extractStructuredList(
+    detail.requisitiStrutturati,
+    [
+      ['expenses', 'admitted'],
+      ['expenses', 'eligible'],
+      ['economic', 'admittedCosts'],
+      ['economic', 'eligibleCosts'],
+      ['summary', 'whatFinances'],
+    ],
+    6,
+  );
+  const financedDescription = extractKeywordSentences(
+    detail.description,
+    /(finanzia|ammissibil|copre|contribut|voucher|investiment|spes[ae]|acquisto|impiant|macchinar|digital|innovaz|ricerca|sviluppo|efficientament|internaz|export)/,
+    4,
+  ).filter((line) => !hasNegativeHint(line));
+  const financedFromCorpus = structuredCorpus.filter(
+    (line) =>
+      /(finanzia|ammissibil|copre|contribut|voucher|investiment|spes[ae]|acquisto|impiant|macchinar)/.test(
+        normalizeText(line),
+      ) && !hasNegativeHint(line),
+  );
+  const financedItems = toUniqueList(
+    [...financedStructured, ...financedDescription, ...financedFromCorpus]
+      .map(sanitizeGuideLine)
+      .filter((item) => item.length <= 180),
+    6,
+  );
+
+  const excludedStructured = extractStructuredList(
+    detail.requisitiStrutturati,
+    [
+      ['expenses', 'excluded'],
+      ['expenses', 'notAdmitted'],
+      ['summary', 'whatExcludes'],
+      ['constraints', 'excludedConditions'],
+    ],
+    6,
+  );
+  const excludedDescription = extractKeywordSentences(
+    detail.description,
+    /(non ammess|non finanzi|esclus|escluse|esclusi|inammiss|vietat|non consentit|solo per)/,
+    4,
+  );
+  const excludedFromCorpus = structuredCorpus.filter((line) => hasNegativeHint(line));
+  const excludedItems = toUniqueList(
+    [...excludedStructured, ...excludedDescription, ...excludedFromCorpus]
+      .map(sanitizeGuideLine)
+      .filter((item) => item.length <= 180),
+    6,
+  );
+
+  const probableDocumentsFromDescription = extractDocumentHints(detail.description);
+  const probableDocumentsFromCorpus = structuredCorpus.filter((line) =>
+    /(document|allegat|dichiarazion|visura|bilanci|preventiv|durc|pec|firma digitale|atto costitutivo|statuto|identita|codice fiscale)/.test(
+      normalizeText(line),
+    ),
+  );
+  const probableDocuments = toUniqueList(
+    [
+      ...(detail.requiredDocuments ?? []),
+      ...extractStructuredList(
+        detail.requisitiStrutturati,
+        [
+          ['documents', 'required'],
+          ['documents', 'base'],
+          ['summary', 'likelyDocuments'],
+        ],
+        8,
+      ),
+      ...probableDocumentsFromDescription,
+      ...probableDocumentsFromCorpus.map(sanitizeGuideLine),
+    ],
+    8,
+  );
+  const targetAudienceItems = toUniqueList(
+    [
+      detail.beneficiaries.length
+        ? `Beneficiari principali: ${detail.beneficiaries.slice(0, 4).join(', ')}`
+        : 'Beneficiari principali: imprese e professionisti indicati dal bando',
+      sectorsLabel ? `Settori coinvolti: ${sectorsLabel}` : null,
+      detail.authority ? `Ente gestore: ${detail.authority}` : null,
+    ],
+    4,
+  ).map(sanitizeGuideLine);
+
+  const keyRequirementItems = toUniqueList(
+    [
+      ...criticalItems,
+      ...extractStructuredList(
+        detail.requisitiStrutturati,
+        [
+          ['requirements', 'hard'],
+          ['requirements', 'mandatory'],
+          ['summary', 'keyRequirements'],
+        ],
+        6,
+      ),
+    ]
+      .map(sanitizeGuideLine)
+      .filter((item) => item.length <= 180),
+    6,
+  );
+  const operationalSteps = toUniqueList(
+    [
+      ...(explain.applySteps ?? []),
+      `Verifica i requisiti specifici del tuo profilo prima della candidatura.`,
+      `Prepara i documenti richiesti e i preventivi di spesa coerenti con il bando.`,
+      `Conferma con BNDO i tempi di sportello e la strategia di invio pratica.`,
+    ].map(sanitizeGuideLine),
+    5,
+  );
+  const officialUpdateNote = detail.deadlineDate
+    ? `Ultimo controllo scadenza: ${deadlineLabel}.`
+    : 'Scadenza non indicata: consigliata verifica diretta su fonte ufficiale.';
+  const economicDetailItems = toUniqueList(
+    [
+      detail.aidForm ? `Forma agevolazione: ${detail.aidForm}` : null,
+      detail.aidIntensity ? `Intensità indicata: ${detail.aidIntensity}` : null,
+      economicSummary.grantAmount ? `Importo contributo indicativo: ${economicSummary.grantAmount}` : null,
+      economicSummary.projectAmount ? `Spesa progetto ammissibile: ${economicSummary.projectAmount}` : null,
+    ].map((item) => (item ? sanitizeGuideLine(item) : item)),
+    5,
+  );
+  const timingDetailItems = toUniqueList(
+    [
+      `Stato sportello: ${grantStatus}`,
+      `Apertura: ${openingLabel}`,
+      `Scadenza: ${deadlineLabel}`,
+      detail.authority ? `Ente di riferimento: ${detail.authority}` : null,
+      officialUpdateNote,
+    ].map((item) => (item ? sanitizeGuideLine(item) : item)),
+    5,
+  );
+  const practicalIntro =
+    conciseDescription ||
+    `Questa misura sostiene ${beneficiariesLabel.toLowerCase()} con interventi in ambito ${sectorsLabel.toLowerCase()}. Prima di candidarti conviene verificare requisiti e spese ammissibili sul tuo caso reale.`;
+
+  const handleVerify = () => {
+    if (onVerify) {
+      onVerify(detail.id);
+    } else {
+      window.location.href = verifyRequirementsHref;
+    }
+  };
 
   return (
     <div className="grant-detail-page grant-detail-layout">
@@ -434,20 +964,17 @@ export function GrantDetailInlinePro({
             </div>
           </div>
 
-          {'message' in explain && explain.message ? (
-            <div className="grant-probability-box">
-              <div className="grant-probability-label">Probabilità stimata di ottenere il bando</div>
-              <div className="grant-probability-value">N/D</div>
-              <p className="grant-probability-hint">{explain.message}</p>
-            </div>
-          ) : (
-            <div className="grant-probability-box">
-              <div className="grant-probability-label">Probabilità stimata di ottenere il bando</div>
-              <div className="grant-probability-value">{probability}%</div>
-              <ProgressBar value={probability} />
-              <p className="grant-probability-hint">Stima tecnica basata sui dati inseriti. Non è una garanzia.</p>
-            </div>
-          )}
+          <div className="grant-probability-box">
+            <div className="grant-probability-label">Probabilità stimata di ottenere il bando</div>
+            <div className="grant-probability-value">{displayedProbability}%</div>
+            <ProgressBar value={displayedProbability} />
+            <p className="grant-probability-hint">
+              {hasProbability
+                ? 'Stima tecnica basata sui dati inseriti. Non è una garanzia.'
+                : 'Stima preliminare con dati parziali: completa il quiz requisiti per una verifica più accurata.'}
+            </p>
+            {'message' in explain && explain.message ? <p className="grant-empty-note">{explain.message}</p> : null}
+          </div>
         </div>
       </section>
 
@@ -455,7 +982,7 @@ export function GrantDetailInlinePro({
         <h2 className="grant-section-title">Cosa offre in breve</h2>
         <div className="grant-summary-grid grant-summary-grid--compact">
           <div className="grant-summary-item grant-summary-item--key">
-            <div className="grant-summary-k">% fondo perduto / copertura</div>
+            <div className="grant-summary-k">{economicSummary.coverageTitle}</div>
             <div className="grant-summary-v">{economicSummary.coverage}</div>
           </div>
           <div className="grant-summary-item">
@@ -473,9 +1000,9 @@ export function GrantDetailInlinePro({
         </div>
 
         <div className="grant-cta-row grant-cta-row--triple">
-          <Link href={verifyRequirementsHref} className="grant-cta-btn grant-cta-btn--solid">
+          <button type="button" className="grant-cta-btn grant-cta-btn--solid" onClick={handleVerify}>
             Verifica requisiti
-          </Link>
+          </button>
           <a href={detail.officialUrl} target="_blank" rel="noreferrer" className="grant-cta-btn grant-cta-btn--solid">
             Vai al bando ufficiale
           </a>
@@ -493,6 +1020,84 @@ export function GrantDetailInlinePro({
             ))}
           </div>
         ) : null}
+      </section>
+
+      <section className="premium-card fade-up p-6 grant-detail-section">
+        <h2 className="grant-section-title">Guida pratica al bando</h2>
+        <p className="grant-empty-note">{practicalIntro}</p>
+        <div className="grant-summary-grid grant-summary-grid--compact grant-guide-grid">
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">In sintesi per te</div>
+            <ul className="grant-summary-list">
+              {economicDetailItems.length > 0 ? (
+                economicDetailItems.map((item) => <li key={`eco-top-${item}`}>{sanitizeGuideLine(item)}</li>)
+              ) : (
+                <li>Contributo e copertura vengono definiti in base alle spese ammissibili previste dal bando.</li>
+              )}
+            </ul>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">A chi è rivolto</div>
+            <ul className="grant-summary-list">
+              {targetAudienceItems.length > 0 ? (
+                targetAudienceItems.map((item) => <li key={`target-${item}`}>{item}</li>)
+              ) : (
+                <li>Il bando è destinato ai soggetti indicati nella scheda ufficiale.</li>
+              )}
+            </ul>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">Cosa puoi finanziare</div>
+            <ul className="grant-summary-list">
+              {financedItems.length > 0 ? (
+                financedItems.map((item) => <li key={`fin-${item}`}>{item}</li>)
+              ) : (
+                <li>Investimenti, servizi e spese coerenti con le finalità della misura.</li>
+              )}
+            </ul>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">Requisiti e attenzioni</div>
+            <ul className="grant-summary-list">
+              {(keyRequirementItems.length > 0 ? keyRequirementItems : excludedItems).length > 0 ? (
+                (keyRequirementItems.length > 0 ? keyRequirementItems : excludedItems).map((item) => (
+                  <li key={`req-${item}`}>{item}</li>
+                ))
+              ) : (
+                <li>Verifica requisiti soggettivi, settore e limiti di spesa prima di inviare la domanda.</li>
+              )}
+            </ul>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">Documenti da preparare</div>
+            <ul className="grant-summary-list">
+              {probableDocuments.length > 0 ? (
+                probableDocuments.map((item) => <li key={`doc-${item}`}>{sanitizeGuideLine(item)}</li>)
+              ) : (
+                <li>Documento d&apos;identità, codice fiscale, visura e documentazione tecnica della spesa.</li>
+              )}
+            </ul>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">Prossimo step con BNDO</div>
+            <ul className="grant-summary-list">
+              {(operationalSteps.length > 0 ? operationalSteps : ['Completa la verifica requisiti e carica i documenti base della pratica.']).map((item) => (
+                <li key={`step-${item}`}>{sanitizeGuideLine(item)}</li>
+              ))}
+            </ul>
+            <p className="grant-guide-note">{officialUpdateNote}</p>
+          </article>
+          <article className="grant-summary-item grant-guide-item">
+            <div className="grant-summary-k">Tempistiche e canale</div>
+            <ul className="grant-summary-list">
+              {timingDetailItems.length > 0 ? (
+                timingDetailItems.map((item) => <li key={`time-${item}`}>{sanitizeGuideLine(item)}</li>)
+              ) : (
+                <li>Tempistiche non completamente pubblicate: monitoraggio consigliato del bando ufficiale.</li>
+              )}
+            </ul>
+          </article>
+        </div>
       </section>
 
       <section className="premium-card fade-up p-6 grant-detail-section">
@@ -532,6 +1137,8 @@ export function GrantDetailInlinePro({
           </article>
         </div>
       </section>
+
+      <GrantAiPopup grantId={detail.id} grantTitle={detail.title} />
     </div>
   );
 }

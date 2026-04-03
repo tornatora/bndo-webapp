@@ -45,11 +45,40 @@ export const ACTIVE_SOURCES: ScrapingSource[] = [
   SOURCE_CAMPANIA
 ];
 
+function isPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  if (/^10\.\d+\.\d+\.\d+$/.test(host)) return true;
+  if (/^192\.168\.\d+\.\d+$/.test(host)) return true;
+  const m = host.match(/^172\.(\d+)\.\d+\.\d+$/);
+  if (m) {
+    const second = Number.parseInt(m[1] ?? '0', 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+}
+
+function isAllowedUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    if (isPrivateHost(url.hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Helper to fetch and extract raw text from a dynamically resolved URL.
  */
 export async function scrapePageText(url: string, contentSelector: string): Promise<{ title: string, text: string } | null> {
   try {
+    if (!isAllowedUrl(url)) {
+      console.warn(`[scrapePageText] Blocked URL by outbound policy: ${url}`);
+      return null;
+    }
+
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'BNDO-Scanner-Bot/1.0 (Research & Indexing)'

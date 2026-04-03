@@ -106,11 +106,17 @@ function amountFromSession(session: Stripe.Checkout.Session, fallbackAmountCents
   return fallbackAmountCents;
 }
 
-export function buildOnboardingUrl(args: { practiceType: PracticeType; sessionId: string; quizSubmissionId?: string | null }) {
+export function buildOnboardingUrl(args: {
+  practiceType: PracticeType;
+  sessionId: string;
+  quizSubmissionId?: string | null;
+  applicationId?: string | null;
+}) {
   const params = new URLSearchParams();
   params.set('session_id', args.sessionId);
   params.set('practice', args.practiceType);
   if (args.quizSubmissionId) params.set('quiz', args.quizSubmissionId);
+  if (args.applicationId) params.set('applicationId', args.applicationId);
   return `/onboarding?${params.toString()}`;
 }
 
@@ -121,13 +127,14 @@ export function buildDashboardPracticeUrl(applicationId: string) {
 export function resolveNextUrlFromPayment(record: PracticePaymentRecord) {
   const practiceType = resolvePracticeTypeFromAny(record.practice_type);
   if (!practiceType) return '/onboarding';
-  if (record.onboarding_status === 'completed' && record.application_id) {
-    return buildDashboardPracticeUrl(record.application_id);
+  if (record.onboarding_status === 'completed') {
+    return '/dashboard/pratiche';
   }
   return buildOnboardingUrl({
     practiceType,
     sessionId: record.stripe_checkout_session_id,
     quizSubmissionId: record.quiz_submission_id,
+    applicationId: record.application_id,
   });
 }
 
@@ -169,9 +176,16 @@ export async function upsertPracticePaymentFromSession(args: {
   session: Stripe.Checkout.Session;
   fallbackPracticeType?: PracticeType | null;
   fallbackQuizSubmissionId?: string | null;
+  fallbackApplicationId?: string | null;
   forceStatus?: PracticePaymentStatus;
 }) {
-  const { session, fallbackPracticeType = null, fallbackQuizSubmissionId = null, forceStatus } = args;
+  const {
+    session,
+    fallbackPracticeType = null,
+    fallbackQuizSubmissionId = null,
+    fallbackApplicationId = null,
+    forceStatus
+  } = args;
   const admin = getSupabaseAdmin();
 
   const practiceType = extractPracticeTypeFromSession(session, fallbackPracticeType);
@@ -201,7 +215,7 @@ export async function upsertPracticePaymentFromSession(args: {
     quiz_submission_id: quizSubmissionId || null,
     company_id: existing?.company_id ?? null,
     user_id: existing?.user_id ?? null,
-    application_id: existing?.application_id ?? null,
+    application_id: existing?.application_id ?? fallbackApplicationId ?? null,
     practice_type: practiceType,
     grant_slug: grantSlugFromPracticeType(practiceType),
     grant_title: extractGrantTitle(practiceType, session),
@@ -241,9 +255,16 @@ export async function upsertPracticePaymentFromIntent(args: {
   intent: Stripe.PaymentIntent;
   fallbackPracticeType?: PracticeType | null;
   fallbackQuizSubmissionId?: string | null;
+  fallbackApplicationId?: string | null;
   forceStatus?: PracticePaymentStatus;
 }) {
-  const { intent, fallbackPracticeType = null, fallbackQuizSubmissionId = null, forceStatus } = args;
+  const {
+    intent,
+    fallbackPracticeType = null,
+    fallbackQuizSubmissionId = null,
+    fallbackApplicationId = null,
+    forceStatus
+  } = args;
   const admin = getSupabaseAdmin();
 
   const practiceType = extractPracticeTypeFromIntent(intent, fallbackPracticeType);
@@ -294,7 +315,7 @@ export async function upsertPracticePaymentFromIntent(args: {
     quiz_submission_id: quizSubmissionId || null,
     company_id: existing?.company_id ?? null,
     user_id: existing?.user_id ?? null,
-    application_id: existing?.application_id ?? null,
+    application_id: existing?.application_id ?? fallbackApplicationId ?? null,
     practice_type: practiceType,
     grant_slug: grantSlugFromPracticeType(practiceType),
     grant_title: String(intent.metadata?.grant_title ?? '').trim() || existing?.grant_title || practiceConfig.title,

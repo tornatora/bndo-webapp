@@ -37,6 +37,30 @@ type PracticeLaunchHubProps = {
 };
 
 export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryPoint }: PracticeLaunchHubProps) {
+  const LEGACY_AUTOIMPIEGO_QUIZ_URL = 'https://bndo.it/quiz/autoimpiego';
+  const LEGACY_AUTOIMPIEGO_QUIZ_IDS = new Set([
+    '769117e6-ab97-4b8a-9ff1-bec0e14879e6',
+    'a13a8bde-e544-4a14-b73f-61dd0ca8fe90',
+    'strategic-resto-al-sud-20',
+    'strategic-autoimpiego-centro-nord',
+    'resto-al-sud-20',
+    'autoimpiego-centro-nord',
+    'autoimpiego',
+  ]);
+  const shouldUseLegacyQuiz = (grantId: string) => {
+    const raw = String(grantId || '').trim();
+    if (!raw) return false;
+    if (LEGACY_AUTOIMPIEGO_QUIZ_IDS.has(raw)) return true;
+    const normalized = raw
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return normalized.includes('resto al sud 2 0') || normalized.includes('autoimpiego centro nord');
+  };
+
   const router = useRouter();
   const [grantId, setGrantId] = useState(initialGrantId);
   const [sourceChannel, setSourceChannel] = useState(initialSource);
@@ -136,6 +160,10 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
 
   useEffect(() => {
     if (!shouldForwardToQuiz || !grantId) return;
+    if (shouldUseLegacyQuiz(grantId)) {
+      window.location.href = LEGACY_AUTOIMPIEGO_QUIZ_URL;
+      return;
+    }
     const source = sourceChannel || 'direct';
     router.replace(`/dashboard/new-practice/quiz?grantId=${encodeURIComponent(grantId)}&source=${source}`);
   }, [grantId, router, shouldForwardToQuiz, sourceChannel]);
@@ -251,6 +279,17 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
     router.replace('/dashboard/new-practice');
   };
 
+  const openGrantQuizFromDetail = (selectedGrantId: string) => {
+    if (shouldUseLegacyQuiz(selectedGrantId)) {
+      window.location.href = LEGACY_AUTOIMPIEGO_QUIZ_URL;
+      return;
+    }
+    const source = sourceChannel || 'direct';
+    setGrantId(selectedGrantId);
+    setEntryPoint('choice');
+    router.replace(`/dashboard/new-practice/quiz?grantId=${encodeURIComponent(selectedGrantId)}&source=${source}`);
+  };
+
   if (shouldForwardToQuiz) {
     return (
       <section className="section-card" style={{ maxWidth: 1000 }}>
@@ -267,6 +306,10 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
     };
 
     const onGrantSelected = (selectedGrantId: string, source: 'scanner' | 'chat') => {
+      if (shouldUseLegacyQuiz(selectedGrantId)) {
+        window.location.href = LEGACY_AUTOIMPIEGO_QUIZ_URL;
+        return;
+      }
       setSourceChannel(source);
       setGrantId(selectedGrantId);
       setEntryPoint('choice');
@@ -329,7 +372,11 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
   if (entryPoint === 'detail') {
     return (
       <div className="practice-launch-full">
-        <GrantDetailProView grantId={grantId} sourceChannel={sourceChannel} />
+        <GrantDetailProView
+          grantId={grantId}
+          sourceChannel={sourceChannel}
+          onVerify={openGrantQuizFromDetail}
+        />
       </div>
     );
   }

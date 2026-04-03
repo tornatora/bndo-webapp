@@ -208,6 +208,21 @@ create table if not exists public.scanner_dataset_snapshots (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.scanner_ingestion_runs (
+  id uuid primary key default gen_random_uuid(),
+  started_at timestamptz not null default now(),
+  finished_at timestamptz not null default now(),
+  status text not null check (status in ('ok', 'degraded', 'failed')),
+  source_runs_json jsonb not null default '[]'::jsonb,
+  metrics_json jsonb not null default '{}'::jsonb,
+  alerts_json jsonb not null default '[]'::jsonb,
+  dataset_version text,
+  sources_total integer not null default 0,
+  sources_ok integer not null default 0,
+  sources_failed integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.practice_quiz_templates (
   id uuid primary key default gen_random_uuid(),
   application_id uuid not null references public.tender_applications(id) on delete cascade,
@@ -299,6 +314,10 @@ create index if not exists idx_scanner_dataset_snapshots_active_fetched
   on public.scanner_dataset_snapshots (is_active, fetched_at desc);
 create index if not exists idx_scanner_dataset_snapshots_version
   on public.scanner_dataset_snapshots (version_hash);
+create index if not exists idx_scanner_ingestion_runs_finished
+  on public.scanner_ingestion_runs (finished_at desc);
+create index if not exists idx_scanner_ingestion_runs_status
+  on public.scanner_ingestion_runs (status, finished_at desc);
 create index if not exists idx_practice_quiz_templates_application
   on public.practice_quiz_templates(application_id);
 create index if not exists idx_practice_quiz_templates_grant
@@ -402,6 +421,7 @@ alter table public.consultant_threads enable row level security;
 alter table public.consultant_thread_participants enable row level security;
 alter table public.consultant_messages enable row level security;
 alter table public.scanner_dataset_snapshots enable row level security;
+alter table public.scanner_ingestion_runs enable row level security;
 
 drop policy if exists "profiles_select_own_or_ops" on public.profiles;
 create policy "profiles_select_own_or_ops"
@@ -675,6 +695,18 @@ create policy "scanner snapshots ops read"
 on public.scanner_dataset_snapshots
 for select
 using (public.is_ops_user());
+
+drop policy if exists "scanner ingestion runs ops read" on public.scanner_ingestion_runs;
+create policy "scanner ingestion runs ops read"
+on public.scanner_ingestion_runs
+for select
+using (public.is_ops_user());
+
+drop policy if exists "scanner ingestion runs ops insert" on public.scanner_ingestion_runs;
+create policy "scanner ingestion runs ops insert"
+on public.scanner_ingestion_runs
+for insert
+with check (public.is_ops_user());
 
 -- No policies for leads/quiz_submissions/onboarding_credentials: access only through service role.
 

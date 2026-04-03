@@ -1,6 +1,13 @@
 import { APP_URL, MARKETING_URL } from '@/shared/lib';
 
-export type DashboardNavKey = 'home' | 'pratiche' | 'documenti' | 'messaggi' | 'profilo' | 'new_practice';
+export type DashboardNavKey =
+  | 'home'
+  | 'pratiche'
+  | 'catalogo_bandi'
+  | 'documenti'
+  | 'messaggi'
+  | 'profilo'
+  | 'new_practice';
 
 export type DashboardShellItem = {
   key: DashboardNavKey;
@@ -32,6 +39,7 @@ export const routes = {
     scanner: '/dashboard/scanner',
     scannerLegacy: '/dashboard/scanner-bandi',
     bandi: '/dashboard/bandi',
+    catalogoBandi: '/dashboard/catalogo-bandi',
     documents: '/dashboard/documents',
     messages: '/dashboard/messages',
     notifications: '/dashboard/notifications',
@@ -86,7 +94,7 @@ export function getDashboardShellItems(): DashboardShellItem[] {
   return [
     { key: 'home', label: 'Home', href: resolveAssistantHomeUrl(), icon: 'home', external: true },
     { key: 'pratiche', label: 'Le tue pratiche', href: routes.dashboard.list, icon: 'pratiche' },
-    { key: 'documenti', label: 'I tuoi documenti', href: routes.dashboard.documents, icon: 'documenti' },
+    { key: 'catalogo_bandi', label: 'Catalogo Bandi', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
     { key: 'new_practice', label: 'Nuova pratica', href: routes.dashboard.newPractice, icon: 'new_practice' },
@@ -102,6 +110,7 @@ export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
     return pathname === routes.dashboard.list ? 'pratiche' : 'messaggi';
   }
   if (pathname === routes.dashboard.home) return 'home';
+  if (pathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo_bandi';
   if (pathname.startsWith(routes.dashboard.documents)) return 'documenti';
   if (
     pathname.startsWith(routes.dashboard.messages) ||
@@ -125,14 +134,22 @@ export function isPublicDashboardShellPath(pathname: string) {
 
 export function resolveDashboardInitialView(
   slugs: string[] | undefined
-): 'chat' | 'home' | 'form' | 'pratiche' | 'choice' {
+): 'chat' | 'home' | 'form' | 'pratiche' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail' {
   if (!slugs || slugs.length === 0) {
-    return 'pratiche';
+    return 'myPractices';
   }
   const main = slugs[0];
   if (main === 'chat') return 'chat';
   if (main === 'scanner') return 'form';
-  if (main === 'pratiche') return 'pratiche';
-  if (main === 'new-practice') return 'choice';
-  return 'pratiche';
+  if (main === 'pratiche') return 'myPractices';
+  if (main === 'bandi') return 'myPractices';
+  if (main === 'quiz') return 'quiz';
+  if (main === 'new-practice') {
+    if (slugs[1] === 'quiz') return 'quiz';
+    return 'choice';
+  }
+  if (main === 'practices' && slugs[1]) {
+    return 'practiceDetail';
+  }
+  return 'myPractices';
 }

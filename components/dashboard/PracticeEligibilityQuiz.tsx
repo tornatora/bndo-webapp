@@ -10,6 +10,12 @@ export type PracticeQuizQuestion = {
   questionType: 'single_select' | 'boolean' | 'text' | 'number';
   options: Array<{ value: string; label: string }>;
   isRequired: boolean;
+  validation?: Record<string, unknown>;
+  rule?: {
+    kind?: 'critical_boolean' | 'investment_range' | 'ateco_validation' | 'geographic_validation' | 'choice_in_set' | 'informational' | 'none';
+    expected?: string | null;
+  };
+  metadata?: Record<string, unknown>;
 };
 
 type PracticeEligibilityQuizProps = {

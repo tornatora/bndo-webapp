@@ -12,14 +12,26 @@ type QuizSubmissionNotificationInput = {
   practiceTitle: string | null;
   eligibility: 'eligible' | 'not_eligible';
   createdAtIso: string;
+  answers?: Record<string, string | number | boolean | null | undefined>;
 };
 
+const DEFAULT_QUIZ_NOTIFICATION_EMAIL = 'nataleletteriotornatora@gmail.com';
+
 function parseExtraRecipients() {
-  const fromEnv = (process.env.QUIZ_NOTIFICATION_EMAILS ?? '')
+  const csvRecipients = (process.env.QUIZ_NOTIFICATION_EMAILS ?? '')
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
-  return Array.from(new Set(fromEnv));
+  const singleRecipients = [
+    process.env.QUIZ_NOTIFICATION_EMAIL ?? '',
+    process.env.ADMIN_NOTIFICATION_EMAIL ?? '',
+    process.env.OPS_NOTIFICATION_EMAIL ?? '',
+    DEFAULT_QUIZ_NOTIFICATION_EMAIL
+  ]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return Array.from(new Set([...csvRecipients, ...singleRecipients]));
 }
 
 function mapQuizLabel(bandoType: string | null) {
@@ -75,7 +87,7 @@ export async function dispatchQuizSubmissionNotifications(input: QuizSubmissionN
   ]);
 
   if (notifResult.error) {
-    throw notifResult.error;
+    console.error('[QUIZ_NOTIFICATION_INSERT_ERROR]', notifResult.error);
   }
 
   const roleRecipients = (opsProfiles ?? [])
@@ -96,11 +108,12 @@ export async function dispatchQuizSubmissionNotifications(input: QuizSubmissionN
     practiceTitle: resolvedPracticeTitle,
     eligibility: input.eligibility,
     submittedAtIso: input.createdAtIso,
-    adminLink
+    adminLink,
+    answers: input.answers
   });
 
   return {
-    notificationCreated: true,
+    notificationCreated: !notifResult.error,
     emailSent: emailResult.sent,
     emailSkipped: !!emailResult.skipped,
     emailError: emailResult.error
@@ -117,6 +130,7 @@ type PracticeQuizNotificationInput = {
   sourceChannel: PracticeSourceChannel;
   eligibility: 'eligible' | 'not_eligible' | 'needs_review';
   createdAtIso: string;
+  answers?: Record<string, string | number | boolean | null | undefined>;
 };
 
 type PracticeSourceChannel = 'scanner' | 'chat' | 'direct' | 'admin';
@@ -162,7 +176,7 @@ export async function dispatchPracticeQuizNotifications(input: PracticeQuizNotif
   ]);
 
   if (notifResult.error) {
-    throw notifResult.error;
+    console.error('[PRACTICE_QUIZ_NOTIFICATION_INSERT_ERROR]', notifResult.error);
   }
 
   const roleRecipients = (opsProfiles ?? [])
@@ -181,16 +195,14 @@ export async function dispatchPracticeQuizNotifications(input: PracticeQuizNotif
     phone: null,
     quizType: 'Quiz requisiti pratica',
     practiceTitle: input.practiceTitle,
-    eligibility:
-      input.eligibility === 'not_eligible'
-        ? 'not_eligible'
-        : 'eligible',
+    eligibility: input.eligibility,
     submittedAtIso: input.createdAtIso,
-    adminLink
+    adminLink,
+    answers: input.answers
   });
 
   return {
-    notificationCreated: true,
+    notificationCreated: !notifResult.error,
     emailSent: emailResult.sent,
     emailSkipped: !!emailResult.skipped,
     emailError: emailResult.error

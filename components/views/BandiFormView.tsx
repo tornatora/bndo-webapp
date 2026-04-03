@@ -41,6 +41,32 @@ interface ProfileFormState {
 type AvailabilityFilter = 'all' | 'open' | 'incoming';
 type SortMode = 'coverage' | 'fit' | 'deadline' | 'budget';
 type JourneyStep = 1 | 2;
+type StoredScannerProfile = {
+  location?: { region?: string | null } | null;
+  region?: string | null;
+  activityType?: string | null;
+  sector?: string | null;
+  ateco?: string | null;
+  fundingGoal?: string | null;
+  contributionPreference?: string | null;
+  employees?: number | null;
+  founderAge?: number | null;
+  employmentStatus?: string | null;
+  revenueOrBudgetEUR?: number | null;
+  requestedContributionEUR?: number | null;
+  legalForm?: string | null;
+  businessExists?: boolean | null;
+  annualTurnover?: number | null;
+  isInnovative?: boolean | null;
+  foundationYear?: number | null;
+};
+type StoredMatchesPayload = {
+  items?: MatchCardItem[];
+  nearMisses?: MatchCardItem[];
+};
+
+const LOCAL_PROFILE_KEY = 'bndo_scanner_local_profile';
+const LOCAL_MATCHES_KEY = 'bndo_scanner_local_matches';
 
 const IT_REGIONS = [
   '',
@@ -261,12 +287,15 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
   const [journeyStep, setJourneyStep] = useState<JourneyStep>(1);
   const [stepOneAttempted, setStepOneAttempted] = useState(false);
   const [stepTwoAttempted, setStepTwoAttempted] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [overlayProgress, setOverlayProgress] = useState(0);
   const [overlayStepIndex, setOverlayStepIndex] = useState(0);
   const formRef = useRef<HTMLElement | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingStepScrollRef = useRef(false);
   const overlayProgressTimerRef = useRef<number | null>(null);
+  const overlayProgressValueRef = useRef(0);
+  const overlayProgressStartedAtRef = useRef<number | null>(null);
   const runIdRef = useRef(0);
 
   const scrollScannerViewportToTop = useCallback((behavior: ScrollBehavior = 'smooth') => {
@@ -325,14 +354,52 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
 
   const startOverlayProgressLoop = () => {
     stopOverlayProgressLoop();
+    overlayProgressStartedAtRef.current = window.performance.now();
     overlayProgressTimerRef.current = window.setInterval(() => {
       setOverlayProgress((prev) => {
-        if (prev >= 92) return prev;
-        const baseStep = prev < 24 ? 6.8 : prev < 56 ? 3.6 : prev < 78 ? 1.8 : 0.9;
-        const jitter = prev < 78 ? Math.random() : Math.random() * 0.35;
-        return Math.min(92, prev + baseStep + jitter);
+        if (prev >= 95.2) return prev;
+        const startedAt = overlayProgressStartedAtRef.current ?? window.performance.now();
+        const elapsedSeconds = (window.performance.now() - startedAt) / 1000;
+
+        let target = 8;
+        if (elapsedSeconds < 4.5) {
+          target = 8 + elapsedSeconds * 10.5;
+        } else if (elapsedSeconds < 9.5) {
+          target = 55.25 + (elapsedSeconds - 4.5) * 6.2;
+        } else if (elapsedSeconds < 18) {
+          target = 86.25 + (elapsedSeconds - 9.5) * 1.05;
+        } else {
+          target = 95.2;
+        }
+
+        const jitter = elapsedSeconds < 10 ? Math.random() * 0.24 : Math.random() * 0.09;
+        const desired = Math.min(95.2, target + jitter);
+        const next = Math.max(prev, desired);
+        return Number(next.toFixed(2));
       });
-    }, 110);
+    }, 120);
+  };
+
+  const completeOverlayProgress = async () => {
+    stopOverlayProgressLoop();
+    overlayProgressStartedAtRef.current = null;
+    const from = Math.max(0, Math.min(99.4, overlayProgressValueRef.current));
+    const durationMs = from < 90 ? 900 : from < 95 ? 760 : 560;
+    const startedAt = window.performance.now();
+
+    while (true) {
+      const elapsed = window.performance.now() - startedAt;
+      const t = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const next = from + (100 - from) * eased;
+      setOverlayProgress(Number(next.toFixed(2)));
+      setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
+      if (t >= 1) break;
+      await wait(24);
+    }
+    setOverlayProgress(100);
+    setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
+    await wait(120);
   };
 
   useEffect(() => {
@@ -366,6 +433,7 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
   }, [matching, scrollScannerViewportToTop]);
 
   useEffect(() => {
+    overlayProgressValueRef.current = overlayProgress;
     const clamped = Math.max(0, Math.min(100, overlayProgress));
     const idx = Math.min(SCAN_OVERLAY_STEPS.length - 1, Math.floor((clamped / 100) * SCAN_OVERLAY_STEPS.length));
     setOverlayStepIndex((prev) => (prev === idx ? prev : idx));
@@ -377,6 +445,7 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
         window.clearInterval(overlayProgressTimerRef.current);
         overlayProgressTimerRef.current = null;
       }
+      overlayProgressStartedAtRef.current = null;
     };
   }, []);
 
@@ -395,6 +464,74 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
       .catch(() => setCoverage(null));
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const rawProfile = window.localStorage.getItem(LOCAL_PROFILE_KEY);
+    if (rawProfile) {
+      try {
+        const parsed = JSON.parse(rawProfile) as StoredScannerProfile;
+        setProfile((prev) => {
+          const restoredBusinessExists =
+            typeof parsed.businessExists === 'boolean' ? parsed.businessExists : prev.businessExists;
+          return {
+            ...prev,
+            businessExists: restoredBusinessExists,
+            region: String(parsed.location?.region ?? parsed.region ?? prev.region ?? ''),
+            activityType: String(parsed.activityType ?? prev.activityType ?? ''),
+            legalForm: String(parsed.legalForm ?? prev.legalForm ?? ''),
+            employmentStatus: String(parsed.employmentStatus ?? prev.employmentStatus ?? ''),
+            employees:
+              typeof parsed.employees === 'number' && Number.isFinite(parsed.employees)
+                ? String(parsed.employees)
+                : prev.employees,
+            founderAge:
+              typeof parsed.founderAge === 'number' && Number.isFinite(parsed.founderAge)
+                ? String(parsed.founderAge)
+                : prev.founderAge,
+            sector: String(parsed.sector ?? prev.sector ?? ''),
+            atecoCodes: String(parsed.ateco ?? prev.atecoCodes ?? ''),
+            fundingGoal: String(parsed.fundingGoal ?? prev.fundingGoal ?? ''),
+            plannedInvestment:
+              typeof parsed.revenueOrBudgetEUR === 'number' && Number.isFinite(parsed.revenueOrBudgetEUR)
+                ? String(parsed.revenueOrBudgetEUR)
+                : prev.plannedInvestment,
+            targetAmount:
+              typeof parsed.requestedContributionEUR === 'number' && Number.isFinite(parsed.requestedContributionEUR)
+                ? String(parsed.requestedContributionEUR)
+                : prev.targetAmount,
+            aidPreference: String(parsed.contributionPreference ?? prev.aidPreference ?? ''),
+            annualTurnover:
+              typeof parsed.annualTurnover === 'number' && Number.isFinite(parsed.annualTurnover)
+                ? String(parsed.annualTurnover)
+                : prev.annualTurnover,
+            isInnovative: typeof parsed.isInnovative === 'boolean' ? parsed.isInnovative : prev.isInnovative,
+            foundationYear:
+              typeof parsed.foundationYear === 'number' && Number.isFinite(parsed.foundationYear)
+                ? String(parsed.foundationYear)
+                : prev.foundationYear
+          };
+        });
+      } catch {
+        // storage corrotto: ignora e usa default
+      }
+    }
+
+    const rawMatches = window.localStorage.getItem(LOCAL_MATCHES_KEY);
+    if (!rawMatches) return;
+    try {
+      const parsed = JSON.parse(rawMatches) as StoredMatchesPayload;
+      const restoredItems = Array.isArray(parsed.items) ? parsed.items : [];
+      const restoredNearMisses = Array.isArray(parsed.nearMisses) ? parsed.nearMisses : [];
+      if (restoredItems.length > 0 || restoredNearMisses.length > 0) {
+        setMatchItems(restoredItems);
+        setNearMissItems(restoredNearMisses);
+      }
+    } catch {
+      // storage corrotto: ignora e usa default
+    }
+  }, []);
+
   const stepOneReady = useMemo(() => {
     const hasRegion = Boolean(profile.region.trim());
     if (!profile.businessExists) {
@@ -410,10 +547,12 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
 
   const stepTwoReady = useMemo(() => {
     if (profile.businessExists) {
-      return Boolean(profile.fundingGoal.trim()) && Boolean(profile.targetAmount.trim());
+      const hasGoal = profile.fundingGoal.trim().length >= 3;
+      const hasAmountSignal = Boolean(profile.targetAmount.trim()) || Boolean(profile.plannedInvestment.trim());
+      return hasGoal || hasAmountSignal;
     }
     return true;
-  }, [profile.businessExists, profile.fundingGoal, profile.targetAmount]);
+  }, [profile.businessExists, profile.fundingGoal, profile.targetAmount, profile.plannedInvestment]);
 
   const canRun = useMemo(() => stepOneReady && stepTwoReady, [stepOneReady, stepTwoReady]);
 
@@ -555,7 +694,7 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
       }
       setError(
         profile.businessExists
-          ? 'Indica obiettivo e importo richiesto per la tua impresa.'
+          ? 'Inserisci almeno obiettivo progetto oppure importo per affinare la ricerca.'
           : 'Per azienda da aprire inserisci almeno obiettivo o importo richiesto.',
       );
       return;
@@ -575,12 +714,20 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
     }
     scrollScannerViewportToTop('auto');
     await wait(40);
+    setHasSearched(true);
     setMatching(true);
     setOverlayProgress(8);
     setOverlayStepIndex(0);
     startOverlayProgressLoop();
     setError(null);
     setNearMissItems([]);
+    if (typeof window !== 'undefined' && window.bndoTrackEvent) {
+      window.bndoTrackEvent('scanner_started', {
+        region: profile.region || null,
+        sector: profile.sector || null,
+        ateco: profile.atecoCodes || null,
+      });
+    }
     let shouldScrollResults = false;
 
     try {
@@ -593,19 +740,28 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
       const latest = await apiRequest<MatchLatestResponse>('/api/v1/matching/latest', 'GET');
       if (isStaleRun()) return;
 
-      stopOverlayProgressLoop();
       setMatchItems(latest.items);
       setNearMissItems(latest.nearMisses ?? []);
-      setOverlayProgress(100);
-      setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
-      await wait(90);
+      if (typeof window !== 'undefined' && window.bndoTrackEvent) {
+        window.bndoTrackEvent('scanner_completed', {
+          resultsCount: latest.items.length,
+          nearMissCount: (latest.nearMisses ?? []).length,
+          region: profile.region || null,
+          sector: profile.sector || null,
+        });
+      }
+      await completeOverlayProgress();
       shouldScrollResults = true;
     } catch (err) {
       if (isStaleRun()) return;
-      stopOverlayProgressLoop();
-      setOverlayProgress(100);
-      setOverlayStepIndex(SCAN_OVERLAY_STEPS.length - 1);
-      await wait(90);
+      if (typeof window !== 'undefined' && window.bndoTrackEvent) {
+        window.bndoTrackEvent('scanner_failed', {
+          region: profile.region || null,
+          sector: profile.sector || null,
+          message: (err as Error)?.message ?? null,
+        });
+      }
+      await completeOverlayProgress();
       setError((err as Error).message || 'Errore durante la ricerca');
     } finally {
       if (isStaleRun()) return;
@@ -1054,7 +1210,7 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
         </form>
       </section>
 
-      <section ref={resultsRef} className="panel-card scanner-results fade-up">
+      <section id="scanner-results" ref={resultsRef} className="panel-card scanner-results fade-up">
         <div className="panel-head">
           <div className="panel-title">Risultati</div>
           <div className="panel-sub">{openCount} aperti · {incomingCount} in arrivo</div>
@@ -1101,7 +1257,11 @@ export function BandiFormView(props: BandiFormViewProps = {}) {
         </div>
 
         {matchItems.length === 0 ? (
-          <div className="panel-hint">Compila i dati e avvia la ricerca.</div>
+          <div className="panel-hint">
+            {hasSearched
+              ? 'Sulla base delle informazioni fornite non risultano bandi in linea con il suo profilo.'
+              : 'Compila i dati e avvia la ricerca.'}
+          </div>
         ) : visibleItems.length > 0 ? (
           <div className="result-grid">
             {visibleItems.map((item) => (

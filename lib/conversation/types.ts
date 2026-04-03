@@ -131,6 +131,7 @@ export type ProfileFieldMemory = {
 export type ProfileMemory = Partial<Record<NextBestField, ProfileFieldMemory>>;
 
 export type Session = {
+  conversationId: string;
   step: Step;
   userProfile: UserProfile;
   profileMemory?: ProfileMemory;
@@ -141,4 +142,6 @@ export type Session = {
   qaMode?: boolean;
   humanHandoffRequested?: boolean;
   humanHandoffCompleted?: boolean;
+  conversationSummary?: string | null;
+  updatedAt?: string;
 };

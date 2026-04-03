@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchAllIncentiviDocs } from '@/lib/matching/datasetIncentivi';
-import { refreshRuntimeCacheFile, saveActiveDatasetSnapshotToSupabase } from '@/lib/matching/datasetRepository';
+import { runIngestionOrchestrator } from '@/lib/matching/ingestionOrchestrator';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 
 export const runtime = 'nodejs';
@@ -15,32 +14,43 @@ export async function POST(req: Request) {
   }
 
   const secret = process.env.CRON_SECRET?.trim() || null;
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction && !secret) {
+    return NextResponse.json({ error: 'CRON_SECRET mancante in produzione.' }, { status: 500 });
+  }
   if (secret) {
-    const provided = req.headers.get('x-cron-secret');
+    const provided = req.headers.get('x-cron-secret') || '';
     if (!provided || provided !== secret) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
   }
 
   try {
-    const docs = await fetchAllIncentiviDocs(20000);
-    const fetchedAt = new Date().toISOString();
-    const saved = await refreshRuntimeCacheFile(docs);
-    const snapshot = await saveActiveDatasetSnapshotToSupabase({
-      docs,
-      source: 'incentivi.gov.it',
-      fetchedAt,
-    }).catch(() => null);
+    const url = new URL(req.url);
+    const mode = url.searchParams.get('mode') === 'incremental' ? 'incremental' : 'full';
+    const execution = await runIngestionOrchestrator(mode);
 
     return NextResponse.json({
-      ok: true,
-      source: 'incentivi.gov.it',
-      fetched: docs.length,
-      snapshotId: snapshot?.id ?? null,
-      snapshotVersion: snapshot?.versionHash ?? null,
-      cachePath: saved.path,
-      fetchedAt: saved.fetchedAt,
-    });
+      ok: execution.ok,
+      mode: execution.mode,
+      startedAt: execution.startedAt,
+      finishedAt: execution.finishedAt,
+      sourcesTotal: execution.sourcesTotal,
+      sourcesOk: execution.sourcesOk,
+      sourcesFailed: execution.sourcesFailed,
+      newCount: execution.metrics.newCount,
+      updatedCount: execution.metrics.updatedCount,
+      closedCount: execution.metrics.closedCount,
+      unchangedCount: execution.metrics.unchangedCount,
+      totalRecords: execution.metrics.totalRecords,
+      datasetVersion: execution.datasetVersion,
+      snapshotId: execution.snapshotId,
+      coverageStatus: execution.coverageStatus,
+      alerts: execution.alerts,
+      runLogId: execution.runLogId,
+      sourceRuns: execution.sourceRuns,
+      error: execution.error ?? null,
+    }, { status: execution.ok ? 200 : 503 });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'Refresh fallito.' }, { status: 500 });
   }

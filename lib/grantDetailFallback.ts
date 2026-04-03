@@ -484,7 +484,7 @@ export async function buildFallbackGrantDetail(grantId: string): Promise<Fallbac
     availabilityStatus: resolveAvailabilityStatus(doc.openDate ?? null),
     budgetTotal,
     aidForm: supportForm[0] ?? 'Agevolazione',
-    aidIntensity: economic.displayCoverageLabel || 'Da verificare',
+    aidIntensity: economic.displayCoverageLabel || null,
     beneficiaries: beneficiaries.length ? beneficiaries : ['Imprese'],
     sectors,
     officialUrl: buildSourceUrl(doc),
@@ -497,9 +497,9 @@ export async function buildFallbackGrantDetail(grantId: string): Promise<Fallbac
     requisitiSoft: {},
     requisitiStrutturati: {
       economic: {
-        displayAmountLabel: economic.displayAmountLabel || 'Da verificare',
-        displayProjectAmountLabel: economic.displayProjectAmountLabel || 'Da verificare',
-        displayCoverageLabel: economic.displayCoverageLabel || 'Da verificare',
+        displayAmountLabel: economic.displayAmountLabel || null,
+        displayProjectAmountLabel: economic.displayProjectAmountLabel || null,
+        displayCoverageLabel: economic.displayCoverageLabel || null,
         grantMin: economic.grantMin,
         grantMax: economic.grantMax,
         costMin: economic.costMin,
@@ -530,8 +530,8 @@ export async function buildFallbackGrantExplainability(grantId: string): Promise
     whyFit,
     satisfiedRequirements: whyFit,
     missingRequirements: [
-      'Verificare requisiti specifici, ATECO ammessi e spese finanziabili sul testo ufficiale.',
-      'Confermare documentazione richiesta e finestra temporale di candidatura.',
+      'Verificare se il soggetto richiedente rientra tra i beneficiari ammessi dal bando.',
+      'Verificare compatibilità del settore/ATECO e dei limiti economici della misura.',
     ],
     applySteps: [
       'Leggi la scheda ufficiale del bando e verifica la finestra di apertura.',

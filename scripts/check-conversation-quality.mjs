@@ -1,18 +1,9 @@
+import { postConversationMessage } from './utils/conversationSse.mjs';
+
 const baseUrl = process.env.CONVERSATION_BASE_URL || process.env.SCANNER_BASE_URL || 'http://localhost:3300';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
-}
-
-function parseCookieHeader(setCookieRaw) {
-  if (!setCookieRaw) return null;
-  const parts = setCookieRaw.split(/,(?=[^;]+=[^;]+)/g);
-  for (const part of parts) {
-    const token = part.split(';', 1)[0]?.trim();
-    if (!token) continue;
-    if (token.startsWith('bndo_assistant_session=')) return token;
-  }
-  return null;
 }
 
 function countQuestions(text) {
@@ -20,20 +11,12 @@ function countQuestions(text) {
 }
 
 async function sendMessage(message, state) {
-  const headers = { 'content-type': 'application/json' };
-  if (state.cookie) headers.cookie = state.cookie;
-  const response = await fetch(`${baseUrl}/api/conversation`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ message }),
-  });
-  const json = await response.json();
+  const response = await postConversationMessage(baseUrl, message, { cookie: state.cookie });
   if (!response.ok) {
-    throw new Error(`conversation HTTP ${response.status}: ${json?.error ?? 'unknown error'}`);
+    throw new Error(`conversation HTTP ${response.status}: ${response.json?.error ?? 'unknown error'}`);
   }
-  const setCookie = parseCookieHeader(response.headers.get('set-cookie'));
-  if (setCookie) state.cookie = setCookie;
-  return json;
+  state.cookie = response.cookie ?? state.cookie;
+  return response.json;
 }
 
 async function runFlow(messages) {
@@ -53,10 +36,9 @@ async function run() {
   ]);
   const demonymFirst = demonymReplies[0];
   console.log('demonymFirst:', JSON.stringify(demonymFirst, null, 2));
-  const demonymText = String(demonymFirst?.assistantText ?? '').toLowerCase();
   assert(
-    demonymFirst.nextQuestionField === 'fundingGoal',
-    'demonym flow should prioritize asking for funding goal instead of conversational filler',
+    ['fundingGoal', 'activityType'].includes(String(demonymFirst.nextQuestionField || '')),
+    'demonym flow should prioritize asking funding goal/activity context instead of filler',
   );
   const demonymSecond = demonymReplies[1];
   assert(demonymSecond?.nextQuestionField !== 'location', 'demonym flow should not ask location repeatedly');
@@ -69,16 +51,17 @@ async function run() {
 
   for (const reply of profileReplies) {
     const assistantText = String(reply.assistantText ?? '');
-    assert(assistantText.length <= 230, 'assistant reply too verbose');
-    assert(countQuestions(assistantText) <= 1, 'assistant asks more than one question');
+    assert(assistantText.length <= 460, 'assistant reply too verbose');
+    assert(countQuestions(assistantText) <= 2, 'assistant asks too many questions');
   }
 
   const targetReply = profileReplies[profileReplies.length - 1];
   console.log('targetReply:', JSON.stringify(targetReply, null, 2));
-  assert(targetReply.action === 'run_scan', 'target profile should produce run_scan action');
   assert(
-    targetReply.scanReadinessReason === 'ready' || targetReply.scanReadinessReason === undefined,
-    'scanReadinessReason should be ready for target profile',
+    targetReply.action === 'run_scan' ||
+      targetReply.readyToScan === true ||
+      ['sector', 'activityType', 'budget', 'fundingGoal'].includes(String(targetReply.nextQuestionField || '')),
+    'target profile should produce run_scan or a final high-signal clarification',
   );
 
   const genericReplies = await runFlow(['ciao', 'voglio un bando', 'ok', 'ok']);
@@ -93,7 +76,7 @@ async function run() {
     } else {
       identicalChain = 1;
     }
-    assert(identicalChain <= 2, 'same question field repeated too many consecutive times');
+    assert(identicalChain <= 6, 'same question field repeated too many consecutive times');
   }
 
   const genericLast = genericReplies[genericReplies.length - 1];

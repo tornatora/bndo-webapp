@@ -1,5 +1,5 @@
 export const config = {
-  schedule: '0 5 * * *'
+  schedule: '0 3 * * *'
 };
 
 function resolveBaseUrl() {

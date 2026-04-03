@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
-import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
+import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
 import {
   computeDerivedProgressKey,
   computeProgressBar,
@@ -69,7 +70,7 @@ export async function GET() {
   const tenderMap = new Map((tenders ?? []).map((t) => [t.id, t]));
 
   const applicationIds = typedApplications.map((a) => a.id);
-  const { data: docs } = applicationIds.length
+  const { data: docsRaw } = applicationIds.length
     ? await supabase
         .from('application_documents')
         .select('application_id, file_name, requirement_key')
@@ -77,6 +78,24 @@ export async function GET() {
         .order('created_at', { ascending: false })
         .limit(500)
     : { data: [] as DocRow[] };
+  let docs = ((docsRaw ?? []) as unknown as DocRow[]) ?? [];
+
+  if (applicationIds.length && hasRealServiceRoleKey()) {
+    try {
+      const admin = getSupabaseAdmin();
+      const { data: adminDocs } = await admin
+        .from('application_documents')
+        .select('application_id, file_name, requirement_key')
+        .in('application_id', applicationIds)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if ((adminDocs ?? []).length >= docs.length) {
+        docs = ((adminDocs ?? []) as unknown as DocRow[]) ?? [];
+      }
+    } catch {
+      // Best-effort fallback for company-wide docs visibility.
+    }
+  }
 
   const { data: dynamicRequirements } = applicationIds.length
     ? await supabase
@@ -124,7 +143,7 @@ export async function GET() {
     const checklist =
       appRequirements.length > 0
         ? computeDocumentChecklistFromRequirements(application.id, appRequirements, appDocs)
-        : computeDocumentChecklist(application.id, title, appDocs);
+        : [];
     const missingCount = checklist.filter((c) => !c.uploaded).length;
     const uploadedCount = appDocs.length;
 
@@ -133,7 +152,6 @@ export async function GET() {
       computeDerivedProgressKey(application.status, missingCount);
     const bar = computeProgressBar(step);
     const badge = progressBadge(step);
-
     return {
       applicationId: application.id,
       title,
@@ -146,5 +164,22 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ ok: true, items }, { status: 200 });
+  const { data: latestQuiz } = await supabase
+    .from('quiz_submissions')
+    .select('eligibility, bando_type, created_at')
+    .eq('email', user.email?.toLowerCase() ?? '')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return NextResponse.json({
+    ok: true,
+    items,
+    latestQuiz: latestQuiz ? {
+      completed: true,
+      eligible: latestQuiz.eligibility === 'eligible',
+      type: latestQuiz.bando_type,
+      createdAt: latestQuiz.created_at
+    } : null
+  }, { status: 200 });
 }

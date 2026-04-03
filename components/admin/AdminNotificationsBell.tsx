@@ -122,6 +122,13 @@ export function AdminNotificationsBell() {
     } else if (item.type === 'quiz_submission') {
       const qs = item.entityId ? `?submission_id=${encodeURIComponent(item.entityId)}` : '';
       window.location.href = `/admin/quiz-responses${qs}`;
+    } else if (item.type === 'system' && item.entityId?.includes(':')) {
+      const [companyId, applicationId] = item.entityId.split(':');
+      if (companyId && applicationId) {
+        window.location.href = `/admin/clients/${companyId}?tab=practice:${applicationId}`;
+        return;
+      }
+      window.location.href = `/admin`;
     } else {
       // generic or system
       window.location.href = `/admin`;

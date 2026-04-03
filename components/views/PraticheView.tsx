@@ -3,6 +3,7 @@ import { MARKETING_URL } from '@/shared/lib';
 const QUIZ_URL = `${MARKETING_URL}/quiz/autoimpiego`;
 
 type Practice = {
+  grantId: string;
   title: string;
   badge: string;
   maxAmount: string;
@@ -12,6 +13,7 @@ type Practice = {
 
 const PRACTICES: Practice[] = [
   {
+    grantId: '769117e6-ab97-4b8a-9ff1-bec0e14879e6',
     title: 'Resto al Sud 2.0',
     badge: 'Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia',
     maxAmount: '€200k',
@@ -27,6 +29,7 @@ const PRACTICES: Practice[] = [
     ]
   },
   {
+    grantId: 'a13a8bde-e544-4a14-b73f-61dd0ca8fe90',
     title: 'Autoimpiego Centro Nord',
     badge: "Piemonte, Valle d'Aosta, Liguria, Lombardia, Veneto, Friuli, Trentino, Emilia-R., Toscana, Lazio, Umbria, Marche",
     maxAmount: '€200k',
@@ -43,12 +46,22 @@ const PRACTICES: Practice[] = [
   }
 ];
 
-export function PraticheView() {
+export function PraticheView({ 
+  onVerify, 
+  onOpenDetail,
+  title = 'Pratiche disponibili',
+  subtitle = 'Seleziona una pratica e verifica i requisiti con BNDO.'
+}: { 
+  onVerify?: (grantId: string) => void;
+  onOpenDetail?: (grantId: string) => void;
+  title?: string;
+  subtitle?: string;
+}) {
   return (
     <div className="content-stage mobile-menu-safe">
       <div className="page-head">
-        <div className="page-title">Pratiche disponibili</div>
-        <div className="page-sub">Seleziona una pratica e verifica i requisiti con BNDO.</div>
+        <div className="page-title">{title}</div>
+        <div className="page-sub">{subtitle}</div>
       </div>
 
       <div className="practice-grid">
@@ -74,10 +87,26 @@ export function PraticheView() {
               ))}
             </div>
 
-            <div className="practice-footer">
-              <a className="practice-btn" href={QUIZ_URL} target="_blank" rel="noreferrer">
-                <span>Verifica requisiti</span>
-              </a>
+            <div className="practice-footer" style={{ display: 'flex', gap: '8px' }}>
+              {onOpenDetail && (
+                <button 
+                  type="button" 
+                  className="practice-btn practice-btn--secondary" 
+                  onClick={() => onOpenDetail(p.grantId)}
+                  style={{ flex: 1, background: 'rgba(11,17,54,0.05)', color: 'var(--navy)' }}
+                >
+                  <span>Dettagli</span>
+                </button>
+              )}
+              {onVerify ? (
+                <button type="button" className="practice-btn" onClick={() => onVerify(p.grantId)} style={{ flex: 1 }}>
+                  <span>Verifica requisiti</span>
+                </button>
+              ) : (
+                <a className="practice-btn" href={QUIZ_URL} target="_blank" rel="noreferrer" style={{ flex: 1 }}>
+                  <span>Verifica requisiti</span>
+                </a>
+              )}
             </div>
           </div>
         ))}
