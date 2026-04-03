@@ -769,7 +769,7 @@ export function OnboardingWizardClient({
 
   async function persistWizardState(nextStep: OnboardingWizardStep, nextCompleted: OnboardingWizardStep[]) {
     if (isDashboardMode) return;
-    if (paymentStatus !== 'paid') return;
+    if (paymentStatus !== 'paid' && !paymentDeferred) return;
     try {
       const response = await fetch('/api/onboarding/wizard-state', {
         method: 'POST',
@@ -779,6 +779,7 @@ export function OnboardingWizardClient({
           quizSubmissionId,
           applicationId: activeApplicationId,
           session_id: activeSessionId,
+          paymentDeferred: paymentDeferred ? 'yes' : 'no',
           onboardingMode: resolvedOnboardingMode,
           currentStep: nextStep,
           completedSteps: nextCompleted,

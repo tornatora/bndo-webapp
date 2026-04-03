@@ -68,6 +68,7 @@ const PostSchema = z.object({
   applicationId: ApplicationIdSchema.optional().nullable(),
   currentStep: z.number().int().min(1).max(7),
   completedSteps: z.array(z.number().int().min(1).max(7)).default([]),
+  paymentDeferred: z.enum(['yes', 'no']).optional().nullable(),
 });
 
 const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -588,7 +589,9 @@ export async function POST(request: Request) {
       });
     }
 
-    if (!record || record.status !== 'paid') {
+    const paymentDeferred = body.data.paymentDeferred === 'yes';
+
+    if (!record || (record.status !== 'paid' && !paymentDeferred)) {
       return NextResponse.json({ error: 'Pagamento non verificato: progresso non persistibile.' }, { status: 409 });
     }
     if (requestedApplicationId && record.application_id && record.application_id !== requestedApplicationId) {

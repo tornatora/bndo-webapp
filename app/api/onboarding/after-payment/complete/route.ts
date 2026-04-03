@@ -218,7 +218,7 @@ export async function POST(request: Request) {
     }
 
 
-    if (providedSessionId) {
+    if (providedSessionId && !paymentDeferred) {
       if (paymentRecord?.status === 'paid') {
         amountPaid = Math.max(amountPaid, paymentRecord.amount_cents / 100);
         currency = paymentRecord.currency ?? currency;
