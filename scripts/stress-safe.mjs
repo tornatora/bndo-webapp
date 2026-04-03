@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { normalizeConversationResponse } from './utils/conversationSse.mjs';
 
 const baseUrl = process.env.STRESS_BASE_URL || 'http://127.0.0.1:3300';
 const scanRuns = Number(process.env.STRESS_SCAN_RUNS || 120);
@@ -174,10 +175,15 @@ async function fetchJsonWithTimeout(url, init = {}, ms = timeoutMs) {
     const response = await fetch(url, { ...init, signal: controller.signal });
     const text = await response.text();
     let json = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      json = null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/event-stream') || String(text || '').trimStart().startsWith('data:')) {
+      json = normalizeConversationResponse({ response, text }).json;
+    } else {
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        json = null;
+      }
     }
     return {
       ok: response.ok,

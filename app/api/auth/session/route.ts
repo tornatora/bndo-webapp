@@ -50,10 +50,14 @@ export async function GET(request: NextRequest) {
   const {
     data: { user }
   } = await supabase.auth.getUser();
+  const typedUser = user as (typeof user & { is_anonymous?: boolean }) | null;
+  const isAnonymous = Boolean(typedUser?.is_anonymous);
+  const hasIdentity = Boolean(user?.email || user?.phone);
+  const authenticated = Boolean(user) && !isAnonymous && hasIdentity;
 
   return withCors(
     NextResponse.json({
-      authenticated: Boolean(user),
+      authenticated,
       email: user?.email ?? null
     }),
     origin

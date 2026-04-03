@@ -14,76 +14,69 @@ type SummaryItem = {
   statusClassName: string;
 };
 
-type SummaryPayload = {
-  ok?: boolean;
-  items?: SummaryItem[];
-  error?: string;
-};
-
 export function DashboardApplicationsClient({
-  initialCount,
   initialItems
 }: {
-  initialCount: number;
-  initialItems?: SummaryItem[];
+  initialItems: SummaryItem[];
 }) {
-  const [loading, setLoading] = useState(!initialItems);
-  const [items, setItems] = useState<SummaryItem[]>(initialItems ?? []);
+  const [items, setItems] = useState<SummaryItem[]>(initialItems);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
+
+    const refresh = async () => {
       try {
         const res = await fetch('/api/dashboard/applications-summary', { cache: 'no-store' });
-        const json = (await res.json().catch(() => ({}))) as SummaryPayload;
-        if (!res.ok) throw new Error(json.error ?? 'Impossibile caricare le pratiche.');
+        const json = (await res.json().catch(() => ({}))) as {
+          items?: SummaryItem[];
+          error?: string;
+        };
+        if (!res.ok) throw new Error(json.error ?? 'Impossibile aggiornare le pratiche.');
         if (cancelled) return;
         setItems(json.items ?? []);
-      } catch {
-        if (!cancelled && !initialItems) setItems([]);
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(null);
+      } catch (refreshError) {
+        if (cancelled) return;
+        setError(refreshError instanceof Error ? refreshError.message : 'Aggiornamento non riuscito.');
       }
     };
-    // If we have SSR items, refresh in the background; otherwise fetch immediately.
-    const t = setTimeout(run, initialItems ? 400 : 0);
+
+    const delayed = window.setTimeout(() => {
+      void refresh();
+    }, 220);
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 30000);
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refresh();
+    };
+    const onFocus = () => {
+      void refresh();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      window.clearTimeout(delayed);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [initialItems]);
-
-  if (loading) {
-    // Keep layout stable: render a couple of skeleton cards.
-    return (
-      <>
-        {[0, 1].map((i) => (
-          <div key={i} className="pratica-card" style={{ padding: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ height: 20, width: 220, borderRadius: 10, background: 'rgba(11,17,54,0.06)' }} />
-              <div style={{ height: 22, width: 110, borderRadius: 999, background: 'rgba(11,17,54,0.05)' }} />
-            </div>
-            <div style={{ height: 10, width: '100%', borderRadius: 999, background: 'rgba(11,17,54,0.05)', marginTop: 14 }} />
-            <div style={{ height: 12, width: 260, borderRadius: 10, background: 'rgba(11,17,54,0.05)', marginTop: 12 }} />
-          </div>
-        ))}
-      </>
-    );
-  }
-
-  if (items.length === 0 && initialCount === 0) return null;
-
-  if (items.length === 0) {
-    return (
-      <div className="empty-state">
-        <div className="empty-icon">📋</div>
-        <p className="empty-text">Nessuna pratica disponibile al momento.</p>
-      </div>
-    );
-  }
+  }, []);
 
   return (
     <>
+      {error ? <div className="dashboard-inline-error">{error}</div> : null}
+      {items.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📋</div>
+          <p className="empty-text">Nessuna pratica disponibile al momento.</p>
+        </div>
+      ) : null}
       {items.map((it) => (
         <Link key={it.applicationId} href={`/dashboard/practices/${it.applicationId}`} className="pratica-card pratica-card-link">
           <div className="pratica-header">

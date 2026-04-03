@@ -1,70 +1,47 @@
 'use client';
 
-import Image from 'next/image';
-import { useMemo, useState } from 'react';
-import { AfterPaymentOnboardingForm } from '@/components/landing/AfterPaymentOnboardingForm';
+import { OnboardingWizardClient } from '@/components/landing/OnboardingWizardClient';
 import type { PracticeType } from '@/lib/bandi';
+import type { OnboardingMode, OnboardingWizardStep } from '@/components/landing/onboarding-wizard/types';
 
-export function OnboardingWelcomeClient({ sessionId, practiceType }: { sessionId?: string; practiceType?: PracticeType }) {
-  const [view, setView] = useState<'welcome' | 'form'>('welcome');
-
-  const buttonLabel = useMemo(
-    () =>
-      view === 'welcome'
-        ? 'Carica i documenti richiesti e attiva la dashboard'
-        : 'Invia documenti e attiva dashboard',
-    [view]
-  );
-
+export function OnboardingWelcomeClient({
+  sessionId,
+  practiceType,
+  quizSubmissionId,
+  applicationId,
+  grantId,
+  grantSlug,
+  source,
+  previewStep,
+  resumeStep,
+  skipPayment,
+  onboardingMode,
+}: {
+  sessionId?: string;
+  practiceType?: PracticeType;
+  quizSubmissionId?: string;
+  applicationId?: string;
+  grantId?: string;
+  grantSlug?: string;
+  source?: 'scanner' | 'chat' | 'direct' | 'admin';
+  previewStep?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  resumeStep?: OnboardingWizardStep;
+  skipPayment?: boolean;
+  onboardingMode?: OnboardingMode;
+}) {
   return (
-    <main className={`onboarding2030 ${view === 'form' ? 'is-form' : ''}`}>
-      <div className="onboarding2030-bg" aria-hidden="true" />
-
-      <div className="onboarding2030-inner">
-        {view === 'welcome' ? (
-          <section className="onboarding2030-stage">
-            <div className="onboarding2030-tag">Attivazione pratica</div>
-
-            <h1 className="onboarding2030-welcomeTitle">BENVENUT* IN</h1>
-
-            <div className="onboarding2030-logoWrap" aria-label="BNDO">
-              <Image
-                src="/Logo-BNDO-header.png"
-                alt="BNDO"
-                width={520}
-                height={224}
-                priority
-                quality={100}
-                sizes="(max-width: 520px) 90vw, 520px"
-                className="onboarding2030-logo"
-              />
-              <div className="onboarding2030-logoShine" aria-hidden="true" />
-            </div>
-
-            <p className="onboarding2030-subtitle">
-              Caricando questi documenti avrai accesso alla tua dashboard cliente. Da lì potrai seguire lo stato della
-              pratica, ricevere richieste documenti e comunicare con il tuo consulente.
-            </p>
-
-            <div className="onboarding2030-ctaRow">
-              <button type="button" className="onboarding2030-cta" onClick={() => setView('form')}>
-                <span>{buttonLabel}</span>
-              </button>
-            </div>
-          </section>
-        ) : (
-          <section className="onboarding2030-formOnly">
-            <div className="onboarding2030-formTop">
-              <button type="button" className="onboarding2030-formBack" onClick={() => setView('welcome')}>
-                ← Indietro
-              </button>
-            </div>
-            <div className="onboarding2030-formCard">
-              <AfterPaymentOnboardingForm sessionId={sessionId} practiceType={practiceType} />
-            </div>
-          </section>
-        )}
-      </div>
-    </main>
+    <OnboardingWizardClient
+      sessionId={sessionId}
+      practiceType={practiceType}
+      quizSubmissionId={quizSubmissionId}
+      applicationId={applicationId}
+      grantId={grantId}
+      grantSlug={grantSlug}
+      source={source}
+      previewStep={previewStep}
+      resumeStep={resumeStep}
+      skipPayment={skipPayment}
+      onboardingMode={onboardingMode}
+    />
   );
 }

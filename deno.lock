@@ -11,6 +11,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@stripe/stripe-js@^8.9.0",
         "npm:@supabase/ssr@0.5.2",
         "npm:@supabase/supabase-js@2.48.1",
         "npm:@types/canvas-confetti@^1.9.0",
@@ -19,11 +20,13 @@
         "npm:@types/react@^18.2.48",
         "npm:autoprefixer@^10.4.20",
         "npm:canvas-confetti@^1.9.4",
+        "npm:cheerio@^1.2.0",
         "npm:clsx@^2.1.1",
         "npm:eslint-config-next@^14.2.18",
         "npm:eslint@^8.57.1",
         "npm:lucide-react@0.473",
         "npm:next@^14.2.18",
+        "npm:openai@^6.27.0",
         "npm:pdf-parse@^2.4.5",
         "npm:postcss@^8.4.49",
         "npm:react-dom@^18.2.0",

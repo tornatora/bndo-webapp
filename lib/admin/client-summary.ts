@@ -32,11 +32,20 @@ export type ClientSummary = {
     id: string;
     application_id: string;
     file_name: string;
+    requirement_key: string | null;
     storage_path: string;
     file_size: number;
     mime_type: string;
     created_at: string;
     downloadUrl: string | null;
+  }>;
+  practiceRequirements: Array<{
+    application_id: string;
+    requirement_key: string;
+    label: string;
+    description: string | null;
+    is_required: boolean;
+    status: 'missing' | 'uploaded' | 'waived';
   }>;
 };
 
@@ -44,6 +53,7 @@ type DocumentRow = {
   id: string;
   application_id: string;
   file_name: string;
+  requirement_key: string | null;
   storage_path: string;
   file_size: number;
   mime_type: string;
@@ -90,11 +100,27 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
   const { data: documents } = applicationIds.length
     ? await supabase
         .from('application_documents')
-        .select('id, application_id, file_name, storage_path, file_size, mime_type, created_at')
+        .select('id, application_id, file_name, requirement_key, storage_path, file_size, mime_type, created_at')
         .in('application_id', applicationIds)
         .order('created_at', { ascending: false })
         .limit(120)
     : { data: [] as DocumentRow[] };
+
+  const { data: practiceRequirements } = applicationIds.length
+    ? await supabase
+        .from('practice_document_requirements')
+        .select('application_id, requirement_key, label, description, is_required, status')
+        .in('application_id', applicationIds)
+    : {
+        data: [] as Array<{
+          application_id: string;
+          requirement_key: string;
+          label: string;
+          description: string | null;
+          is_required: boolean;
+          status: 'missing' | 'uploaded' | 'waived';
+        }>
+      };
 
   const docsWithLinks = await Promise.all(
     (documents ?? []).map(async (doc) => {
@@ -110,6 +136,7 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
     company,
     clientProfile,
     applications: applicationsWithTitle,
-    documents: docsWithLinks
+    documents: docsWithLinks,
+    practiceRequirements: practiceRequirements ?? []
   };
 }

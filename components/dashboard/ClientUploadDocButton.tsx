@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation';
 
 export function ClientUploadDocButton({
   applicationId,
-  documentLabel
+  requirementKey,
+  documentLabel,
+  onUploadComplete
 }: {
   applicationId: string;
+  requirementKey?: string;
   documentLabel: string;
+  onUploadComplete?: () => void;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -24,6 +28,7 @@ export function ClientUploadDocButton({
     try {
       const fd = new FormData();
       fd.append('applicationId', applicationId);
+      if (requirementKey) fd.append('requirementKey', requirementKey);
       fd.append('documentLabel', documentLabel);
       fd.append('file', file);
 
@@ -33,6 +38,7 @@ export function ClientUploadDocButton({
 
       setDone(true);
       router.refresh();
+      onUploadComplete?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload fallito.');
     } finally {
@@ -66,4 +72,3 @@ export function ClientUploadDocButton({
     </div>
   );
 }
-

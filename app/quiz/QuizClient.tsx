@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { APP_URL, MARKETING_URL } from '@/lib/site-urls';
 import { getQuizQuestions } from '@/lib/quiz/quiz-map';
-import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
+import { SUPPORT_WHATSAPP_URL, buildEligibleQuizWhatsAppUrl } from '@/lib/support';
 import './quiz.css';
 
 type StepId =
@@ -12,6 +13,7 @@ type StepId =
   | 'q1'
   | 'q1b'
   | 'q2'
+  | 'q2_contact'
   | 'q3'
   | 'q4'
   | 'q4b'
@@ -52,21 +54,22 @@ const progressMap: Record<StepId, number> = {
   q1: 1,
   q1b: 1,
   q2: 2,
-  q3: 3,
-  q4: 4,
-  q4b: 4,
-  q5: 5,
-  q5b: 5,
-  q5c: 5,
-  q6: 6,
-  q6b: 6,
-  q7: 7,
-  q8: 8,
-  q8b: 8,
-  q9: 9,
-  q10: 10,
-  q11: 11,
-  q11b: 12,
+  q2_contact: 3,
+  q3: 4,
+  q4: 5,
+  q4b: 5,
+  q5: 6,
+  q5b: 6,
+  q5c: 6,
+  q6: 7,
+  q6b: 7,
+  q7: 8,
+  q8: 9,
+  q8b: 9,
+  q9: 10,
+  q10: 11,
+  q11: 12,
+  q11b: 13,
   q12: 13,
   blocked: 13,
   success: 13
@@ -98,7 +101,10 @@ export default function QuizPage() {
   const [consentDataProcessing, setConsentDataProcessing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [latestSubmissionId, setLatestSubmissionId] = useState<string | null>(null);
   const [blockedFromStep, setBlockedFromStep] = useState<StepId | null>(null);
+  const [pendingEarlyBlock, setPendingEarlyBlock] = useState<StepId | null>(null);
+  const [lastSavedNonEligibleStep, setLastSavedNonEligibleStep] = useState<StepId | null>(null);
 
   const progress = Math.round((progressMap[step] / 13) * 100);
   const region = answers.q3 ?? null;
@@ -115,6 +121,16 @@ export default function QuizPage() {
       setStep('q1');
     }, 2500);
     return () => clearTimeout(timer);
+  }, [step]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (step !== 'q1') return;
+    const tracker = (window as Window & { bndoTrackEvent?: (eventType: string, payload?: Record<string, unknown>) => void }).bndoTrackEvent;
+    tracker?.('quiz_started', {
+      pagePath: '/quiz',
+      channel: 'quiz_public',
+    });
   }, [step]);
 
   useEffect(() => {
@@ -211,22 +227,32 @@ export default function QuizPage() {
 
   function showBlocked(fromStep: StepId) {
     setBlockedFromStep(fromStep);
+    setPendingEarlyBlock(null);
     setStep('blocked');
+    void persistNotEligible(fromStep);
   }
 
   function handleAnswer(questionId: string, value: string) {
     setAnswers((previous) => ({ ...previous, [questionId]: value }));
 
     if (questionId === 'q1') {
-      if (value === 'A') return showBlocked('q1');
+      if (value === 'A') {
+        setPendingEarlyBlock('q1');
+        return goTo('q2');
+      }
       if (value === 'B') return goTo('q2');
       return goTo('q1b');
     }
     if (questionId === 'q1b') {
-      return value === 'A' ? goTo('q2') : showBlocked('q1b');
+      if (value === 'A') return goTo('q2');
+      setPendingEarlyBlock('q1b');
+      return goTo('q2');
     }
     if (questionId === 'q2') {
-      return value === 'D' ? showBlocked('q2') : goTo('q3');
+      if (value === 'D') {
+        setPendingEarlyBlock('q2');
+      }
+      return goTo('q2_contact');
     }
     if (questionId === 'q4') {
       return value === 'A' ? goTo('q5') : goTo('q4b');
@@ -279,53 +305,125 @@ export default function QuizPage() {
     goTo('q4');
   }
 
-  async function submitQuiz() {
-    setSubmissionError(null);
-
+  function hasValidLeadData() {
     if (!contact.firstName || !contact.lastName || !contact.email || !contact.phone) {
       setSubmissionError('Compila tutti i campi obbligatori.');
-      return;
+      return false;
     }
     if (!consentPrivacy || !consentTerms || !consentDataProcessing) {
       setSubmissionError('Devi accettare i consensi obbligatori per procedere.');
+      return false;
+    }
+    return true;
+  }
+
+  function resolveBandoTypeForSubmission() {
+    return bandoType ?? 'centro_nord';
+  }
+
+  async function postQuizSubmission(
+    eligibility: 'eligible' | 'not_eligible',
+    extraAnswers?: Record<string, string>
+  ) {
+    const response = await fetch('/api/quiz/submit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        email: contact.email,
+        phone: contact.phone,
+        region,
+        bandoType: resolveBandoTypeForSubmission(),
+        eligibility,
+        answers: {
+          ...answers,
+          ...(extraAnswers ?? {})
+        },
+        consentPrivacy,
+        consentTerms,
+        consentDataProcessing
+      })
+    });
+
+    const payload = (await response.json().catch(() => null)) as { error?: string; submissionId?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'Salvataggio non riuscito.');
+    }
+    return payload?.submissionId ?? null;
+  }
+
+  async function persistNotEligible(blockStep: StepId) {
+    if (lastSavedNonEligibleStep === blockStep) return;
+    if (!hasValidLeadData()) return;
+    try {
+      const blockedQuestion = q(blockStep)?.title ?? blockStep;
+      await postQuizSubmission('not_eligible', {
+        _blocked_from_step: blockStep,
+        _blocked_question: blockedQuestion,
+        _captured_after_question: 'q2'
+      });
+      setLastSavedNonEligibleStep(blockStep);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : 'Errore invio quiz.');
+    }
+  }
+
+  async function submitQuiz() {
+    setSubmissionError(null);
+
+    if (!hasValidLeadData()) {
       return;
     }
 
     setSubmitting(true);
 
     try {
-      const response = await fetch('/api/quiz/submit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          firstName: contact.firstName,
-          lastName: contact.lastName,
-          email: contact.email,
-          phone: contact.phone,
-          region,
-          bandoType,
-          eligibility: 'eligible',
-          answers,
-          consentPrivacy,
-          consentTerms,
-          consentDataProcessing
-        })
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? 'Salvataggio non riuscito.');
-      }
-
+      const submissionId = await postQuizSubmission('eligible');
+      setLatestSubmissionId(submissionId);
       setBlockedFromStep(null);
+      setPendingEarlyBlock(null);
       setStep('success');
     } catch (error) {
       setSubmissionError(error instanceof Error ? error.message : 'Errore invio quiz.');
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleLeadGateNext() {
+    setSubmissionError(null);
+    if (!hasValidLeadData()) return;
+    if (pendingEarlyBlock) {
+      const stopAt = pendingEarlyBlock;
+      setPendingEarlyBlock(null);
+      showBlocked(stopAt);
+      return;
+    }
+    goTo('q3');
+  }
+
+  function goToPracticePayment() {
+    const practiceType = isSouth ? 'resto_sud_2_0' : 'autoimpiego_centro_nord';
+    if (!latestSubmissionId) {
+      setSubmissionError('Errore sessione quiz. Riprova l’invio del quiz per procedere al pagamento.');
+      return;
+    }
+    setSubmissionError(null);
+    const query = new URLSearchParams();
+    query.set('practice', practiceType);
+    query.set('quiz', latestSubmissionId);
+    query.set('skip_payment', '1');
+    query.set('onboarding_mode', 'dashboard_client');
+    window.location.href = `/onboarding?${query.toString()}`;
+  }
+
+  function openConsultantChat() {
+    const practiceType = isSouth ? 'resto_sud_2_0' : 'autoimpiego_centro_nord';
+    const whatsappUrl = buildEligibleQuizWhatsAppUrl(practiceType);
+    window.open(whatsappUrl, '_blank');
   }
 
   return (
@@ -335,7 +433,7 @@ export default function QuizPage() {
           <>
             <div className="top-links">
               <Link href={MARKETING_URL}>Torna al sito</Link>
-              <Link href={`${APP_URL}/login`}>Area clienti</Link>
+              {step !== 'success' && <Link href={`${APP_URL}/login`}>Area clienti</Link>}
             </div>
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${progress}%` }} />
@@ -406,6 +504,82 @@ export default function QuizPage() {
               <OptionButton key={opt.value} text={opt.label} value={opt.value} onPick={(value) => handleAnswer('q2', value)} />
             ))}
             <BackRow onBack={goBack} />
+          </QuestionLayout>
+        ) : null}
+
+        {step === 'q2_contact' ? (
+          <QuestionLayout title="Inserisci i tuoi dati per continuare" subtitle="Passaggio obbligatorio">
+            <div className="quiz-warning-banner">
+              <div className="quiz-warning-icon">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="quiz-warning-text">
+                Non fare il furbo, se non inserisci i tuoi dati correttamente, non riusciremo a contattarti in caso di esito positivo.
+              </div>
+            </div>
+            <div className="input-group">
+              <input
+                placeholder="Nome *"
+                value={contact.firstName}
+                onChange={(event) => setContact((previous) => ({ ...previous, firstName: event.target.value }))}
+              />
+            </div>
+            <div className="input-group">
+              <input
+                placeholder="Cognome *"
+                value={contact.lastName}
+                onChange={(event) => setContact((previous) => ({ ...previous, lastName: event.target.value }))}
+              />
+            </div>
+            <div className="input-group">
+              <input
+                type="email"
+                placeholder="Email *"
+                value={contact.email}
+                onChange={(event) => setContact((previous) => ({ ...previous, email: event.target.value }))}
+              />
+            </div>
+            <div className="input-group">
+              <input
+                placeholder="Telefono *"
+                value={contact.phone}
+                onChange={(event) => setContact((previous) => ({ ...previous, phone: event.target.value }))}
+              />
+            </div>
+
+            <div className="quiz-consents">
+              <div className="quiz-consents-title">Consensi obbligatori</div>
+              <label className="quiz-consent-row">
+                <input type="checkbox" checked={consentPrivacy} onChange={(e) => setConsentPrivacy(e.target.checked)} />
+                <span>
+                  Ho letto e accetto la <Link href="/privacy">Privacy Policy</Link>.
+                </span>
+              </label>
+              <label className="quiz-consent-row">
+                <input type="checkbox" checked={consentTerms} onChange={(e) => setConsentTerms(e.target.checked)} />
+                <span>
+                  Accetto i <Link href="/termini">Termini e Condizioni</Link>.
+                </span>
+              </label>
+              <label className="quiz-consent-row">
+                <input
+                  type="checkbox"
+                  checked={consentDataProcessing}
+                  onChange={(e) => setConsentDataProcessing(e.target.checked)}
+                />
+                <span>Acconsento al trattamento dei dati per la verifica requisiti e per essere ricontattato.</span>
+              </label>
+            </div>
+
+            <div className="buttons">
+              <button type="button" className="btn-back" onClick={goBack}>
+                Indietro
+              </button>
+              <button type="button" className="btn-next" onClick={handleLeadGateNext}>
+                Continua quiz
+              </button>
+            </div>
+            {submissionError ? <p className="error-text">{submissionError}</p> : null}
           </QuestionLayout>
         ) : null}
 
@@ -601,70 +775,16 @@ export default function QuizPage() {
         ) : null}
 
         {step === 'q12' ? (
-          <QuestionLayout title="Inserisci i tuoi dati per procedere" subtitle="Domanda 13 di 13">
-            <div className="input-group">
-              <input
-                placeholder="Nome *"
-                value={contact.firstName}
-                onChange={(event) => setContact((previous) => ({ ...previous, firstName: event.target.value }))}
-              />
-            </div>
-            <div className="input-group">
-              <input
-                placeholder="Cognome *"
-                value={contact.lastName}
-                onChange={(event) => setContact((previous) => ({ ...previous, lastName: event.target.value }))}
-              />
-            </div>
-            <div className="input-group">
-              <input
-                type="email"
-                placeholder="Email *"
-                value={contact.email}
-                onChange={(event) => setContact((previous) => ({ ...previous, email: event.target.value }))}
-              />
-            </div>
-            <div className="input-group">
-              <input
-                placeholder="Telefono *"
-                value={contact.phone}
-                onChange={(event) => setContact((previous) => ({ ...previous, phone: event.target.value }))}
-              />
-            </div>
-
-            <div className="quiz-consents">
-              <div className="quiz-consents-title">Consensi obbligatori</div>
-              <label className="quiz-consent-row">
-                <input type="checkbox" checked={consentPrivacy} onChange={(e) => setConsentPrivacy(e.target.checked)} />
-                <span>
-                  Ho letto e accetto la <Link href="/privacy">Privacy Policy</Link>.
-                </span>
-              </label>
-              <label className="quiz-consent-row">
-                <input type="checkbox" checked={consentTerms} onChange={(e) => setConsentTerms(e.target.checked)} />
-                <span>
-                  Accetto i <Link href="/termini">Termini e Condizioni</Link>.
-                </span>
-              </label>
-              <label className="quiz-consent-row">
-                <input
-                  type="checkbox"
-                  checked={consentDataProcessing}
-                  onChange={(e) => setConsentDataProcessing(e.target.checked)}
-                />
-                <span>Acconsento al trattamento dei dati per la verifica requisiti e per essere ricontattato.</span>
-              </label>
-              <div className="quiz-consents-note">
-                Maggiori informazioni: <Link href="/gdpr">GDPR</Link> e <Link href="/cookie-policy">Cookie</Link>.
-              </div>
-            </div>
-
+          <QuestionLayout title="Conferma finale e invio esito" subtitle="Domanda 13 di 13">
+            <p className="info-box">
+              Dati e consensi sono già stati acquisiti dopo la domanda 2. Conferma per ricevere l&apos;esito finale.
+            </p>
             <div className="buttons">
               <button type="button" className="btn-back" onClick={goBack}>
                 Indietro
               </button>
               <button type="button" className="btn-next" disabled={submitting} onClick={submitQuiz}>
-                {submitting ? 'Invio...' : 'Invia'}
+                {submitting ? 'Invio...' : 'Conferma e invia'}
               </button>
             </div>
             {submissionError ? <p className="error-text">{submissionError}</p> : null}
@@ -676,6 +796,11 @@ export default function QuizPage() {
             <div className="error-icon">⚠️</div>
             <h2>Purtroppo non sei idoneo</h2>
             <p>Con i dati inseriti non hai i requisiti per questi bandi Invitalia.</p>
+            {blockedFromStep ? (
+              <p className="info-box">
+                Domanda bloccante: <strong>{q(blockedFromStep)?.title ?? blockedFromStep}</strong> in quanto con questa caratteristica non puoi partecipare al bando in questione.
+              </p>
+            ) : null}
             <p>
               <strong>Ma non preoccuparti!</strong> Contattaci per scoprire altre opportunita:
             </p>
@@ -716,26 +841,23 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => {
-                  window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
-                }}
+                onClick={goToPracticePayment}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.location.href = 'https://buy.stripe.com/cNi8wJf93bQr9XafBdaIM00';
+                    goToPracticePayment();
                   }
                 }}
               >
                 <h3>
-                  ⚡ Salta la fila
+                  ⚡ Avvia la pratica Online con Bndo
                   <span className="badge badge-premium">Consigliato</span>
                 </h3>
                 <p>
-                  Pagamento immediato di <strong>100€</strong> per accedere subito alla verifica documenti e saltare la
-                  lista d&apos;attesa.
+                  Avvia subito la pratica online: un consulente BNDO ti guiderà in ogni passaggio operativo.
                 </p>
                 <button type="button" className="btn-premium">
-                  Paga 100€ e inizia subito
+                  Avvia la pratica online
                 </button>
               </div>
 
@@ -743,55 +865,41 @@ export default function QuizPage() {
                 className="option-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => window.open(SUPPORT_WHATSAPP_URL, '_blank')}
+                onClick={openConsultantChat}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    window.open(SUPPORT_WHATSAPP_URL, '_blank');
+                    openConsultantChat();
                   }
                 }}
               >
                 <h3>
-                  💬 Parla con un consulente
+                  💬 Chat con il consulente
                   <span className="badge badge-free">Gratuito</span>
                 </h3>
-                <p>Chatta gratuitamente con un nostro esperto per approfondire la tua situazione prima di procedere.</p>
+                <p>Chatta con un consulente BNDO per chiarire dubbi e ricevere supporto immediato.</p>
                 <button type="button" className="btn-chat">
-                  Chatta con noi
+                  Chatta con un consulente
                 </button>
               </div>
             </div>
 
+            {submissionError ? <p className="error-text">{submissionError}</p> : null}
+
             <div className="process-info">
-              <h4>📋 Come funziona il processo &quot;Salta la fila&quot;:</h4>
+              <h4>📋 Come funziona dopo l&apos;idoneità:</h4>
               <ol>
                 <li>
-                  <strong>Pagamento 100€:</strong> Accedi immediatamente alla verifica documenti
+                  <strong>Invio documenti:</strong> carichi i documenti richiesti per la pratica.
                 </li>
                 <li>
-                  <strong>Invio documenti:</strong> Carica i documenti richiesti per la verifica
+                  <strong>Verifica esperta:</strong> un consulente BNDO verifica con attenzione la documentazione.
                 </li>
                 <li>
-                  <strong>Verifica:</strong> Il nostro team verifica la conformita dei documenti
-                  <ul style={{ marginTop: 6 }}>
-                    <li>
-                      ✅ <strong>Documenti OK:</strong> Riceverai link per pagare altri 200€ per la compilazione pratica
-                    </li>
-                    <li>
-                      ❌ <strong>Documenti NON OK:</strong> Rimborso completo dei 100€
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  <strong>Invio pratica:</strong> Inviamo la pratica a Invitalia
-                </li>
-                <li>
-                  <strong>Saldo finale:</strong> Ultimi 200EUR a pratica inviata
+                  <strong>Contatto consulenziale:</strong> se è tutto OK, un consulente specializzato ti contatterà per
+                  spiegarti tutto il procedimento passo dopo passo.
                 </li>
               </ol>
-              <p style={{ marginTop: 12, fontWeight: 500, color: 'var(--navy)' }}>
-                💰 Totale servizio completo: 500€ (100€ + 200€ + 200€)
-              </p>
             </div>
           </div>
         ) : null}

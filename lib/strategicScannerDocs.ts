@@ -44,6 +44,12 @@ export const STRATEGIC_SCANNER_DOCS = [
     coverageMaxPercent: 100,
     institutionalLink: 'https://www.invitalia.it/incentivi-e-strumenti/autoimpiego-centro-nord',
     url: '/incentivi-e-strumenti/autoimpiego-centro-nord',
+    requiredDocuments: [
+      'Documento di Identità',
+      'Codice Fiscale',
+      'Certificazione DID (Stato di disoccupazione)',
+      'Sintesi del Progetto Imprenditoriale'
+    ],
     score: 99,
   },
   {
@@ -70,6 +76,12 @@ export const STRATEGIC_SCANNER_DOCS = [
     coverageMaxPercent: 100,
     institutionalLink: 'https://www.invitalia.it/incentivi-e-strumenti/resto-al-sud-20',
     url: '/incentivi-e-strumenti/resto-al-sud-20',
+    requiredDocuments: [
+      'Documento di Identità',
+      'Codice Fiscale',
+      'Certificazione DID (Stato di disoccupazione)',
+      'Sintesi del Progetto Imprenditoriale'
+    ],
     score: 100,
   },
   {

@@ -1,19 +1,19 @@
 {
-  "passed": 16,
+  "passed": 14,
   "failed": 0,
-  "skipped": 1,
+  "skipped": 3,
   "details": [
     {
       "category": "scanner-retrieval",
       "id": "software-sicilia",
       "status": "PASS",
-      "msg": "Relevant results: 7 (sector match)"
+      "msg": "Relevant results: 3 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "agricoltura-sicilia",
-      "status": "PASS",
-      "msg": "Relevant results: 1 (sector match)"
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
     },
     {
       "category": "scanner-retrieval",
@@ -25,7 +25,7 @@
       "category": "scanner-retrieval",
       "id": "pmi-digitale-lombardia",
       "status": "PASS",
-      "msg": "Found Nuova Sabatini, Sabatini"
+      "msg": "Found one expected option in top results"
     },
     {
       "category": "scanner-retrieval",
@@ -36,8 +36,8 @@
     {
       "category": "scanner-retrieval",
       "id": "agroalimentare",
-      "status": "PASS",
-      "msg": "Results: 3 (sector match weak, dataset dependent)"
+      "status": "SKIP",
+      "msg": "No results (dataset may not cover this profile)"
     },
     {
       "category": "regional",
@@ -107,5 +107,5 @@
     }
   ],
   "errors": [],
-  "timestamp": "2026-03-07T23:53:29.480Z"
+  "timestamp": "2026-03-28T16:53:57.107Z"
 }

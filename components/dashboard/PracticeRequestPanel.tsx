@@ -45,7 +45,7 @@ function formatDate(value: string | null) {
   }
 }
 
-export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, quizCompletedAt }: PracticeRequestPanelProps) {
+export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, quizCompletedAt, onVerify }: PracticeRequestPanelProps & { onVerify?: (grantId?: string) => void }) {
   const [loadingType, setLoadingType] = useState<PracticeType | null>(null);
   const [feedback, setFeedback] = useState<{ error: boolean; message: string } | null>(null);
 
@@ -127,7 +127,7 @@ export function PracticeRequestPanel({ quizCompleted, quizEligible, quizType, qu
 
             {!quizCompleted ? (
               <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
-                Consigliato: <Link href={`/quiz/autoimpiego`}>compila il quiz requisiti</Link>
+                Consigliato: <button type="button" onClick={() => onVerify?.()} style={{ background: 'none', border: 'none', padding: 0, color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline', font: 'inherit' }}>compila il quiz requisiti</button>
               </div>
             ) : null}
           </article>

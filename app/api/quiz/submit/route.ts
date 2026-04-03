@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
 import { enforceRateLimit, getClientIp, publicError, rejectCrossSiteMutation } from '@/lib/security/http';
+import { dispatchQuizSubmissionNotifications } from '@/lib/services/quizNotifications';
+import { logPlatformEvent } from '@/lib/ops/telemetry';
+import { formatQuizAnswerValue, getQuizQuestions, type QuizBandoType } from '@/lib/quiz/quiz-map';
 
 const payloadSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -17,6 +20,40 @@ const payloadSchema = z.object({
   consentTerms: z.boolean(),
   consentDataProcessing: z.boolean()
 });
+
+function normalizeQuizBandoType(value: string | null | undefined): QuizBandoType | null {
+  if (value === 'sud' || value === 'centro_nord') return value;
+  return null;
+}
+
+function buildQuizAnswersForNotification(
+  bandoType: string | null | undefined,
+  answers: Record<string, string>
+): Record<string, string> {
+  const normalizedType = normalizeQuizBandoType(bandoType);
+  const questions = getQuizQuestions(normalizedType);
+  const questionById = new Map(questions.map((question) => [question.id, question]));
+
+  const mapped: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(answers ?? {})) {
+    if (key.startsWith('_')) {
+      mapped[key] = String(rawValue ?? '');
+      continue;
+    }
+
+    const question = questionById.get(key);
+    if (!question) {
+      mapped[key] = String(rawValue ?? '');
+      continue;
+    }
+
+    const label = question.title || key;
+    const answerValue = formatQuizAnswerValue(question, rawValue) ?? String(rawValue ?? '');
+    mapped[label] = String(answerValue);
+  }
+
+  return mapped;
+}
 
 export async function POST(request: Request) {
   try {
@@ -60,7 +97,7 @@ export async function POST(request: Request) {
           eligibility: payload.eligibility,
           answers: payload.answers
         })
-        .select('id')
+        .select('id, created_at')
         .single(),
       supabaseAdmin.from('leads').insert({
         full_name: fullName,
@@ -118,6 +155,42 @@ export async function POST(request: Request) {
       };
       await supabaseAdmin.from('quiz_submissions').update({ answers: fallbackAnswers }).eq('id', quizSubmission.id);
     }
+
+    // Best effort admin notification + email (never blocks user flow).
+    try {
+      await dispatchQuizSubmissionNotifications({
+        submissionId: quizSubmission.id,
+        fullName,
+        email: payload.email.toLowerCase(),
+        phone: payload.phone,
+        region,
+        bandoType,
+        practiceTitle:
+          bandoType === 'sud'
+            ? 'Resto al Sud 2.0'
+            : bandoType === 'centro_nord'
+              ? 'Autoimpiego Centro-Nord'
+              : null,
+        eligibility: payload.eligibility,
+        createdAtIso: quizSubmission.created_at,
+        answers: buildQuizAnswersForNotification(bandoType, payload.answers)
+      });
+    } catch (e) {
+      console.error('[QUIZ_NOTIFY_DISPATCH_ERROR]', e);
+    }
+
+    await logPlatformEvent({
+      eventType: 'quiz_completed',
+      companyId: null,
+      applicationId: null,
+      channel: 'quiz_public',
+      metadata: {
+        submissionId: quizSubmission.id,
+        eligibility: payload.eligibility,
+        bandoType: bandoType ?? null,
+        region: region ?? null,
+      },
+    });
 
     return NextResponse.json({ success: true, submissionId: quizSubmission.id }, { status: 201 });
   } catch (error) {

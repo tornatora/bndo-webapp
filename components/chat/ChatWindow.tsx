@@ -1,16 +1,25 @@
 'use client';
 
+import Image from 'next/image';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { InputArea } from '@/components/chat/InputArea';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { BandiResults, type BandoResult } from '@/components/chat/BandiResults';
+import { ThinkingBubble } from '@/components/chat/ThinkingBubble';
 import { TypewriterExamples } from '@/components/chat/TypewriterExamples';
 import { Sidebar } from '@/components/chat/Sidebar';
 import { BndiHomeView } from '@/components/views/BndiHomeView';
 import { FullScreenScannerOverlayPro as FullScreenScannerOverlay, SCAN_OVERLAY_STEPS } from '@/components/views/FullScreenScannerOverlayPro';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
-import { PraticheView } from '@/components/views/PraticheView';
+import { PracticeGrantQuizPage } from '@/components/dashboard/PracticeGrantQuizPage';
+import { OnboardingChoiceView } from '@/components/views/OnboardingChoiceView';
+import { UserPracticesView } from '@/components/views/UserPracticesView';
+import { BandiCatalogView, prefetchCatalogBootstrap } from '@/components/views/BandiCatalogView';
+import { PracticeDetailView } from '@/components/views/PracticeDetailView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
+import { buildUnifiedScanRequestBody, selectUnifiedScanStrictness } from '@/lib/matching/scanRequestPolicy';
+import './ThinkingBubble.css';
 
 type UserProfile = {
   activityType?: string | null;
@@ -18,6 +27,7 @@ type UserProfile = {
   sector?: string | null;
   ateco?: string | null;
   atecoAnswered?: boolean;
+  budgetAnswered?: boolean;
   location?: { region?: string | null; municipality?: string | null } | null;
   locationNeedsConfirmation?: boolean;
   age?: number | null;
@@ -31,6 +41,8 @@ type UserProfile = {
   contributionPreference?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  activeMeasureId?: string | null;
+  activeMeasureTitle?: string | null;
 };
 
 type ConversationResponse = {
@@ -88,9 +100,25 @@ type ConversationResponse = {
   needsClarification?: boolean;
   profileCompletenessScore?: number;
   scanReadinessReason?: string;
+  scanHash?: string | null;
   error?: string;
+  interactionId?: string;
+  conversationId?: string;
+  modelUsed?: string;
+  routingReason?: string;
+  confidence?: number;
+  citations?: Array<{
+    title: string;
+    url: string;
+    sourceTier: 'official' | 'authoritative' | 'web';
+    publishedAt: string | null;
+    evidenceSnippet: string;
+  }>;
+  estimatedWithWarning?: boolean;
 };
 
+type SourceChannel = 'scanner' | 'chat' | 'direct' | 'admin';
+type SessionPayload = { authenticated?: boolean };
 
 type ScanResponse = {
   phase?: 'fast' | 'full';
@@ -125,11 +153,24 @@ type ScanResponse = {
 };
 
 type ChatMessage =
-  | { id: string; role: 'assistant' | 'user'; kind: 'text'; body: string; scanToken?: string }
-  | { id: string; role: 'assistant'; kind: 'results'; explanation: string; results: BandoResult[]; nearMisses?: BandoResult[]; scanToken?: string }
+  | { id: string; role: 'assistant' | 'user'; kind: 'text'; body: string; scanToken?: string; footer?: string }
+  | {
+      id: string;
+      role: 'assistant';
+      kind: 'results';
+      explanation: string;
+      results: BandoResult[];
+      nearMisses?: BandoResult[];
+      scanToken?: string;
+      footer?: string;
+    }
   ;
+const AI_ASSISTANT_DISCLAIMER =
+  "Anche se la nostra intelligenza artificiale è specializzata in finanza agevolata, le risposte dell'AI potrebbero contenere errori.\nPer una consulenza specializzata, prenota una consulenza con un consulente BNDO.";
+const AI_ASSISTANT_DISCLAIMER_MOBILE =
+  "Anche se la nostra intelligenza artificiale è specializzata in finanza agevolata, le risposte dell'AI potrebbero contenere errori.";
 const LANDING_TITLE_PREFIX = 'Vorresti partecipare ad un BNDO?';
-const LANDING_TECH = ['Matching AI', 'Piattaforma con professionisti umani'] as const;
+const LANDING_TECH = ['La nostra AI ti aiuta a trovare il bando giusto, i nostri consulenti umani a vincerlo.'] as const;
 const LANDING_ROTATING_FULL = [
   'Parlami di te e del tuo progetto',
   'Parlami di te, della tua idea e dei tuoi obiettivi',
@@ -151,6 +192,16 @@ const LANDING_ROTATING_FULL = [
   'Parlami del tuo progetto imprenditoriale',
   'Parlami di cosa vuoi avviare o espandere'
 ] as const;
+const LEGACY_AUTOIMPIEGO_QUIZ_URL = 'https://bndo.it/quiz/autoimpiego';
+const LEGACY_AUTOIMPIEGO_QUIZ_IDS = new Set([
+  '769117e6-ab97-4b8a-9ff1-bec0e14879e6',
+  'a13a8bde-e544-4a14-b73f-61dd0ca8fe90',
+  'strategic-resto-al-sud-20',
+  'strategic-autoimpiego-centro-nord',
+  'resto-al-sud-20',
+  'autoimpiego-centro-nord',
+  'autoimpiego',
+]);
 
 function stripLeadingParlami(text: string) {
   return text.replace(/^parlami\s+/i, '').trim();
@@ -184,6 +235,45 @@ function isEchoLikeReply(userText: string, assistantText: string) {
   return false;
 }
 
+function shouldUseLegacyAutoimpiegoQuiz(grantId?: string | null) {
+  const raw = String(grantId ?? '').trim();
+  if (!raw) return false;
+  if (LEGACY_AUTOIMPIEGO_QUIZ_IDS.has(raw)) return true;
+  const normalized = normalizeText(raw);
+  return (
+    normalized.includes('resto al sud 2 0') ||
+    normalized.includes('resto al sud 20') ||
+    normalized.includes('autoimpiego centro nord')
+  );
+}
+
+function shouldAutoScanAfterAssistantPromise(text: string) {
+  const norm = normalizeText(text);
+  if (!norm) return false;
+  const hasAnalyzeCue =
+    norm.includes('procedero a esaminare') ||
+    norm.includes('procedero ad esaminare') ||
+    norm.includes('sto analizzando le opportunita') ||
+    norm.includes('analizzero le opportunita') ||
+    norm.includes('esaminare le opportunita');
+  const hasUpdateCue =
+    norm.includes('ti aggiornero presto') ||
+    norm.includes('ti aggiornero sulle migliori opzioni') ||
+    norm.includes('ti aggiorno presto');
+  return hasAnalyzeCue || hasUpdateCue;
+}
+
+function hasMinimumSignalsForScan(profile: UserProfile) {
+  const hasRegion = Boolean(profile.location?.region && String(profile.location.region).trim());
+  const hasSectorOrGoal = Boolean(
+    (profile.sector && String(profile.sector).trim()) ||
+      (profile.fundingGoal && String(profile.fundingGoal).trim()) ||
+      (profile.activityType && String(profile.activityType).trim()) ||
+      (profile.ateco && String(profile.ateco).trim())
+  );
+  return hasRegion && hasSectorOrGoal;
+}
+
 function uid() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -205,8 +295,14 @@ function friendlyChatError(error: unknown, fallback: string) {
 }
 
 type ChatWindowProps = {
-  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail';
+  initialView?: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail';
   initialGrantId?: string | null;
+  initialApplicationId?: string | null;
+  initialSource?: SourceChannel | null;
+  embedded?: boolean;
+  practiceLaunchMode?: boolean;
+  onPracticeGrantSelect?: (grantId: string, source: 'scanner' | 'chat') => void;
+  onPracticeGrantOpenDetail?: (grantId: string, source: 'scanner' | 'chat') => void;
 };
 
 function normalizeHashString(value: string | null | undefined) {
@@ -234,6 +330,19 @@ function buildScanProfileHash(profile: UserProfile) {
   return JSON.stringify(normalized);
 }
 
+function buildServerScanHash(profile: UserProfile) {
+  const bits = [
+    profile.businessExists ?? null,
+    profile.location?.region ?? null,
+    profile.fundingGoal ?? null,
+    profile.sector ?? null,
+    profile.budgetAnswered ? (profile.revenueOrBudgetEUR ?? null) : null,
+    profile.ageBand ?? null,
+    profile.employmentStatus ?? null,
+  ];
+  return bits.map(String).join('|');
+}
+
 function isInformativeRefineAnswer(text: string) {
   const normalized = normalizeText(text);
   if (!normalized) return false;
@@ -253,15 +362,32 @@ function isInformativeRefineAnswer(text: string) {
   );
 }
 
-export function ChatWindow({ initialView = 'chat', initialGrantId = null }: ChatWindowProps = {}) {
-  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' =
-    initialView === 'home' || initialView === 'form' || initialView === 'pratiche' || initialView === 'grantDetail'
-        ? initialView
-        : 'chat';
+export function ChatWindow({
+  initialView = 'chat',
+  initialGrantId = null,
+  initialApplicationId = null,
+  initialSource = 'scanner',
+  embedded = false,
+  practiceLaunchMode: practiceLaunchModeOverride,
+  onPracticeGrantSelect,
+  onPracticeGrantOpenDetail
+}: ChatWindowProps = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail' =
+    initialView === 'home' || initialView === 'form' || initialView === "pratiche" || initialView === 'grantDetail' || initialView === 'choice' || initialView === 'quiz' || initialView === 'myPractices' || initialView === 'practiceDetail'
+      ? initialView
+      : 'chat';
+
+  const streamingAssistantBodyRef = useRef('');
+  const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [profile, setProfile] = useState<UserProfile>({});
   const [step, setStep] = useState<ConversationResponse['step']>('location');
   const [isTyping, setIsTyping] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [authState, setAuthState] = useState<'loading' | 'guest' | 'authenticated'>('loading');
   const [isScanning, setIsScanning] = useState(false);
   const [scanOverlayProgress, setScanOverlayProgress] = useState(0);
   const [scanOverlayStepIndex, setScanOverlayStepIndex] = useState(0);
@@ -273,67 +399,219 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
-  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail'>(resolvedInitialView);
-  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail', boolean>>({
+  const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail'>(resolvedInitialView);
+  const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail', boolean>>({
     home: resolvedInitialView === 'home',
     form: resolvedInitialView === 'form',
     pratiche: resolvedInitialView === 'pratiche',
-    grantDetail: resolvedInitialView === 'grantDetail'
+    grantDetail: resolvedInitialView === 'grantDetail',
+    choice: resolvedInitialView === 'choice',
+    quiz: resolvedInitialView === 'quiz',
+    myPractices: resolvedInitialView === 'myPractices',
+    practiceDetail: resolvedInitialView === 'practiceDetail'
   });
+
+  useEffect(() => {
+    setViewLoaded((prev) => (prev.home ? prev : { ...prev, home: true }));
+  }, []);
+  const [targetGrantId, setTargetGrantId] = useState<string | null>(initialGrantId || null);
+  const [targetApplicationId, setTargetApplicationId] = useState<string | null>(initialApplicationId || null);
+  const [sourceChannel, setSourceChannel] = useState<SourceChannel>(initialSource || 'scanner');
+  const assistantFooterText = isMobileViewport ? AI_ASSISTANT_DISCLAIMER_MOBILE : AI_ASSISTANT_DISCLAIMER;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fitWrapRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const overlayProgressTimerRef = useRef<number | null>(null);
+  const scanOverlayProgressValueRef = useRef(0);
+  const scanOverlayProgressStartedAtRef = useRef<number | null>(null);
   const lockAutoBottomScrollRef = useRef(false);
   const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const focusLockTimerRef = useRef<number | null>(null);
   const scanInFlightRef = useRef(false);
   const activeScanTokenRef = useRef<string | null>(null);
   const interactionVersionRef = useRef(0);
+  const pendingAutoScanTimeoutRef = useRef<number | null>(null);
   const awaitingRefineAnswerRef = useRef(false);
   const lastRenderedScanHashRef = useRef<string | null>(null);
+  const lastSuccessfulServerScanHashRef = useRef<string | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
+  const practiceLaunchMode = practiceLaunchModeOverride ?? searchParams.get('launch') === 'practice';
+  const grantFocusMode = searchParams.get('focus') === 'grant';
+  const queryGrantTitleRaw = searchParams.get('grantTitle');
+  const queryGrantTitle = queryGrantTitleRaw ? queryGrantTitleRaw.trim().slice(0, 180) : null;
+  const grantFocusBootRef = useRef<string | null>(null);
 
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return;
+  const goHome = useCallback(() => {
+    setView('home');
+    setViewLoaded((prev) => ({ ...prev, home: true }));
+  }, []);
 
-    const root = document.documentElement;
-    const body = document.body;
-    const viewport = window.visualViewport;
+  const goChat = useCallback(() => {
+    setView('chat');
+    setViewLoaded((prev) => ({ ...prev, chat: true }));
+    if (embedded && pathname?.startsWith('/dashboard/new-practice')) {
+      router.replace('/dashboard/new-practice?mode=chat', { scroll: false });
+    }
+  }, [embedded, pathname, router]);
 
-    const syncViewportHeight = () => {
-      const next = Math.round(viewport?.height ?? window.innerHeight);
-      root.style.setProperty('--app-height', `${next}px`);
+  const goScanner = useCallback(() => {
+    setView('form');
+    setViewLoaded((prev) => ({ ...prev, form: true }));
+    setTargetGrantId(null);
+    if (embedded && pathname?.startsWith('/dashboard/new-practice')) {
+      router.replace('/dashboard/new-practice?mode=scanner', { scroll: false });
+    }
+  }, [embedded, pathname, router]);
 
-      const mobile = window.matchMedia('(max-width: 899px)').matches;
-      const keyboardLikely = mobile && window.innerHeight - next > 120;
-      setIsMobileViewport(mobile);
-      setIsKeyboardOpen(keyboardLikely);
-      root.classList.toggle('keyboard-open', keyboardLikely);
-      body.classList.toggle('keyboard-open', keyboardLikely);
-    };
+  const goQuiz = useCallback((grantId?: string, source?: SourceChannel) => {
+    if (grantId && shouldUseLegacyAutoimpiegoQuiz(grantId)) {
+      window.location.href = LEGACY_AUTOIMPIEGO_QUIZ_URL;
+      return;
+    }
+    if (source) setSourceChannel(source);
+    setTargetGrantId(grantId || 'autoimpiego');
+    setView('quiz');
+    setViewLoaded((prev) => ({ ...prev, quiz: true }));
+  }, []);
 
-    syncViewportHeight();
-    window.addEventListener('resize', syncViewportHeight);
-    window.addEventListener('orientationchange', syncViewportHeight);
-    viewport?.addEventListener('resize', syncViewportHeight);
-    viewport?.addEventListener('scroll', syncViewportHeight);
+  const goGrantDetail = useCallback((grantId: string, source?: SourceChannel) => {
+    if (source) setSourceChannel(source);
+    setTargetGrantId(grantId);
+    setView('grantDetail');
+    setViewLoaded((prev) => ({ ...prev, grantDetail: true }));
+  }, []);
 
-    return () => {
-      window.removeEventListener('resize', syncViewportHeight);
-      window.removeEventListener('orientationchange', syncViewportHeight);
-      viewport?.removeEventListener('resize', syncViewportHeight);
-      viewport?.removeEventListener('scroll', syncViewportHeight);
-      root.classList.remove('keyboard-open');
-      body.classList.remove('keyboard-open');
-    };
+  const goPracticeDetail = useCallback((appId: string) => {
+    setTargetApplicationId(appId);
+    setView('practiceDetail');
+    setViewLoaded((prev) => ({ ...prev, practiceDetail: true }));
+  }, []);
+
+  const goMyPractices = useCallback(() => {
+    setView('myPractices');
+    setViewLoaded((prev) => ({ ...prev, myPractices: true }));
   }, []);
 
   useEffect(() => {
-    // The UI currently doesn't persist chat history; always start with a clean server session
-    // to avoid stale cookies generating incoherent replies (e.g. "Ciao" -> "posso affinare...").
-    resetConversation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (embedded) return;
+    const timer = window.setTimeout(() => {
+      void prefetchCatalogBootstrap().catch(() => {});
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [embedded]);
+
+  useEffect(() => {
+    if (!initialGrantId) return;
+    if (!grantFocusMode && !queryGrantTitle) return;
+
+    const focusKey = `${initialGrantId}:${queryGrantTitle ?? ''}`;
+    if (grantFocusBootRef.current === focusKey) return;
+    grantFocusBootRef.current = focusKey;
+
+    setTargetGrantId(initialGrantId);
+    setProfile((prev) => ({
+      ...prev,
+      activeMeasureId: initialGrantId,
+      activeMeasureTitle: queryGrantTitle || prev.activeMeasureTitle || null,
+    }));
+
+    setMessages((prev) => {
+      if (prev.length > 0) return prev;
+      const titleLabel = queryGrantTitle || 'questo bando';
+      return [
+        {
+          id: uid(),
+          role: 'assistant',
+          kind: 'text',
+          body: `Perfetto, ora sono focalizzata su ${titleLabel}. Puoi chiedermi requisiti, spese ammissibili, scadenze, esclusioni e documenti richiesti: ti rispondo in modo specifico su questa misura.`,
+        },
+      ];
+    });
+  }, [initialGrantId, grantFocusMode, queryGrantTitle]);
+
+  const onSelectGrantForPractice = useCallback(
+    (grantId?: string, source?: 'scanner' | 'chat') => {
+      goQuiz(grantId, source);
+    },
+    [goQuiz]
+  );
+
+  const onOpenGrantDetailForPractice = useCallback(
+    (grantId: string, source: 'scanner' | 'chat') => {
+      goGrantDetail(grantId, source);
+    },
+    [goGrantDetail]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    let raf = 0;
+
+    const isEditableActiveElement = () => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) return false;
+      const tag = active.tagName;
+      if (tag === 'TEXTAREA') return true;
+      if (tag === 'SELECT') return true;
+      if (active.isContentEditable) return true;
+      if (tag !== 'INPUT') return false;
+      const input = active as HTMLInputElement;
+      if (input.disabled || input.readOnly) return false;
+      const disallowed = new Set(['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'file', 'color']);
+      return !disallowed.has((input.type || 'text').toLowerCase());
+    };
+
+    const syncViewportState = () => {
+      const rawViewportHeight = Math.round(viewport?.height ?? window.innerHeight);
+      const viewportOffsetTop = Math.round(viewport?.offsetTop ?? 0);
+      const effectiveViewportHeight = Math.max(
+        0,
+        Math.min(window.innerHeight, rawViewportHeight + viewportOffsetTop)
+      );
+
+      const mobile = window.matchMedia('(max-width: 899px)').matches;
+      const keyboardDelta = window.innerHeight - rawViewportHeight;
+      const hasEditableFocus = isEditableActiveElement();
+      const viewportShrunk = rawViewportHeight < window.innerHeight - 16;
+      const keyboardLikely =
+        mobile && (keyboardDelta > 120 || (hasEditableFocus && (keyboardDelta > 0 || viewportShrunk)));
+      setIsMobileViewport(mobile);
+      setIsKeyboardOpen(
+        keyboardLikely ||
+          root.classList.contains('keyboard-open') ||
+          document.body.classList.contains('keyboard-open') ||
+          (mobile && window.innerHeight - effectiveViewportHeight > 120)
+      );
+    };
+
+    const queueSync = () => {
+      cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(syncViewportState);
+    };
+
+    syncViewportState();
+    window.addEventListener('resize', queueSync);
+    window.addEventListener('orientationchange', queueSync);
+    window.addEventListener('focus', queueSync, true);
+    document.addEventListener('focusin', queueSync);
+    document.addEventListener('focusout', queueSync);
+    viewport?.addEventListener('resize', queueSync);
+    viewport?.addEventListener('scroll', queueSync);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', queueSync);
+      window.removeEventListener('orientationchange', queueSync);
+      window.removeEventListener('focus', queueSync, true);
+      document.removeEventListener('focusin', queueSync);
+      document.removeEventListener('focusout', queueSync);
+      viewport?.removeEventListener('resize', queueSync);
+      viewport?.removeEventListener('scroll', queueSync);
+    };
   }, []);
 
   useEffect(() => {
@@ -346,9 +624,74 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   }, [isScanning]);
 
   useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+    const loadSession = async () => {
+      try {
+        const response = await fetch('/api/auth/session', {
+          method: 'GET',
+          credentials: 'include',
+          signal: controller.signal,
+          headers: { Accept: 'application/json' }
+        });
+        if (!mounted) return;
+        if (!response.ok) {
+          setAuthState('guest');
+          return;
+        }
+        const json = (await response.json()) as SessionPayload;
+        setAuthState(json.authenticated ? 'authenticated' : 'guest');
+      } catch {
+        if (mounted) setAuthState('guest');
+      }
+    };
+    void loadSession();
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     if (view === 'chat') return;
     setViewLoaded((prev) => (prev[view] ? prev : { ...prev, [view]: true }));
   }, [view]);
+
+
+  useEffect(() => {
+    setView(resolvedInitialView);
+    setViewLoaded((prev) => ({ ...prev, [resolvedInitialView]: true }));
+    if (initialGrantId !== undefined) {
+      setTargetGrantId(initialGrantId);
+    }
+    if (initialApplicationId !== undefined) {
+      setTargetApplicationId(initialApplicationId);
+    }
+    if (initialSource !== undefined) {
+      setSourceChannel(initialSource || 'scanner');
+    }
+  }, [resolvedInitialView, initialGrantId, initialApplicationId, initialSource]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onResetNewPractice = () => {
+      if (!embedded) return;
+      if (!window.location.pathname.startsWith('/dashboard/new-practice')) return;
+      setTargetGrantId(null);
+      setTargetApplicationId(null);
+      setSourceChannel('scanner');
+      setView('choice');
+      setViewLoaded((prev) => ({ ...prev, choice: true }));
+      router.replace('/dashboard/new-practice');
+    };
+
+    window.addEventListener('bndo:new-practice-reset', onResetNewPractice as EventListener);
+    return () => {
+      window.removeEventListener('bndo:new-practice-reset', onResetNewPractice as EventListener);
+    };
+  }, [embedded, router]);
+
 
   useEffect(() => {
     if (viewLoaded.form) return;
@@ -397,17 +740,57 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
 
   function startOverlayProgressLoop() {
     stopOverlayProgressLoop();
+    scanOverlayProgressStartedAtRef.current = window.performance.now();
     overlayProgressTimerRef.current = window.setInterval(() => {
       setScanOverlayProgress((prev) => {
-        if (prev >= 92) return prev;
-        const baseStep = prev < 26 ? 7.2 : prev < 58 ? 3.8 : prev < 80 ? 1.9 : 0.9;
-        const jitter = prev < 80 ? Math.random() : Math.random() * 0.3;
-        return Math.min(92, prev + baseStep + jitter);
+        if (prev >= 95) return prev;
+        const startedAt = scanOverlayProgressStartedAtRef.current ?? window.performance.now();
+        const elapsedSeconds = (window.performance.now() - startedAt) / 1000;
+
+        let target = 8;
+        if (elapsedSeconds < 3.9) {
+          target = 8 + elapsedSeconds * 10.8;
+        } else if (elapsedSeconds < 8.6) {
+          target = 50.12 + (elapsedSeconds - 3.9) * 6.6;
+        } else if (elapsedSeconds < 16.5) {
+          target = 81.14 + (elapsedSeconds - 8.6) * 1.75;
+        } else {
+          target = 95;
+        }
+
+        const jitter = elapsedSeconds < 9 ? Math.random() * 0.3 : Math.random() * 0.11;
+        const desired = Math.min(95, target + jitter);
+        const next = Math.max(prev, desired);
+        return Number(next.toFixed(2));
       });
-    }, 110);
+    }, 120);
+  }
+
+  async function completeOverlayProgress() {
+    stopOverlayProgressLoop();
+    scanOverlayProgressStartedAtRef.current = null;
+    const from = Math.max(0, Math.min(99.4, scanOverlayProgressValueRef.current));
+    const durationMs = from < 90 ? 860 : from < 95 ? 700 : 520;
+    const startedAt = window.performance.now();
+
+    while (true) {
+      const elapsed = window.performance.now() - startedAt;
+      const t = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const next = from + (100 - from) * eased;
+      setScanOverlayProgress(Number(next.toFixed(2)));
+      setScanOverlayStepIndex(4);
+      if (t >= 1) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 24));
+    }
+
+    setScanOverlayProgress(100);
+    setScanOverlayStepIndex(4);
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
   }
 
   useEffect(() => {
+    scanOverlayProgressValueRef.current = scanOverlayProgress;
     const clamped = Math.max(0, Math.min(100, scanOverlayProgress));
     const next = Math.min(4, Math.floor((clamped / 100) * 5));
     setScanOverlayStepIndex(next);
@@ -420,6 +803,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
         window.clearTimeout(focusLockTimerRef.current);
         focusLockTimerRef.current = null;
       }
+      if (pendingAutoScanTimeoutRef.current !== null) {
+        window.clearTimeout(pendingAutoScanTimeoutRef.current);
+        pendingAutoScanTimeoutRef.current = null;
+      }
+      scanOverlayProgressStartedAtRef.current = null;
     };
   }, []);
 
@@ -428,6 +816,13 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     const active = document.activeElement as HTMLElement | null;
     if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
       active.blur();
+    }
+  }, []);
+
+  const clearPendingAutoScan = useCallback(() => {
+    if (pendingAutoScanTimeoutRef.current !== null) {
+      window.clearTimeout(pendingAutoScanTimeoutRef.current);
+      pendingAutoScanTimeoutRef.current = null;
     }
   }, []);
 
@@ -490,8 +885,18 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     if (!el || typeof window === 'undefined') return;
 
     const applyHeight = () => {
+      const isMobile = window.matchMedia('(max-width: 899px)').matches;
       const h = Math.ceil(el.getBoundingClientRect().height);
-      const withBreath = Math.max(96, h + 20);
+
+      if (isMobile) {
+        const mobileMin = isKeyboardOpen ? 108 : 122;
+        const mobileBreath = isKeyboardOpen ? 14 : 20;
+        const mobileComposerHeight = Math.min(180, Math.max(mobileMin, h + mobileBreath));
+        document.documentElement.style.setProperty('--composer-h', `${mobileComposerHeight}px`);
+        return;
+      }
+
+      const withBreath = Math.min(220, Math.max(96, h + 20));
       document.documentElement.style.setProperty('--composer-h', `${withBreath}px`);
     };
 
@@ -503,7 +908,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       ro.disconnect();
       window.removeEventListener('resize', applyHeight);
     };
-  }, [view, messages.length, isTyping]);
+  }, [view, messages.length, isTyping, isKeyboardOpen]);
 
   useEffect(() => {
     if (view !== 'chat') return;
@@ -555,6 +960,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     _refineStep?: ConversationResponse['step'],
     scanProfileHash?: string,
     interactionVersionAtStart?: number,
+    serverScanHash?: string | null,
   ) {
     if (scanInFlightRef.current) return;
     scanInFlightRef.current = true;
@@ -618,8 +1024,18 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       const refineText =
         payload.refineQuestion?.trim() ||
         "Per essere preciso mi serve un dettaglio in più: settore principale e importo indicativo dell'investimento.";
+      
       setMessages((prev) => [
         ...prev,
+        {
+          id: resultMessageId,
+          role: 'assistant',
+          kind: 'results',
+          explanation: payload.explanation || "Non abbiamo trovato bandi corrispondenti al tuo profilo.",
+          results: [],
+          nearMisses: payload.nearMisses ?? [],
+          scanToken
+        },
         {
           id: followupMessageId,
           role: 'assistant',
@@ -628,8 +1044,8 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
           scanToken,
         },
       ]);
+      setFocusResultMessageId(resultMessageId);
       lockAutoBottomScrollRef.current = false;
-      setFocusResultMessageId(null);
       awaitingRefineAnswerRef.current = true;
     };
 
@@ -664,8 +1080,6 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       ]);
     }, 25000);
 
-    const hasSignals = Boolean((nextProfile.fundingGoal?.trim() || nextProfile.sector?.trim()) && nextProfile.location?.region);
-    const scanMode = hasSignals ? 'full' : 'fast';
     const scanProfile = {
       ...nextProfile,
       location: {
@@ -677,11 +1091,18 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       ageBand: nextProfile.ageBand ?? null,
       employmentStatus: nextProfile.employmentStatus ?? null,
     };
+    const scanRequestBody = buildUnifiedScanRequestBody({
+      userProfile: scanProfile,
+      channel: 'chat',
+      strictness: selectUnifiedScanStrictness(scanProfile, 'full', null),
+      limit: 10,
+      mode: null,
+    });
     try {
       const scanRes = await fetch('/api/scan-bandi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userProfile: scanProfile, limit: 10, mode: scanMode, channel: 'chat', strictness: 'high' })
+        body: JSON.stringify(scanRequestBody)
       });
       const scanJson = (await scanRes.json()) as ScanResponse & { error?: string };
       if (activeScanTokenRef.current !== scanToken) return;
@@ -691,12 +1112,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
         return;
       }
 
-      stopOverlayProgressLoop();
-      setScanOverlayProgress(100);
-      setScanOverlayStepIndex(4);
-      
-      // Wait for progress bar animation to reach 100% visually
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await completeOverlayProgress();
 
       if ((scanJson.results?.length ?? 0) === 0) {
         handleNoResults(scanJson);
@@ -707,15 +1123,13 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
         appendScanMessages(scanJson);
       }
       lastRenderedScanHashRef.current = scanProfileHash ?? buildScanProfileHash(nextProfile);
+      lastSuccessfulServerScanHashRef.current = serverScanHash ?? buildServerScanHash(nextProfile);
       if ((scanJson.results?.length ?? 0) > 0) {
         awaitingRefineAnswerRef.current = true;
       }
     } catch (e) {
       if (activeScanTokenRef.current !== scanToken) return;
-      stopOverlayProgressLoop();
-      setScanOverlayProgress(100);
-      setScanOverlayStepIndex(4);
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await completeOverlayProgress();
       setMessages((prev) => {
         return [
           ...prev,
@@ -741,67 +1155,182 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
   async function onSend(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const interactionId = uid();
     interactionVersionRef.current += 1;
     const interactionVersion = interactionVersionRef.current;
+    clearPendingAutoScan();
 
+    // Optimistic UI
     setMessages((prev) => [...prev, { id: uid(), role: 'user', kind: 'text', body: trimmed }]);
 
     setIsTyping(true);
+    setIsThinking(true);
+    setShowTypingIndicator(true);
+    let assistantMessageId = uid();
+    streamingAssistantBodyRef.current = '';
+    let finalMetadata: ConversationResponse | null = null;
+    let hasAddedAssistantPlaceholder = false;
+
     try {
-      const startedAt = Date.now();
       const res = await fetch('/api/conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed })
+        body: JSON.stringify({
+          message: trimmed,
+          interactionId,
+          conversationId: conversationIdRef.current ?? undefined,
+          focusGrantContext: grantFocusMode && Boolean(targetGrantId),
+          focusedGrantId: grantFocusMode ? (targetGrantId ?? undefined) : undefined,
+          focusedGrantTitle: grantFocusMode ? (queryGrantTitle ?? undefined) : undefined,
+        })
       });
-      const json = (await res.json()) as ConversationResponse;
-      if (!res.ok) throw new Error(json.error ?? 'Conversazione non disponibile.');
 
-      // Ensure a modern "typing" feel even when the API is fast.
-      const minMs = 700;
-      const byLengthMs = Math.min(1100, Math.max(200, Math.round((json.assistantText ?? '').length * 10)));
-      const target = minMs + byLengthMs;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < target) await new Promise((r) => setTimeout(r, target - elapsed));
-
-      setProfile(json.userProfile);
-      setStep(json.step);
-      if (!isEchoLikeReply(trimmed, json.assistantText ?? '') && json.assistantText) {
-        setMessages((prev) => [...prev, { id: uid(), role: 'assistant', kind: 'text', body: json.assistantText }]);
+      if (!res.ok) {
+         const errData = await res.json().catch(() => ({}));
+         throw new Error(errData.error ?? 'Conversazione non disponibile.');
       }
 
-      // Respect the strict decision model
-      if (json.action === 'run_scan' || json.action === 'refine_after_scan') {
-        const profileHash = buildScanProfileHash(json.userProfile);
-        const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
-        const shouldRunFirstScan = lastRenderedScanHashRef.current === null && hasProfileDelta;
-        const refineAnswerInformative = isInformativeRefineAnswer(trimmed);
-        const shouldRunRefineScan = awaitingRefineAnswerRef.current && hasProfileDelta && refineAnswerInformative;
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("Stream non disponibile");
+
+      let sseBuffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        if (
-          (shouldRunFirstScan || shouldRunRefineScan || json.readyToScan) &&
-          !scanInFlightRef.current
-        ) {
-          await runScan(json.userProfile, json.step, profileHash, interactionVersion);
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
+          
+          try {
+            const dataStr = trimmedLine.slice(6);
+            if (dataStr === '[DONE]') break;
+            const data = JSON.parse(dataStr);
+            
+            if (data.type === 'text') {
+              const delta = String(data.content ?? '');
+              if (!delta) continue;
+              streamingAssistantBodyRef.current += delta;
+              if (isThinking) setIsThinking(false);
+            } else if (data.type === 'thinking') {
+              setIsThinking(!!data.content);
+            } else if (data.type === 'metadata') {
+              finalMetadata = data.content as ConversationResponse;
+              if (finalMetadata.conversationId) {
+                conversationIdRef.current = finalMetadata.conversationId;
+              }
+              setProfile(finalMetadata.userProfile);
+              setStep(finalMetadata.step);
+
+              const finalText = (streamingAssistantBodyRef.current || finalMetadata.assistantText || '').trim();
+              if (finalText && !hasAddedAssistantPlaceholder) {
+                setMessages((prev) => [...prev, { id: assistantMessageId, role: 'assistant', kind: 'text', body: finalText }]);
+                hasAddedAssistantPlaceholder = true;
+                setShowTypingIndicator(false);
+              }
+            } else if (data.type === 'error') {
+              throw new Error(data.content || "Errore durante lo streaming");
+            }
+          } catch (e) {
+            console.warn("Parse error in stream line:", line, e);
+          }
         }
       }
+
+      if (finalMetadata) {
+        const metadata = finalMetadata;
+        const profileHash = buildScanProfileHash(metadata.userProfile);
+        const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
+        const assistantFinalText = (streamingAssistantBodyRef.current || metadata.assistantText || '').trim();
+        const autoScanCue = shouldAutoScanAfterAssistantPromise(assistantFinalText);
+        const canRunFromMetadata =
+          (metadata.action === 'run_scan' || metadata.action === 'refine_after_scan') &&
+          (lastRenderedScanHashRef.current === null || hasProfileDelta || metadata.readyToScan);
+        const canRunFromCue =
+          autoScanCue &&
+          hasMinimumSignalsForScan(metadata.userProfile) &&
+          (lastRenderedScanHashRef.current === null || hasProfileDelta || metadata.readyToScan);
+        const shouldRunScan = (canRunFromMetadata || canRunFromCue) && !scanInFlightRef.current;
+
+        if (shouldRunScan) {
+          if (autoScanCue) {
+            pendingAutoScanTimeoutRef.current = window.setTimeout(() => {
+              pendingAutoScanTimeoutRef.current = null;
+              if (interactionVersionRef.current !== interactionVersion) return;
+              if (scanInFlightRef.current) return;
+              void runScan(
+                metadata.userProfile,
+                metadata.step,
+                profileHash,
+                interactionVersion,
+                metadata.scanHash ?? null
+              );
+            }, 2200);
+          } else {
+            await runScan(
+              metadata.userProfile,
+              metadata.step,
+              profileHash,
+              interactionVersion,
+              metadata.scanHash ?? null,
+            );
+          }
+        }
+      }
+
     } catch (e) {
-      setMessages((prev) => [
+      console.error("Chat error:", e);
+       setMessages((prev) => [
         ...prev,
         { id: uid(), role: 'assistant', kind: 'text', body: friendlyChatError(e, 'Errore conversazione.') }
       ]);
     } finally {
+      const assistantTextToCommit = (streamingAssistantBodyRef.current || finalMetadata?.assistantText || '').trim();
+      if (!hasAddedAssistantPlaceholder && assistantTextToCommit) {
+        setMessages((prev) => [...prev, { id: assistantMessageId, role: 'assistant', kind: 'text', body: assistantTextToCommit }]);
+        hasAddedAssistantPlaceholder = true;
+      }
+      try {
+        if (finalMetadata && assistantTextToCommit) {
+          const commitInteractionId = finalMetadata.interactionId || interactionId;
+          // Fire-and-forget persistence for server-side memory continuity.
+          await fetch('/api/conversation', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              interactionId: commitInteractionId,
+              assistantText: assistantTextToCommit,
+              userProfile: finalMetadata.userProfile,
+              step: finalMetadata.step,
+              conversationId: conversationIdRef.current ?? finalMetadata.conversationId ?? undefined,
+              ...(lastSuccessfulServerScanHashRef.current
+                ? { lastScanHash: lastSuccessfulServerScanHashRef.current }
+                : {}),
+            })
+          });
+        }
+      } catch {
+        // ignore commit errors; chat UX should not be blocked
+      }
       setIsTyping(false);
+      setIsThinking(false);
+      setShowTypingIndicator(false);
     }
   }
 
-  async function resetConversation() {
+  const resetConversation = useCallback(async () => {
     try {
       await fetch('/api/conversation', { method: 'DELETE' });
     } catch {
       // ignore
     }
     stopOverlayProgressLoop();
+    clearPendingAutoScan();
     setIsScanning(false);
     setScanOverlayProgress(0);
     setScanOverlayStepIndex(0);
@@ -809,19 +1338,21 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
     setFocusResultMessageId(null);
     scanInFlightRef.current = false;
     activeScanTokenRef.current = null;
-    awaitingRefineAnswerRef.current = false;
-    lastRenderedScanHashRef.current = null;
     setMessages([]);
     setProfile({});
     setStep('location');
-  }
-
-  const goHome = useCallback(() => setView('home'), []);
-  const goChat = useCallback(() => setView('chat'), []);
-  const goScanner = useCallback(() => setView('form'), []);
+    setIsTyping(false);
+    setIsThinking(false);
+    setView('chat');
+    setViewLoaded((prev) => ({ ...prev, chat: true }));
+    awaitingRefineAnswerRef.current = false;
+    conversationIdRef.current = null;
+    setSourceChannel('chat'); // Reset to default when resetting conversation
+  }, [clearPendingAutoScan]);
 
   const navItems = useMemo(
-    () => [
+    () => {
+      return [
       {
         id: 'home',
         label: 'Home',
@@ -833,7 +1364,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       },
       {
         id: 'chat',
-        label: 'Chat',
+        label: 'Chat AI',
         icon: 'chat' as const,
         onClick: () => {
           goChat();
@@ -851,77 +1382,129 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
       },
       {
         id: 'pratiche',
-        label: 'Pratiche',
-        icon: 'practice' as const,
+        label: 'Catalogo Bandi',
+        icon: 'favorite' as const,
         onClick: () => {
-          setView('pratiche');
+          goMyPractices();
           setSidebarOpen(false);
         }
       }
-    ],
-    [goChat, goHome, goScanner]
+    ];
+    },
+    [goChat, goHome, goScanner, goMyPractices]
   );
 
   return (
-    <div className={sidebarOpen ? 'bndo-shell with-sidebar sidebar-open' : 'bndo-shell with-sidebar'}>
-      {sidebarOpen ? <button type="button" className="mobile-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Chiudi menu" /> : null}
-      <button
-        type="button"
-        className={sidebarOpen ? 'mobile-menu-fab is-open' : 'mobile-menu-fab'}
-        onClick={() => setSidebarOpen((v) => !v)}
-        aria-label={sidebarOpen ? 'Chiudi menu' : 'Apri menu'}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="3.5" y="4.5" width="17" height="15" rx="4" stroke="currentColor" strokeWidth="2" />
-          <path d="M10 5.5v13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </button>
-      <Sidebar
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
-        onNewChat={resetConversation}
-        items={navItems}
-        recent={[]}
-      />
+    <div
+      className={
+        embedded
+          ? 'chat-window-embedded'
+          : sidebarOpen
+            ? 'bndo-shell with-sidebar sidebar-open'
+            : 'bndo-shell with-sidebar'
+      }
+    >
+      {!embedded && sidebarOpen ? (
+        <button type="button" className="mobile-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Chiudi menu" />
+      ) : null}
+      {!embedded ? (
+        <button
+          type="button"
+          className={sidebarOpen ? 'mobile-menu-fab is-open' : 'mobile-menu-fab'}
+          onClick={() => setSidebarOpen((v) => !v)}
+          aria-label={sidebarOpen ? 'Chiudi menu' : 'Apri menu'}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3.5" y="4.5" width="17" height="15" rx="4" stroke="currentColor" strokeWidth="2" />
+            <path d="M10 5.5v13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+      ) : null}
+      {!embedded ? (
+        <Sidebar
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen((v) => !v)}
+          onNewChat={resetConversation}
+          items={navItems}
+          recent={[]}
+        />
+      ) : null}
 
-      <main className="mainpane">
-        {view === 'home' ? null : (
+      <main className={embedded ? 'mainpane chat-mainpane-embedded' : 'mainpane'}>
+        {!embedded && view === 'home' ? null : !embedded ? (
           <div className="topbar">
             <button type="button" className="topbar-logo topbar-logo-btn" onClick={goHome} aria-label="BNDO Home">
-              <img src="/Logo-BNDO-header.png" alt="BNDO" width={98} height={26} />
+              <Image src="/Logo-BNDO-header.png" alt="BNDO" width={98} height={26} priority />
             </button>
           </div>
-        )}
+        ) : null}
+
+        {view === 'quiz' || viewLoaded.quiz ? (
+          <div className={view === 'quiz' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'quiz'}>
+            {targetGrantId && (
+              <PracticeGrantQuizPage grantId={targetGrantId} sourceChannel={sourceChannel} />
+            )}
+          </div>
+        ) : null}
+
+        {view === 'choice' || viewLoaded.choice ? (
+          <div className={view === 'choice' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'choice'}>
+            <OnboardingChoiceView onStartChat={goChat} onOpenScanner={goScanner} />
+          </div>
+        ) : null}
 
         {view === 'home' || viewLoaded.home ? (
           <div className={view === 'home' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'home'}>
-            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} />
+            <BndiHomeView onStart={goChat} onOpenScanner={goScanner} onVerify={goQuiz} embedded={embedded} />
           </div>
         ) : null}
 
         {view === 'form' || viewLoaded.form ? (
           <div className={view === 'form' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'form'}>
-            <div className="scanner-pro-page">
-              <ScannerBandiProView initialGrantId={initialGrantId} />
-            </div>
+            <ScannerBandiProView
+              initialGrantId={initialGrantId}
+              onGrantSelect={(grantId) => onSelectGrantForPractice(grantId, 'scanner')}
+              onGrantDetail={(grantId) => onOpenGrantDetailForPractice(grantId, 'scanner')}
+              embedded={embedded}
+              guestMobileSafe={!embedded && authState !== 'authenticated'}
+            />
           </div>
         ) : null}
 
         {view === 'grantDetail' || viewLoaded.grantDetail ? (
           <div className={view === 'grantDetail' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'grantDetail'}>
             <div className="scanner-pro-page">
-              {initialGrantId ? <GrantDetailProView grantId={initialGrantId} /> : null}
+              {targetGrantId ? (
+                <GrantDetailProView 
+                  grantId={targetGrantId} 
+                  onVerify={goQuiz}
+                  onBack={goScanner}
+                />
+              ) : null}
             </div>
           </div>
         ) : null}
 
-        {view === 'pratiche' || viewLoaded.pratiche ? (
-          <div className={view === 'pratiche' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'pratiche'}>
-            <PraticheView />
+        {view === 'myPractices' || view === 'pratiche' || viewLoaded.myPractices || viewLoaded.pratiche ? (
+          <div className={(view === 'myPractices' || view === 'pratiche') ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'myPractices' && view !== 'pratiche'}>
+            <BandiCatalogView
+              title="Catalogo Bandi"
+              subtitle="Tutti i bandi attivi da fonti italiane"
+              onOpenDetail={(grantId) => onOpenGrantDetailForPractice(grantId, 'scanner')}
+              onVerify={(grantId) => onSelectGrantForPractice(grantId, 'scanner')}
+            />
           </div>
         ) : null}
 
-        {
+        {view === 'practiceDetail' || viewLoaded.practiceDetail ? (
+          <div className={view === 'practiceDetail' ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'practiceDetail'}>
+            {targetApplicationId && (
+              <PracticeDetailView applicationId={targetApplicationId} onBack={goMyPractices} />
+            )}
+          </div>
+        ) : null}
+
+        {view === 'chat' || messages.length > 0 ? (
           <div className={view === 'chat' ? 'view-pane chat-view-pane' : 'view-pane chat-view-pane is-hidden'} aria-hidden={view !== 'chat'}>
             <div className="chatgpt-stage">
               {messages.length === 0 ? (
@@ -932,9 +1515,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                   </div>
                   <TypewriterExamples />
                   <div className="chat-tech" aria-hidden="true">
-                    <span className="chat-tech-left">{LANDING_TECH[0]}</span>
-                    <span className="chat-tech-mid" aria-hidden="true" />
-                    <span className="chat-tech-right">{LANDING_TECH[1]}</span>
+                    {LANDING_TECH.map((tag, i) => (
+                      <span key={tag} className={i === 0 ? 'chat-tech-left' : 'chat-tech-right'}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 </div>
               ) : null}
@@ -950,7 +1535,11 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                             messageNodeRefs.current[m.id] = node;
                           }}
                         >
-                          <MessageBubble role={m.role} body={m.body} />
+                          <MessageBubble
+                            role={m.role}
+                            body={m.body}
+                            footer={m.role === 'assistant' ? assistantFooterText : undefined}
+                          />
                         </div>
                       );
                     if (m.kind === 'results')
@@ -961,14 +1550,23 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
                             messageNodeRefs.current[m.id] = node;
                           }}
                         >
-                          <MessageBubble role="assistant">
-                            <BandiResults explanation={m.explanation} results={m.results} nearMisses={m.nearMisses} />
+                          <MessageBubble role="assistant" footer={assistantFooterText}>
+                            <BandiResults
+                              explanation={m.explanation}
+                              results={m.results}
+                              nearMisses={m.nearMisses}
+                              onOpenDetail={(grantId) => onOpenGrantDetailForPractice(grantId, 'chat')}
+                              onVerifyRequirements={(grantId) => onSelectGrantForPractice(grantId, 'chat')}
+                            />
                           </MessageBubble>
                         </div>
                       );
                     return null;
                   })}
-                  {isTyping ? (
+                  {isThinking && (
+                    <ThinkingBubble />
+                  )}
+                  {isTyping && !isThinking && showTypingIndicator ? (
                     <MessageBubble role="assistant">
                       <span className="typing" aria-label="Assistant sta scrivendo">
                         <span className="typing-dot" />
@@ -1003,7 +1601,7 @@ export function ChatWindow({ initialView = 'chat', initialGrantId = null }: Chat
               </div>
             </div>
           </div>
-        }
+        ) : null}
       </main>
     </div>
   );

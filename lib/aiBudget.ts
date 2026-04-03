@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 
 type UsageSample = {
   monthKey: string;
@@ -38,51 +37,36 @@ function getUsdToEur() {
   return toNum(process.env.USD_TO_EUR, DEFAULT_USD_TO_EUR);
 }
 
+// In-memory budget tracker for Edge or local fallback.
+// Note: In Edge Runtime, global variables are preserved between requests on the same node.
+let edgeUsageCache: UsageSample | null = null;
+
 async function readUsage(): Promise<UsageSample> {
   const monthKey = monthKeyFromDate();
-  const path = getTrackPath();
-  try {
-    const raw = await fs.readFile(path, 'utf8');
-    const json = JSON.parse(raw) as Partial<UsageSample>;
-    if (!json || json.monthKey !== monthKey) {
-      return {
-        monthKey,
-        inputTokens: 0,
-        outputTokens: 0,
-        usdSpent: 0,
-        eurSpent: 0,
-        requestsCount: 0,
-        fallbackCount: 0,
-        updatedAt: new Date().toISOString()
-      };
-    }
-    return {
-      monthKey,
-      inputTokens: Number.isFinite(json.inputTokens) ? Math.max(0, Math.floor(json.inputTokens ?? 0)) : 0,
-      outputTokens: Number.isFinite(json.outputTokens) ? Math.max(0, Math.floor(json.outputTokens ?? 0)) : 0,
-      usdSpent: Number.isFinite(json.usdSpent) ? Math.max(0, Number(json.usdSpent ?? 0)) : 0,
-      eurSpent: Number.isFinite(json.eurSpent) ? Math.max(0, Number(json.eurSpent ?? 0)) : 0,
-      requestsCount: Number.isFinite(json.requestsCount) ? Math.max(0, Math.floor(json.requestsCount ?? 0)) : 0,
-      fallbackCount: Number.isFinite(json.fallbackCount) ? Math.max(0, Math.floor(json.fallbackCount ?? 0)) : 0,
-      updatedAt: json.updatedAt ?? new Date().toISOString()
-    };
-  } catch {
-    return {
-      monthKey,
-      inputTokens: 0,
-      outputTokens: 0,
-      usdSpent: 0,
-      eurSpent: 0,
-      requestsCount: 0,
-      fallbackCount: 0,
-      updatedAt: new Date().toISOString()
-    };
+  
+  // Use memory cache if available and same month
+  if (edgeUsageCache && edgeUsageCache.monthKey === monthKey) {
+    return edgeUsageCache;
   }
+
+  // Fallback to fresh state (persistence not guaranteed in Edge across nodes)
+  const fresh: UsageSample = {
+    monthKey,
+    inputTokens: 0,
+    outputTokens: 0,
+    usdSpent: 0,
+    eurSpent: 0,
+    requestsCount: 0,
+    fallbackCount: 0,
+    updatedAt: new Date().toISOString()
+  };
+  
+  edgeUsageCache = fresh;
+  return fresh;
 }
 
 async function writeUsage(usage: UsageSample) {
-  const path = getTrackPath();
-  await fs.writeFile(path, JSON.stringify(usage), 'utf8');
+  edgeUsageCache = usage;
 }
 
 export async function canUsePaidAI() {

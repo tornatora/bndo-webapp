@@ -101,7 +101,11 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
     profile.employees !== null ||
     Boolean(profile.legalForm?.trim());
 
-  // Per nuove attività: accettiamo anche dati del fondatore come 5° pilastro
+  if (!profile.legalForm) {
+    missing.push('legalForm');
+  }
+
+  // Per nuove attività: richiediamo ESPLICITAMENTE i dati del fondatore
   const hasFounderData =
     !existingBiz && (
       profile.age !== null ||
@@ -109,25 +113,73 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
       Boolean(profile.employmentStatus?.trim())
     );
 
-  const hasFifthPillar = hasBudgetOrPreference || hasFounderData;
-  
-  if (!hasFifthPillar) {
-    // Per nuove attività: chiediamo dati fondatore (età/occupazione)
-    if (!existingBiz) {
-      missing.push('founderData');
-    } else {
-      // Per imprese esistenti: chiediamo budget o preferenza contributo
-      missing.push('budgetOrPreference');
-    }
+  if (!existingBiz) {
+     if (!hasFounderData && !missing.includes('founderData')) missing.push('founderData');
+     if (!hasBudgetOrPreference && !missing.includes('budgetOrPreference')) missing.push('budgetOrPreference');
+  } else {
+     if (!hasBudgetOrPreference && !missing.includes('budgetOrPreference')) missing.push('budgetOrPreference');
+  }
+
+  // L'ultimo pilastro è diviso logicamente per le startup. Per le startup serve sia founderData che budget, per le esistenti solo budget.
+  const hasFifthPillar = existingBiz ? hasBudgetOrPreference : (hasFounderData && hasBudgetOrPreference);
+
+  // === ADVANCED INTELLIGENCE TRIGGERS (Edge Cases) ===
+  // 1. Agricoltura: serve sapere se ha terreni/IAP
+  const isAgriculture = profile.sector?.toLowerCase() === 'agricoltura';
+  if (isAgriculture && profile.agricultureStatus === null) {
+      if (!missing.includes('agricultureStatus')) missing.push('agricultureStatus');
+  }
+
+  // 2. Liberi Professionisti: serve sapere se sono iscritti all'albo
+  const isProfessional = profile.legalForm?.toLowerCase().includes('professionista') || profile.activityType?.toLowerCase() === 'professionista';
+  if (isProfessional && profile.professionalRegister === null) {
+      if (!missing.includes('professionalRegister')) missing.push('professionalRegister');
+  }
+
+  // 3. Industria 4.0/5.0: serve sapere se i macchinari/software sono 4.0 (solo per imprese esistenti)
+  const isBuyingTech = existingBiz && profile.fundingGoal && /(macchinar|software|digital|impiant|attrezzatur)/i.test(profile.fundingGoal);
+  if (isBuyingTech && profile.tech40 === null) {
+      if (!missing.includes('tech40')) missing.push('tech40');
+  }
+
+  // 4. Fondazione: fondamentale per imprese esistenti
+  if (existingBiz && profile.foundationYear === null) {
+      if (!missing.includes('foundationYear')) missing.push('foundationYear');
+  }
+
+  // 5. Team Femminile/Giovanile: fondamentale per nuove attività
+  if (!existingBiz && profile.teamMajority === null) {
+      if (!missing.includes('teamMajority')) missing.push('teamMajority');
+  }
+
+  // 5. Terzo Settore: se la forma giuridica o il settore indicano enti no-profit
+  const isThirdSectorHint = /(associazion|onlus|terzo sett|ets|cooperativa social|fondazion|ente non commerciale)/i.test(profile.legalForm || '') || /(associazion|onlus|terzo sett|ets|cooperativa social|fondazion)/i.test(profile.sector || '');
+  if (isThirdSectorHint && profile.isThirdSector === null) {
+      if (!missing.includes('isThirdSector')) missing.push('isThirdSector');
+  }
+
+  // 6. Real Estate: se il funding goal riguarda immobili o opere murarie
+  const isRealEstateGoal = /(ristruttur|sede|immobile|capannone|opere murari|fabbricato|locale commerciale|acquist.*immobile)/i.test(profile.fundingGoal || '');
+  if (isRealEstateGoal && profile.propertyStatus === null) {
+      if (!missing.includes('propertyStatus')) missing.push('propertyStatus');
   }
 
   // === CALCOLO SCORE grezzo (0-100) ===
+  // Aggiornato in base a 8 pilastri possibili massimi
   const pillars = [
     hasRegion,
     hasBusinessStatus,
     hasSpecificGoal,
     hasSpecificSector,
-    hasFifthPillar,
+    existingBiz ? hasBudgetOrPreference : hasFounderData,
+    !existingBiz ? hasBudgetOrPreference : false,
+    (isAgriculture ? profile.agricultureStatus !== null : true),
+    (isProfessional ? profile.professionalRegister !== null : true),
+    (isBuyingTech ? profile.tech40 !== null : true),
+    (existingBiz ? profile.foundationYear !== null : true),
+    (!existingBiz ? profile.teamMajority !== null : true),
+    (isThirdSectorHint ? profile.isThirdSector !== null : true),
+    (isRealEstateGoal ? profile.propertyStatus !== null : true)
   ];
   const completedCount = pillars.filter(Boolean).length;
   const score = Math.round((completedCount / pillars.length) * 100);
@@ -140,10 +192,11 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
 
   if (!hasSoftCriterias) {
     level = 'not_ready';
-  } else if (!hasHardCriterias) {
-    // Abbiamo le info base ma non quelle per il matching preciso (Hard Scan)
+  } else if (!hasHardCriterias && existingBiz) {
     level = 'soft_scan_ready';
-  } else if (missing.length === 0) {
+  } else if (!hasHardCriterias && !existingBiz && (!hasFounderData || profile.teamMajority === null)) {
+    level = 'soft_scan_ready'; // Startup MUST have founder data and team majority
+  } else if (missing.length === 0 || (missing.length === 1 && missing[0] === 'budgetOrPreference')) {
     level = 'strong_ready';
   } else {
     level = 'hard_scan_ready';
@@ -151,7 +204,11 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
 
 
   // === NEXT PRIORITY FIELD ===
-  const priorityOrder = ['location', 'locationConfirmation', 'businessContext', 'fundingGoal', 'sector', 'founderData', 'budgetOrPreference', 'additionalContext'];
+  const priorityOrder = [
+      'location', 'locationConfirmation', 'businessContext', 'fundingGoal', 'sector', 
+      'agricultureStatus', 'professionalRegister', 'legalForm', 'isThirdSector', 'propertyStatus', 'foundationYear', 'annualTurnover', 'isInnovative', 'founderData', 'teamMajority', 'tech40',
+      'budgetOrPreference', 'additionalContext'
+  ];
   const nextPriorityField = [...missing].sort((a, b) => {
     const ia = priorityOrder.indexOf(a);
     const ib = priorityOrder.indexOf(b);

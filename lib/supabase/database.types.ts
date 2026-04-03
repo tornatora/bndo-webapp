@@ -251,6 +251,81 @@ export type Database = {
         };
         Relationships: [];
       };
+      practice_payments: {
+        Row: {
+          id: string;
+          quiz_submission_id: string | null;
+          company_id: string | null;
+          user_id: string | null;
+          application_id: string | null;
+          practice_type: string;
+          grant_slug: string;
+          grant_title: string;
+          amount_cents: number;
+          currency: string;
+          status: 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
+          priority_queue: boolean;
+          onboarding_status: 'not_started' | 'in_progress' | 'completed';
+          onboarding_completed_at: string | null;
+          stripe_checkout_session_id: string;
+          stripe_payment_intent_id: string | null;
+          stripe_customer_id: string | null;
+          customer_email: string;
+          paid_at: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          quiz_submission_id?: string | null;
+          company_id?: string | null;
+          user_id?: string | null;
+          application_id?: string | null;
+          practice_type: string;
+          grant_slug: string;
+          grant_title: string;
+          amount_cents: number;
+          currency?: string;
+          status?: 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
+          priority_queue?: boolean;
+          onboarding_status?: 'not_started' | 'in_progress' | 'completed';
+          onboarding_completed_at?: string | null;
+          stripe_checkout_session_id: string;
+          stripe_payment_intent_id?: string | null;
+          stripe_customer_id?: string | null;
+          customer_email: string;
+          paid_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          quiz_submission_id?: string | null;
+          company_id?: string | null;
+          user_id?: string | null;
+          application_id?: string | null;
+          practice_type?: string;
+          grant_slug?: string;
+          grant_title?: string;
+          amount_cents?: number;
+          currency?: string;
+          status?: 'pending' | 'paid' | 'failed' | 'canceled' | 'refunded';
+          priority_queue?: boolean;
+          onboarding_status?: 'not_started' | 'in_progress' | 'completed';
+          onboarding_completed_at?: string | null;
+          stripe_checkout_session_id?: string;
+          stripe_payment_intent_id?: string | null;
+          stripe_customer_id?: string | null;
+          customer_email?: string;
+          paid_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       onboarding_credentials: {
         Row: {
           id: string;
@@ -304,6 +379,9 @@ export type Database = {
           summary: string;
           dossier_url: string | null;
           supplier_portal_url: string | null;
+          external_grant_id: string | null;
+          grant_slug: string | null;
+          metadata: Json;
           created_at: string;
         };
         Insert: {
@@ -316,6 +394,9 @@ export type Database = {
           summary: string;
           dossier_url?: string | null;
           supplier_portal_url?: string | null;
+          external_grant_id?: string | null;
+          grant_slug?: string | null;
+          metadata?: Json;
           created_at?: string;
         };
         Update: {
@@ -328,6 +409,9 @@ export type Database = {
           summary?: string;
           dossier_url?: string | null;
           supplier_portal_url?: string | null;
+          external_grant_id?: string | null;
+          grant_slug?: string | null;
+          metadata?: Json;
           created_at?: string;
         };
         Relationships: [];
@@ -401,6 +485,7 @@ export type Database = {
           storage_path: string;
           file_size: number;
           mime_type: string;
+          requirement_key: string | null;
           created_at: string;
         };
         Insert: {
@@ -411,6 +496,7 @@ export type Database = {
           storage_path: string;
           file_size: number;
           mime_type: string;
+          requirement_key?: string | null;
           created_at?: string;
         };
         Update: {
@@ -421,7 +507,185 @@ export type Database = {
           storage_path?: string;
           file_size?: number;
           mime_type?: string;
+          requirement_key?: string | null;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      practice_quiz_templates: {
+        Row: {
+          id: string;
+          application_id: string;
+          tender_id: string;
+          grant_external_id: string | null;
+          grant_slug: string | null;
+          grant_title: string;
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          status: 'active' | 'archived';
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          application_id: string;
+          tender_id: string;
+          grant_external_id?: string | null;
+          grant_slug?: string | null;
+          grant_title: string;
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          status?: 'active' | 'archived';
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          application_id?: string;
+          tender_id?: string;
+          grant_external_id?: string | null;
+          grant_slug?: string | null;
+          grant_title?: string;
+          source_channel?: 'scanner' | 'chat' | 'direct' | 'admin';
+          status?: 'active' | 'archived';
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      practice_quiz_questions: {
+        Row: {
+          id: string;
+          template_id: string;
+          sort_order: number;
+          question_key: string;
+          label: string;
+          description: string | null;
+          question_type: 'single_select' | 'boolean' | 'text' | 'number';
+          options: Json;
+          is_required: boolean;
+          validation: Json;
+          rule: Json;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          template_id: string;
+          sort_order?: number;
+          question_key: string;
+          label: string;
+          description?: string | null;
+          question_type: 'single_select' | 'boolean' | 'text' | 'number';
+          options?: Json;
+          is_required?: boolean;
+          validation?: Json;
+          rule?: Json;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          template_id?: string;
+          sort_order?: number;
+          question_key?: string;
+          label?: string;
+          description?: string | null;
+          question_type?: 'single_select' | 'boolean' | 'text' | 'number';
+          options?: Json;
+          is_required?: boolean;
+          validation?: Json;
+          rule?: Json;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      practice_quiz_submissions: {
+        Row: {
+          id: string;
+          template_id: string;
+          application_id: string;
+          tender_id: string;
+          company_id: string;
+          user_id: string;
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+          answers: Json;
+          completed_at: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          template_id: string;
+          application_id: string;
+          tender_id: string;
+          company_id: string;
+          user_id: string;
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+          answers?: Json;
+          completed_at?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          template_id?: string;
+          application_id?: string;
+          tender_id?: string;
+          company_id?: string;
+          user_id?: string;
+          source_channel?: 'scanner' | 'chat' | 'direct' | 'admin';
+          eligibility?: 'eligible' | 'not_eligible' | 'needs_review';
+          answers?: Json;
+          completed_at?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      practice_document_requirements: {
+        Row: {
+          id: string;
+          application_id: string;
+          tender_id: string;
+          requirement_key: string;
+          label: string;
+          description: string | null;
+          is_required: boolean;
+          status: 'missing' | 'uploaded' | 'waived';
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          application_id: string;
+          tender_id: string;
+          requirement_key: string;
+          label: string;
+          description?: string | null;
+          is_required?: boolean;
+          status?: 'missing' | 'uploaded' | 'waived';
+          source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          application_id?: string;
+          tender_id?: string;
+          requirement_key?: string;
+          label?: string;
+          description?: string | null;
+          is_required?: boolean;
+          status?: 'missing' | 'uploaded' | 'waived';
+          source_channel?: 'scanner' | 'chat' | 'direct' | 'admin';
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -556,6 +820,36 @@ export type Database = {
           thread_id?: string;
           sender_profile_id?: string;
           body?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      admin_notifications: {
+        Row: {
+          id: string;
+          type: 'message' | 'quiz_submission' | 'system';
+          title: string;
+          body: string;
+          entity_id: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          type: 'message' | 'quiz_submission' | 'system';
+          title: string;
+          body: string;
+          entity_id?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          type?: 'message' | 'quiz_submission' | 'system';
+          title?: string;
+          body?: string;
+          entity_id?: string | null;
+          read_at?: string | null;
           created_at?: string;
         };
         Relationships: [];

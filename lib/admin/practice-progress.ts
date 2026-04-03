@@ -46,7 +46,9 @@ export function upsertProgressIntoNotes(notes: string | null | undefined, step: 
 export function computeDerivedProgressKey(applicationStatus: string, missingCount: number): ProgressStepKey {
   if (applicationStatus === 'submitted') return 'submitted';
   if (applicationStatus === 'reviewed') return 'review';
-  if (missingCount > 0) return 'docs_collection';
+  // New practices should start from the activation stage (10%) before
+  // moving to document-collection milestones.
+  if (missingCount > 0) return 'contract_active';
   return 'drafting';
 }
 
@@ -76,6 +78,14 @@ export function progressBadge(step: ProgressStepKey) {
 export function computeProgressBar(step: ProgressStepKey) {
   const idx = Math.max(0, PROGRESS_STEPS.findIndex((s) => s.key === step));
   const stepIndex = idx < 0 ? 0 : idx;
-  const pct = Math.round(((stepIndex + 1) / PROGRESS_STEPS.length) * 100);
+  const pctMap: Record<ProgressStepKey, number> = {
+    eligible: 10,
+    contract_active: 10,
+    docs_collection: 35,
+    drafting: 60,
+    review: 80,
+    submitted: 100
+  };
+  const pct = pctMap[step] ?? 10;
   return { stepIndex, pct };
 }

@@ -1,0 +1,49 @@
+{
+  "baseUrl": "http://127.0.0.1:3300",
+  "generatedAt": "2026-03-14T09:33:01.360Z",
+  "timeoutMs": 9000,
+  "concurrency": 6,
+  "interRequestDelayMs": 120,
+  "interTurnDelayMs": 120,
+  "retry429Max": 2,
+  "scan": {
+    "total": 120,
+    "failed": 31,
+    "failureRate": 0.2583,
+    "latency": {
+      "p50": 3059,
+      "p95": 6447,
+      "max": 9002,
+      "avg": 3266
+    },
+    "stupidQuestionCount": 0,
+    "questionCountTotal": 0,
+    "stupidQuestionRate": 0,
+    "failuresByType": {
+      "missing_expected:PIDNEXT": 29,
+      "http_timeout": 2
+    }
+  },
+  "conversation": {
+    "total": 40,
+    "failed": 40,
+    "failureRate": 1,
+    "latency": {
+      "p50": 1587,
+      "p95": 1967,
+      "max": 2196,
+      "avg": 1570
+    },
+    "stupidQuestionCount": 0,
+    "questionCountTotal": 0,
+    "stupidQuestionRate": 0,
+    "failuresByType": {
+      "http_200": 90,
+      "business_exists_mismatch": 10,
+      "region_mismatch": 10,
+      "sector_mismatch": 10,
+      "next_field_unexpected:none": 10,
+      "readiness_reason_unexpected:none": 40
+    }
+  }
+}

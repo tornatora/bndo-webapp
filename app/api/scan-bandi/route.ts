@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchIncentiviDocs, mergeIncentiviDocs, INCENTIVI_SOLR_ENDPOINT } from '@/lib/matching/fetchIncentiviShared';
+import { mergeIncentiviDocs } from '@/lib/matching/fetchIncentiviShared';
 import { z } from 'zod';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import { STRATEGIC_SCANNER_DOCS } from '@/lib/strategicScannerDocs';
@@ -10,12 +10,13 @@ import {
   computeEconomicReliability,
   sanitizeUnreliableEconomicLabels,
 } from '@/lib/matching/economicReliability';
-import { loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { loadDatasetHealthStatus, loadHybridDatasetDocs } from '@/lib/matching/datasetRepository';
+import { loadActiveGrantUniverse } from '@/lib/matching/activeGrantIndex';
 import { buildAtecoSearchQueries, matchAtecoStructured } from '@/lib/matching/atecoTaxonomy';
 import { buildRefineQuestionV3 } from '@/lib/matching/refineQuestion';
 import { resolveCaseProfiles } from '@/lib/matching/caseProfiles';
 import { evaluateHardEligibility } from '@/lib/matching/hardEligibility';
-import { runUnifiedPipeline } from '@/lib/matching/unifiedPipeline';
+import { runUnifiedPipeline, evaluateTerritory, detectRegionsFromText } from '@/lib/matching/unifiedPipeline';
 import type { GrantEvaluation } from '@/lib/matching/unifiedPipeline';
 import { filterClosedCalls } from '@/lib/matching/scannerFilters';
 import { buildResultAwareRefineQuestion } from '@/lib/matching/resultAwareRefine';
@@ -28,9 +29,13 @@ const INCENTIVI_BASE_URL = 'https://www.incentivi.gov.it';
 const ITALY_REGION_COUNT = 20;
 const DEFAULT_SCANNER_API_BASE_URL = process.env.NODE_ENV === 'production' ? '' : 'http://127.0.0.1:3301';
 const SCANNER_API_BASE_URL = (process.env.SCANNER_API_BASE_URL || DEFAULT_SCANNER_API_BASE_URL).replace(/\/+$/, '');
-const SCANNER_API_EMAIL = process.env.SCANNER_API_EMAIL || 'demo@grants.local';
-const SCANNER_API_PASSWORD = process.env.SCANNER_API_PASSWORD || 'Admin123!';
-const SCANNER_API_ENABLED = process.env.SCANNER_API_ENABLED !== 'false' && Boolean(SCANNER_API_BASE_URL);
+const SCANNER_API_EMAIL = process.env.SCANNER_API_EMAIL?.trim() || '';
+const SCANNER_API_PASSWORD = process.env.SCANNER_API_PASSWORD?.trim() || '';
+const SCANNER_API_ENABLED =
+  process.env.SCANNER_API_ENABLED !== 'false' &&
+  Boolean(SCANNER_API_BASE_URL) &&
+  Boolean(SCANNER_API_EMAIL) &&
+  Boolean(SCANNER_API_PASSWORD);
 const SCANNER_API_TIMEOUT_MS = Number.parseInt(process.env.SCANNER_API_TIMEOUT_MS || '14000', 10);
 
 const REGION_DEFS: Array<{ canonical: string; aliases: string[] }> = [
@@ -39,7 +44,7 @@ const REGION_DEFS: Array<{ canonical: string; aliases: string[] }> = [
   { canonical: 'Calabria', aliases: ['calabria'] },
   { canonical: 'Campania', aliases: ['campania'] },
   { canonical: 'Emilia-Romagna', aliases: ['emilia romagna'] },
-  { canonical: 'Friuli-Venezia Giulia', aliases: ['friuli venezia giulia'] },
+  { canonical: 'Friuli-Venezia Giulia', aliases: ['friuli venezia giulia', 'fvg'] },
   { canonical: 'Lazio', aliases: ['lazio'] },
   { canonical: 'Liguria', aliases: ['liguria'] },
   { canonical: 'Lombardia', aliases: ['lombardia'] },
@@ -145,10 +150,14 @@ type ScanResult = {
   budgetTotal?: number | null;
   economicOffer?: Record<string, unknown> | null;
   probabilityScore?: number;
+  feasibilityScore?: number;
   hardStatus?: 'eligible' | 'unknown' | 'not_eligible';
   whyFit?: string[] | null;
   missingRequirements?: string[] | null;
   bookingUrl?: string | null;
+  isClickDay?: boolean;
+  isSpecialArea?: boolean;
+  specialAreaType?: 'zes' | 'sisma' | 'montana' | null;
 };
 
 type Candidate = {
@@ -309,6 +318,9 @@ type ScannerProfilePayload = {
   aidPreference: string | null;
   plannedInvestment: number | null;
   targetAmount: number | null;
+  annualTurnover: number | null;
+  isInnovative: boolean | null;
+  foundationYear: number | null;
   constraints: Record<string, unknown>;
 };
 
@@ -477,6 +489,12 @@ function hardStatusPriority(status: ScanResult['hardStatus']): number {
 const RESTO_TITLE_HINTS = ['resto al sud', 'resto al sud 2 0', 'resto al sud 2.0'];
 const FUSESE_TITLE_HINTS = ['fusese', 'fund for self employment and self entrepreneurship'];
 const ON_TITLE_HINTS = ['oltre nuove imprese a tasso zero', 'nuove imprese a tasso zero'];
+const AUTOIMPIEGO_CENTER_NORTH_HINTS = [
+  'autoimpiego centro nord',
+  'autoimpiego centro-nord',
+  'autoimpiego per il centro nord',
+];
+const PIDNEXT_TITLE_HINTS = ['pidnext'];
 
 type ProfilePriorityRule = {
   tokens: string[];
@@ -501,6 +519,10 @@ function isFuseseResult(result: ScanResult) {
 
 function isOnResult(result: ScanResult) {
   return hasAnyHint(resultTitleAndSourceNorm(result), ON_TITLE_HINTS);
+}
+
+function isAutoimpiegoCentroNordResult(result: ScanResult) {
+  return hasAnyHint(resultTitleAndSourceNorm(result), AUTOIMPIEGO_CENTER_NORTH_HINTS);
 }
 
 function southYouthStartupPriorityRules(enabled: boolean): ProfilePriorityRule[] {
@@ -569,9 +591,13 @@ type ChatStrictContext = {
   fundingGoal: string | null;
   activityType: string | null;
   businessExists: boolean | null;
+  annualTurnover?: number | null;
+  isInnovative?: boolean | null;
+  foundationYear?: number | null;
+  employees?: number | null;
 };
 
-const CHAT_STRICT_STRATEGIC_TITLES = [
+const EXPERT_STRICT_STRATEGIC_TITLES = [
   'resto al sud',
   'resto al sud 2 0',
   'resto al sud 2.0',
@@ -622,13 +648,13 @@ function normalizeResultSearchText(result: ScanResult) {
   );
 }
 
-function passesChatStrictCandidate(result: ScanResult, context: ChatStrictContext, enforceGoal = true): boolean {
+function passesExpertStrictCandidate(result: ScanResult, context: ChatStrictContext, enforceGoal = true): boolean {
   // Se la unifiedPipeline ha dato uno score molto alto, ci fidiamo
   if ((result.score ?? 0) >= 0.70) return true;
 
   const titleNorm = normalizeForMatch(result.title);
   const authorityTrusted = classifyAuthorityPriority(result.authorityName).trusted;
-  const strategicTitle = CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
+  const strategicTitle = EXPERT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
   if (!authorityTrusted && !strategicTitle) return false;
 
   const searchText = normalizeResultSearchText(result);
@@ -656,17 +682,17 @@ function passesChatStrictCandidate(result: ScanResult, context: ChatStrictContex
   return true;
 }
 
-function applyChatStrictCandidateFilter(candidates: Candidate[], context: ChatStrictContext): Candidate[] {
-  const hard = candidates.filter((entry) => passesChatStrictCandidate(entry.result, context, true));
+function applyExpertStrictCandidateFilter(candidates: Candidate[], context: ChatStrictContext): Candidate[] {
+  const hard = candidates.filter((entry) => passesExpertStrictCandidate(entry.result, context, true));
   if (hard.length > 0) return hard;
-  const medium = candidates.filter((entry) => passesChatStrictCandidate(entry.result, context, false));
+  const medium = candidates.filter((entry) => passesExpertStrictCandidate(entry.result, context, false));
   if (medium.length > 0) return medium;
   return [];
 }
 
 function hasStrategicTitleHint(result: ScanResult) {
   const titleNorm = normalizeForMatch(result.title);
-  return CHAT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
+  return EXPERT_STRICT_STRATEGIC_TITLES.some((token) => titleNorm.includes(token));
 }
 
 function normalizeTitleDedupeKey(title: string): string {
@@ -874,7 +900,7 @@ function mergeStrategicRecallCandidates(args: {
   );
 }
 
-function applyChatPrecisionPolicy(args: {
+function applyExpertPrecisionPolicy(args: {
   candidates: Candidate[];
   context: ChatStrictContext;
   contributionPreference: string | null;
@@ -902,6 +928,9 @@ function applyChatPrecisionPolicy(args: {
     contributionPreference,
     requestedContributionEUR: targetAmount,
     revenueOrBudgetEUR: targetAmount,
+    annualTurnover: context.annualTurnover,
+    isInnovative: context.isInnovative,
+    foundationYear: context.foundationYear,
   });
   const dynamicThreshold = computeDynamicAmountThreshold(normalizedProfile);
   const allowMicroTicket = dynamicThreshold.microTicketIntent;
@@ -913,7 +942,7 @@ function applyChatPrecisionPolicy(args: {
     const strategicTitle = hasStrategicTitleHint(result);
     if (!authorityTrusted && !strategicTitle) continue;
     if (!isBusinessTargetResult(result)) continue;
-    if (!passesChatStrictCandidate(result, context, enforceGoal)) continue;
+    if (!passesExpertStrictCandidate(result, context, enforceGoal)) continue;
     if (!computeEconomicReliability(result).reliable) {
       result = sanitizeUnreliableEconomicLabels(result);
     }
@@ -940,7 +969,7 @@ function filterNearMissesForChat(args: {
   profilePriorityRules?: ProfilePriorityRule[];
 }): Candidate[] {
   const { nearMisses, context, contributionPreference, targetAmount, limit, pinnedStrategicTitles = [], profilePriorityRules = [] } = args;
-  const policy = applyChatPrecisionPolicy({
+  const policy = applyExpertPrecisionPolicy({
     candidates: nearMisses,
     context,
     contributionPreference,
@@ -1261,6 +1290,9 @@ function buildScannerProfilePayload(args: {
   employees: number | null;
   age: number | null;
   employmentStatus: string | null;
+  annualTurnover?: number | null;
+  isInnovative?: boolean | null;
+  foundationYear?: number | null;
 }): ScannerProfilePayload {
   const {
     rawProfile,
@@ -1275,6 +1307,9 @@ function buildScannerProfilePayload(args: {
     employees,
     age,
     employmentStatus,
+    annualTurnover,
+    isInnovative,
+    foundationYear,
   } = args;
 
   const businessExists = inferBusinessExists(rawProfile, activityType, fundingGoal) ?? (typeof rawProfile.businessExists === 'boolean' ? rawProfile.businessExists : null);
@@ -1291,6 +1326,9 @@ function buildScannerProfilePayload(args: {
     aidPreference: contributionPreference ?? null,
     plannedInvestment: budget ?? null,
     targetAmount: requestedContribution ?? null,
+    annualTurnover: annualTurnover ?? cleanNumber(rawProfile.annualTurnover) ?? null,
+    isInnovative: isInnovative ?? (typeof rawProfile.isInnovative === 'boolean' ? rawProfile.isInnovative : null),
+    foundationYear: foundationYear ?? cleanNumber(rawProfile.foundationYear) ?? null,
     constraints: {
       flow: businessExists ? 'azienda_attiva' : 'azienda_da_aprire',
       activityType: activityType ?? null,
@@ -1849,6 +1887,7 @@ async function scanViaScannerApi(args: {
     if (economic.amount === null) return null;
 
     const probability = Math.max(0, Math.min(100, Math.round(item.probabilityScore ?? 0)));
+    const feasibility = Math.max(0, Math.min(100, Math.round((item as any).feasibilityScore ?? 80)));
     const strictMatch = matchesStrictPreference(contributionPreference, item.aidForm, item.aidIntensity);
     const mismatchFlags: string[] = [];
 
@@ -1886,7 +1925,11 @@ async function scanViaScannerApi(args: {
       budgetTotal: item.budgetTotal ?? null,
       economicOffer: item.economicOffer ?? null,
       probabilityScore: probability,
+      feasibilityScore: feasibility,
       hardStatus: item.hardStatus,
+      isClickDay: (item.grantTitle?.toLowerCase().includes('sportello') || (item as any).description?.toLowerCase().includes('sportello') || item.grantTitle?.toLowerCase().includes('click day')),
+      isSpecialArea: (item.grantTitle?.toLowerCase().includes('zes') || (item as any).description?.toLowerCase().includes('zes') || item.grantTitle?.toLowerCase().includes('sisma') || item.grantTitle?.toLowerCase().includes('montan')),
+      specialAreaType: item.grantTitle?.toLowerCase().includes('zes') ? 'zes' : item.grantTitle?.toLowerCase().includes('sisma') ? 'sisma' : item.grantTitle?.toLowerCase().includes('montan') ? 'montana' : null,
       whyFit: item.whyFit ?? [],
       missingRequirements: item.missingRequirements ?? [],
     };
@@ -1913,11 +1956,11 @@ async function scanViaScannerApi(args: {
   const profilePriorityRules = southYouthStartupPriorityRules(southYouthStartupProfile);
   const pinnedStrategicTitles = southYouthStartupProfile ? ['resto al sud', 'fusese', 'oltre nuove imprese a tasso zero'] : [];
 
-  const chatStrictEnabled = channel === 'chat' && strictness === 'high';
-  const strictFiltered = chatStrictEnabled ? applyChatStrictCandidateFilter(mappedAll, strictContext) : mappedAll;
+  const chatStrictEnabled = strictness === 'high';
+  const strictFiltered = chatStrictEnabled ? applyExpertStrictCandidateFilter(mappedAll, strictContext) : mappedAll;
   const targetAmount = scannerProfile.targetAmount ?? scannerProfile.plannedInvestment ?? null;
   const precisionFiltered = chatStrictEnabled
-    ? applyChatPrecisionPolicy({
+    ? applyExpertPrecisionPolicy({
         candidates: strictFiltered,
         context: strictContext,
         contributionPreference,
@@ -2062,6 +2105,87 @@ function buildRefineQuestion(args: {
     return 'Indicami investimento totale e contributo desiderato (anche stima) per filtrare solo bandi realistici.';
   }
   return null; // Don't ask generic follow-ups if profile is complete enough
+}
+
+type DecisionProfileMeta = {
+  knownFields: string[];
+  inferredFields: string[];
+  missingFields: string[];
+  missingCriticalFields: string[];
+  contradictions: string[];
+  confidenceByField: Record<string, number>;
+  sourceByField: Record<string, 'explicit' | 'inferred' | 'derived'>;
+};
+
+function buildDecisionProfileMeta(profile: NormalizedMatchingProfile): DecisionProfileMeta {
+  const knownFields: string[] = [];
+  const inferredFields: string[] = [];
+  const missingFields: string[] = [];
+  const missingCriticalFields: string[] = [];
+  const contradictions: string[] = [];
+  const confidenceByField: Record<string, number> = {};
+  const sourceByField: Record<string, 'explicit' | 'inferred' | 'derived'> = {};
+
+  const setField = (
+    field: string,
+    isKnown: boolean,
+    confidence: number,
+    source: 'explicit' | 'inferred' | 'derived' = 'explicit',
+  ) => {
+    if (isKnown) knownFields.push(field);
+    else missingFields.push(field);
+    confidenceByField[field] = confidence;
+    sourceByField[field] = source;
+  };
+
+  const hasRegion = Boolean(profile.region);
+  const hasApplicantType = Boolean(profile.activityType) || typeof profile.businessExists === 'boolean';
+  const hasBusinessStage = typeof profile.businessExists === 'boolean';
+  const hasGoal = Boolean(profile.fundingGoal);
+  const hasSector = Boolean(profile.sector) || profile.atecoDigits.length > 0;
+  const hasBudgetSignal = profile.budget !== null || profile.requestedContribution !== null;
+  const hasEmployment = Boolean(profile.employmentStatus);
+  const hasAgeSignal = profile.age !== null || Boolean(profile.ageBand);
+
+  setField('territory_region', hasRegion, hasRegion ? 0.95 : 0.2);
+  setField('applicant_type', hasApplicantType, hasApplicantType ? 0.9 : 0.35);
+  setField('business_stage', hasBusinessStage, hasBusinessStage ? 0.9 : 0.3);
+  setField('project_goal_primary', hasGoal, hasGoal ? 0.86 : 0.25);
+  setField('sector_primary', hasSector, hasSector ? 0.88 : 0.25);
+  setField('investment_budget_band', hasBudgetSignal, hasBudgetSignal ? 0.82 : 0.2);
+  setField('employment_status_if_relevant', hasEmployment, hasEmployment ? 0.72 : 0.2);
+  setField('age_band', hasAgeSignal, hasAgeSignal ? 0.72 : 0.2, profile.ageBand && profile.age === null ? 'derived' : 'explicit');
+
+  if (profile.age !== null && profile.ageBand) {
+    if ((profile.age <= 35 && profile.ageBand === 'over35') || (profile.age > 35 && profile.ageBand === 'under35')) {
+      contradictions.push('age_vs_age_band');
+    }
+  }
+  if (profile.businessExists === false && typeof profile.annualTurnover === 'number' && profile.annualTurnover > 0) {
+    contradictions.push('new_business_with_turnover');
+  }
+  if (profile.businessExists === false && profile.activityType && /srl|spa|snc|sas|cooperativa/i.test(profile.activityType)) {
+    contradictions.push('new_business_with_structured_legal_form');
+  }
+
+  if (!hasRegion) missingCriticalFields.push('territory_region');
+  if (!hasApplicantType) missingCriticalFields.push('applicant_type');
+  if (!hasGoal) missingCriticalFields.push('project_goal_primary');
+  if (!hasSector) missingCriticalFields.push('sector_primary');
+
+  if (profile.ageBand && profile.age === null) {
+    inferredFields.push('age_band');
+  }
+
+  return {
+    knownFields,
+    inferredFields,
+    missingFields,
+    missingCriticalFields,
+    contradictions,
+    confidenceByField,
+    sourceByField,
+  };
 }
 
 function normalizeForMatch(value: string) {
@@ -3832,6 +3956,87 @@ function normalizeDocTerritory(
   return { kind: 'unknown', source: 'missing' };
 }
 
+function hasNationalTerritoryMarker(textNorm: string): boolean {
+  if (!textNorm) return false;
+  return (
+    textNorm.includes('nazionale') ||
+    textNorm.includes('nazionali') ||
+    textNorm.includes('tutta italia') ||
+    textNorm.includes('intero territorio nazionale') ||
+    textNorm.includes('su tutto il territorio nazionale') ||
+    textNorm.includes('a livello nazionale') ||
+    textNorm.includes('territorio nazionale')
+  );
+}
+
+function isResultCompatibleWithUserRegion(
+  candidate: {
+    id?: string | null;
+    title?: string | null;
+    authorityName?: string | null;
+    requirements?: string[] | null;
+  },
+  userRegionCanonical: string | null,
+  localDocsLookup?: Map<string, IncentiviDoc> | null,
+): boolean {
+  if (!userRegionCanonical) return true;
+
+  const candidateId = String(candidate.id ?? '').trim();
+  if (candidateId && localDocsLookup) {
+    const localDoc = getLocalDocByGrantId(candidateId, localDocsLookup);
+    if (localDoc) {
+      const titleNorm = normalizeForMatch(localDoc.title ?? '');
+      const descriptionNorm = normalizeForMatch(localDoc.description ?? '');
+      const authorityNorm = normalizeForMatch(localDoc.authorityName ?? '');
+      const territory = normalizeDocTerritory(localDoc, { titleNorm, descriptionNorm, authorityNorm });
+
+      if (territory.kind === 'national') return true;
+      if (territory.kind === 'regions') return territory.regions.includes(userRegionCanonical);
+    }
+  }
+
+  const titleNorm = normalizeForMatch(candidate.title ?? '');
+  const authorityNorm = normalizeForMatch(candidate.authorityName ?? '');
+  const requirementsNorm = normalizeForMatch((candidate.requirements ?? []).join(' '));
+  const highSignal = `${authorityNorm} ${titleNorm}`.trim();
+  const allText = `${authorityNorm} ${titleNorm} ${requirementsNorm}`.trim();
+
+  if (hasNationalTerritoryMarker(allText)) return true;
+
+  const regionsHighSignal = detectRegions(highSignal);
+  if (regionsHighSignal.length > 0) {
+    return regionsHighSignal.includes(userRegionCanonical);
+  }
+
+  const regionsAllText = detectRegions(allText);
+  if (regionsAllText.length > 0) {
+    return regionsAllText.includes(userRegionCanonical);
+  }
+
+  // Nessuna regione esplicita trovata: non blocchiamo (evita falsi negativi su bandi nazionali poco strutturati).
+  return true;
+}
+
+function applyUserRegionHardFilter<T extends ScanResult>(
+  items: T[],
+  userRegionCanonical: string | null,
+  localDocsLookup?: Map<string, IncentiviDoc> | null,
+): T[] {
+  if (!userRegionCanonical) return items;
+  return items.filter((item) =>
+    isResultCompatibleWithUserRegion(
+      {
+        id: item.id ?? item.grantId ?? null,
+        title: item.title ?? item.grantTitle ?? null,
+        authorityName: item.authorityName ?? item.authority ?? null,
+        requirements: item.requirements ?? [],
+      },
+      userRegionCanonical,
+      localDocsLookup,
+    ),
+  );
+}
+
 type ContributionPrefKind =
   | 'none'
   | 'any'
@@ -4198,6 +4403,14 @@ export async function POST(req: Request) {
   }
 
   try {
+    const datasetHealth = await loadDatasetHealthStatus().catch(() => ({
+      datasetVersion: null,
+      datasetFreshnessHours: null,
+      coverageStatus: 'degraded' as const,
+      lastRunAt: null,
+      alerts: [] as string[],
+    }));
+
     const rawBody = await req.json();
     const parsedPayload = payloadSchema.safeParse(rawBody);
     const parsed = parsedPayload.success
@@ -4264,9 +4477,11 @@ export async function POST(req: Request) {
       cleanString(rawProfile.employmentStatus, 80) ??
       cleanString(rawProfile.occupationalStatus, 80) ??
       cleanString(rawProfile.workStatus, 80);
-    const budget = cleanNumber(rawProfile.revenueOrBudgetEUR);
-    const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR);
-    const fundingGoalSignalQuery = fundingGoal ? tokenizeKeywords(normalizeForMatch(fundingGoal)).slice(0, 4).join(' ') || null : null;
+    const budget = cleanNumber(rawProfile.budget ?? rawProfile.revenueOrBudgetEUR);
+    const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR ?? rawProfile.requestedContribution);
+    const annualTurnover = cleanNumber(rawProfile.annualTurnover ?? rawProfile.revenueOrBudgetEUR);
+    const isInnovative = typeof rawProfile.isInnovative === 'boolean' ? rawProfile.isInnovative : null;
+    const foundationYear = cleanNumber(rawProfile.foundationYear);
 
     const bookingBase = process.env.NEXT_PUBLIC_BOOKING_URL?.trim() || '/prenota';
 
@@ -4283,6 +4498,9 @@ export async function POST(req: Request) {
       employees,
       age,
       employmentStatus,
+      annualTurnover,
+      isInnovative,
+      foundationYear,
     });
     const businessExists = scannerProfile.businessExists;
     const normalizedProfile = normalizeProfile({
@@ -4294,12 +4512,15 @@ export async function POST(req: Request) {
       ateco,
       activityType,
       contributionPreference,
-      revenueOrBudgetEUR: budget,
-      requestedContributionEUR: requestedContribution,
+      budget,
+      annualTurnover,
+      requestedContribution,
       age,
       ageBand,
       employmentStatus,
       businessExists,
+      isInnovative,
+      foundationYear,
     });
     const caseProfileResolution = resolveCaseProfiles(normalizedProfile);
     const strictContext: ChatStrictContext = {
@@ -4308,9 +4529,31 @@ export async function POST(req: Request) {
       fundingGoal,
       activityType,
       businessExists,
+      annualTurnover,
+      isInnovative,
+      foundationYear,
     };
+    const decisionProfileMeta = buildDecisionProfileMeta(normalizedProfile);
     const matchingVersion = process.env.MATCHING_ENGINE_V4?.trim() === 'false' ? 'v3' : 'v4';
+    const engineVersion = 'scan-v4-unified';
     const profilePriorityApplied = caseProfileResolution.activeCaseIds.length > 0;
+    const profileHash = [
+      region,
+      sector,
+      fundingGoal,
+      ateco,
+      activityType,
+      contributionPreference,
+      scannerProfile.businessExists,
+      scannerProfile.plannedInvestment,
+      scannerProfile.targetAmount,
+      ageBand,
+      employmentStatus,
+    ]
+      .map((entry) => String(entry ?? '').trim())
+      .join('|');
+    const activeUniverse = await loadActiveGrantUniverse();
+    const universeCount = activeUniverse.universeCount;
 
     if (SCANNER_API_ENABLED && mode !== 'fast') {
       try {
@@ -4323,32 +4566,67 @@ export async function POST(req: Request) {
           strictness,
           strictContext,
         });
+        const scannerLocalDocsLookup = userRegionCanonical ? await getLocalDocsLookup().catch(() => null) : null;
         const scannerResultsRaw = scanner.items.map((entry) => entry.result);
-        // ── HARD TERRITORY FILTER on scanner API results ──────────
-        // The external scanner API may return results from wrong regions.
-        // Apply the same detectRegions logic to hard-exclude mismatches.
-        const scannerResults = userRegionCanonical
-          ? scannerResultsRaw.filter((item) => {
-              const titleNorm = normalizeForMatch(item.title || '');
-              const authorityNorm = normalizeForMatch(item.authorityName ?? item.authority ?? '');
-              const combined = `${titleNorm} ${authorityNorm}`;
+        // FILTRO SURGICAL: Definizione logica di esclusione deterministica
+        const surgicalFilter = (item: any) => {
+            const titleNorm = normalizeForMatch(item.title ?? item.grantTitle ?? '');
+            const authNorm = normalizeForMatch(item.authorityName ?? item.authority ?? '');
+            const reqNorm = normalizeForMatch(Array.isArray(item.requirements) ? item.requirements.join(' ') : '');
+            const combined = `${titleNorm} ${authNorm} ${reqNorm}`.trim();
 
-              // Detect if the grant is specific to a region
-              const grantRegions = detectRegions(combined);
-              if (grantRegions.length === 0) return true; // Unknown territory — keep it
-              // National grants pass
-              if (combined.includes('nazionale') || combined.includes('italia') || combined.includes('tutte le regioni')) return true;
-              // Check if user region matches
-              if (grantRegions.includes(userRegionCanonical)) return true;
-              // South macro-region check
-              const isSouth = ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Molise', 'Puglia', 'Sardegna', 'Sicilia'].includes(userRegionCanonical);
-              if (isSouth && (combined.includes('mezzogiorno') || combined.includes('sud italia') || combined.includes('meridione'))) return true;
-              // Grant is for a different region → hard exclude
-              return false;
-            })
-          : scannerResultsRaw;
-        const scannerNearMisses = scanner.nearMisses.map((entry) => entry.result);
-        const scannerTopScore = scannerResults[0]?.matchScore ?? null;
+            if (!isResultCompatibleWithUserRegion(
+              {
+                id: item.id ?? item.grantId ?? null,
+                title: item.title ?? item.grantTitle ?? null,
+                authorityName: item.authorityName ?? item.authority ?? null,
+                requirements: Array.isArray(item.requirements) ? item.requirements.map(String) : [],
+              },
+              userRegionCanonical,
+              scannerLocalDocsLookup,
+            )) return false;
+
+            // 2. SECTOR SURGICAL BLOCK
+            if (sector) {
+                const sLow = sector.toLowerCase();
+                const industries = [
+                    { key: 'agricoltura', variants: ['agricol', 'coltiv', 'allevament', 'agrari', 'pesca', 'zootecn', 'vivaism', 'agritech', 'forest', 'bosco'] },
+                    { key: 'turismo', variants: ['turism', 'albergh', 'ricettiv', 'hotel', 'ristorazione', 'bar', 'agriturism', 'camping', 'villaggi', 'ospitalita'] },
+                    { key: 'industria', variants: ['manifattur', 'fabbric', 'produt', 'meccanic', 'chimic', 'plastica', 'automotive', 'elettronica', 'metalmeccanic'] },
+                    { key: 'artigianato', variants: ['artigian', 'laboratorio', 'bottega', 'orafo', 'ceramica', 'restauro'] },
+                    { key: 'commercio', variants: ['retail', 'negozio', 'e-commerce', 'shop', 'vendita', 'distribuzione', 'franchising'] },
+                    { key: 'edilizia', variants: ['costruzion', 'murator', 'cantier', 'ristrutturazion', 'immobiliar', 'architet', 'ingegher'] },
+                    { key: 'ict', variants: ['software', 'digitale', 'informatic', 'web', 'app', 'piattaforma', 'tecnolog', 'ai', 'intelligenza artificiale', 'cybersecurity', 'fintech'] },
+                    { key: 'servizi', variants: ['consulenza', 'formazione', 'marketing', 'comunicazione', 'professionista', 'commercialista', 'avvocato', 'fiscale'] },
+                    { key: 'cultura', variants: ['spettacolo', 'teatro', 'cinema', 'musica', 'museo', 'arte', 'editoria', 'libro', 'giornal'] },
+                    { key: 'sociale', variants: ['non profit', 'ets', 'terzo settore', 'volontariato', 'cooperativa sociale', 'onlus'] },
+                    { key: 'sanita', variants: ['medico', 'sanitari', 'farmacia', 'ospedalier', 'clinica', 'biotech', 'life science', 'veterinar'] },
+                    { key: 'ambiente', variants: ['ecolog', 'green', 'rinnovabil', 'efficientamento', 'energia', 'economia circolare', 'rifiuti', 'smaltimento'] },
+                    { key: 'sport', variants: ['palestra', 'sportiv', 'piscina', 'campo da', 'atleta', 'associazione sportiva'] },
+                    { key: 'tessile', variants: ['moda', 'fashion', 'abbigliamento', 'calzatur', 'pelle', 'cuoio', 'tessuto', 'maglieria'] },
+                    { key: 'chimica', variants: ['farmaceutic', 'cosmetica', 'biocidi', 'detergen', 'vetro', 'ceramica industriale'] },
+                    { key: 'trasporti', variants: ['logistica', 'spedizione', 'mobility', 'autotrasport'] }
+                ];
+                const userInd = industries.find(ind => sLow.includes(ind.key) || ind.variants.some(v => sLow.includes(v)));
+                
+                if (userInd) {
+                    const otherInds = industries.filter(ind => ind.key !== userInd.key);
+                    for (const other of otherInds) {
+                        // Se il bando menziona un settore diverso e NON menziona il nostro, scarta
+                        const mentionsOther = other.variants.some(v => combined.includes(v));
+                        const mentionsUser = userInd.variants.some(v => combined.includes(v));
+                        if (mentionsOther && !mentionsUser) return false;
+                    }
+                }
+            }
+            return true;
+        };
+
+        const scannerResults = scannerResultsRaw.filter(surgicalFilter);
+        const scannerNearMisses = scanner.nearMisses.map((entry) => entry.result).filter(surgicalFilter);
+        const scannerResultsStrict = applyUserRegionHardFilter(scannerResults, userRegionCanonical, scannerLocalDocsLookup);
+        const scannerNearMissesStrict = applyUserRegionHardFilter(scannerNearMisses, userRegionCanonical, scannerLocalDocsLookup);
+        const scannerTopScore = scannerResultsStrict[0]?.matchScore ?? null;
         const scannerQualityBand = qualityBandFromScore(scannerTopScore);
         const scannerRefineQuestion = buildRefineQuestion({
           region,
@@ -4358,10 +4636,10 @@ export async function POST(req: Request) {
           budget,
           requestedContribution,
           topScore: scannerTopScore,
-          resultsCount: scannerResults.length,
+          resultsCount: scannerResultsStrict.length,
         });
 
-        const scannerResultsWithBooking = scannerResults.map((item) => ({
+        const scannerResultsWithBooking = scannerResultsStrict.map((item) => ({
           ...item,
           bookingUrl: buildBookingUrl(bookingBase, {
             bandoId: item.id,
@@ -4369,7 +4647,7 @@ export async function POST(req: Request) {
             sector,
           }),
         }));
-        const scannerNearMissesWithBooking = scannerNearMisses.map((item) => ({
+        const scannerNearMissesWithBooking = scannerNearMissesStrict.map((item) => ({
           ...item,
           bookingUrl: buildBookingUrl(bookingBase, {
             bandoId: item.id,
@@ -4392,17 +4670,26 @@ export async function POST(req: Request) {
           strictPreferenceLabel: contributionPrefInfo.label,
           strictPreferenceRequested: contributionPrefInfo.strict,
           strictMatchesFound: scanner.strictMatchesFound,
-          resultsCount: scannerResults.length,
+          resultsCount: scannerResultsStrict.length,
         });
         const scannerExplanation =
-          scannerResults.length === 0 && scannerNearMisses.length > 0
+          scannerResultsStrict.length === 0 && scannerNearMissesStrict.length > 0
             ? `${scannerExplanationBase} Ti mostro bandi recuperabili se completi alcuni requisiti.`
             : scannerExplanationBase;
 
         return NextResponse.json({
           phase: 'full',
           matchingVersion,
+          engineVersion,
+          profileHash,
           profilePriorityApplied,
+          datasetVersion: datasetHealth.datasetVersion,
+          datasetFreshnessHours: datasetHealth.datasetFreshnessHours,
+          coverageStatus: datasetHealth.coverageStatus,
+          universeCount,
+          consideredCount: scannerResultsRaw.length,
+          excludedHardCount: scannerResultsRaw.filter((item) => item.hardStatus === 'not_eligible').length,
+          decisionProfileMeta,
           explanation: scannerExplanation,
           results: scannerResultsWithBooking,
           nearMisses: scannerNearMissesWithBooking,
@@ -4430,47 +4717,12 @@ export async function POST(req: Request) {
       const snapshot = await loadHybridDatasetDocs();
       return snapshot.docs;
     };
-
-    if (mode === 'fast') {
-      docs = await loadFallbackDocs();
-    } else {
-      try {
-        if (keyword && userRegionCanonical) {
-          const queryCandidates = Array.from(
-            new Set(
-              [
-                keyword,
-                [keyword, userRegionCanonical, contributionPrefInfo.strict ? contributionPrefInfo.label : null].filter(Boolean).join(' '),
-                fundingGoal,
-                [fundingGoal, userRegionCanonical].filter(Boolean).join(' '),
-                fundingGoalSignalQuery,
-                [fundingGoalSignalQuery, userRegionCanonical].filter(Boolean).join(' '),
-                atecoQuery,
-                [sector, fundingGoal].filter(Boolean).join(' '),
-              ]
-                .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-                .filter((entry) => entry.length >= 3),
-            ),
-          );
-          const results = await Promise.allSettled(queryCandidates.map((query) => fetchIncentiviDocs(query, 180, 6500)));
-          docs = mergeIncentiviDocs(
-            ...results
-              .filter((entry): entry is PromiseFulfilledResult<IncentiviDoc[]> => entry.status === 'fulfilled')
-              .map((entry) => entry.value),
-          );
-        } else {
-          docs = await fetchIncentiviDocs(keyword, 240, 8500);
-        }
-      } catch {
-        docs = await loadFallbackDocs();
-      }
-    }
-
+    docs = activeUniverse.docs;
     if (docs.length === 0) {
       docs = await loadFallbackDocs();
+      docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
+      docs = filterClosedCalls(docs);
     }
-    docs = mergeIncentiviDocs(docs, STRATEGIC_SCANNER_DOCS as unknown as IncentiviDoc[]);
-    docs = filterClosedCalls(docs);
 
     // --- Unified Pipeline scoring overlay ---
     const unifiedResult = runUnifiedPipeline({
@@ -4727,7 +4979,19 @@ export async function POST(req: Request) {
           return titleNorm.includes('resto al sud') || titleNorm.includes('fusese') || titleNorm.includes('fund for self employment') ||
                  titleNorm.includes('oltre nuove imprese') || titleNorm.includes('nuove imprese a tasso zero');
         })();
-        const bypassUnified = isSouthPinnedStrategic;
+        const isCenterNorthAutoimpiegoPinnedStrategic = (() => {
+          if (businessExists !== false) return false;
+          if (!userRegionCanonical || !CENTER_NORTH_REGION_SET.has(userRegionCanonical)) return false;
+          const youthOk = (age !== null && age >= 18 && age <= 35) || ageBand === 'under35';
+          if (!youthOk) return false;
+          const empNorm = normalizeForMatch(employmentStatus ?? '');
+          if (!/(disoccupat|inoccupat|neet|gol|working poor|senza lavoro|non occupat)/.test(empNorm)) return false;
+          if (/(agricolt|pesca|acquacolt)/.test(normalizeForMatch(sector ?? ''))) return false;
+
+          const docTitleAndSourceNorm = `${titleNorm} ${normalizeForMatch(buildSourceUrl(doc))}`;
+          return hasAnyHint(docTitleAndSourceNorm, AUTOIMPIEGO_CENTER_NORTH_HINTS);
+        })();
+        const bypassUnified = isSouthPinnedStrategic || isCenterNorthAutoimpiegoPinnedStrategic;
 
         // Override legacy flags with unified results if available (bypassed for south pinned strategic)
         const overrideRegionOk = (useUnified && !bypassUnified) ? unifiedEval.dimensions.find(d => d.dimension === 'territory')?.compatible ?? regionOk : regionOk;
@@ -4790,6 +5054,7 @@ export async function POST(req: Request) {
           budgetTotal: parseMoneyValue(sanitizedEconomicOffer?.costMax) ?? parseMoneyValue(sanitizedEconomicOffer?.grantMax) ?? economic.budgetTotal,
           economicOffer: sanitizedEconomicOffer,
           probabilityScore: (useUnified && !bypassUnified) ? unifiedEval.totalScore : Math.round(localScore * 100),
+          feasibilityScore: (useUnified && !bypassUnified) ? unifiedEval.feasibilityScore : 80,
           hardStatus: finalHardStatus,
           whyFit: finalMatchReasons,
           missingRequirements: finalMismatchFlags,
@@ -4797,7 +5062,7 @@ export async function POST(req: Request) {
         const hardEligibility = evaluateHardEligibility({
           result,
           profile: normalizedProfile,
-          strategicTitleTokens: [...CHAT_STRICT_STRATEGIC_TITLES, ...caseProfileResolution.pinnedStrategicTitles],
+          strategicTitleTokens: [...EXPERT_STRICT_STRATEGIC_TITLES, ...caseProfileResolution.pinnedStrategicTitles],
         });
 
         const finalRegionOk = (useUnified && !bypassUnified) ? overrideRegionOk : regionOk;
@@ -4840,6 +5105,7 @@ export async function POST(req: Request) {
       if (!entry.economicReliable) acc.economicReliability = (acc.economicReliability ?? 0) + 1;
       return acc;
     }, {});
+    const excludedHardCount = mapped.filter((entry) => !entry.hardEligibilityPassed || entry.result.hardStatus === 'not_eligible').length;
     const openAndRegionStrict = mapped.filter(
       (x) =>
         x.isOpen &&
@@ -5012,11 +5278,11 @@ export async function POST(req: Request) {
       ...southYouthStartupPriorityRules(southYouthStartupProfile),
     ];
     const sortedBase = dedupeCandidatesByTitle(sortCandidatesForDisplay(candidates, pinnedStrategicTitlesUnique, profilePriorityRules));
-    const chatStrictEnabled = channel === 'chat' && strictness === 'high';
-    const strictSorted = chatStrictEnabled ? applyChatStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
+    const expertStrictEnabled = strictness === 'high';
+    const strictSorted = expertStrictEnabled ? applyExpertStrictCandidateFilter(sortedBase, strictContext) : sortedBase;
     const targetAmount = requestedContribution ?? budget ?? null;
-    const precisionSorted = chatStrictEnabled
-      ? applyChatPrecisionPolicy({
+    const precisionSorted = expertStrictEnabled
+      ? applyExpertPrecisionPolicy({
           candidates: strictSorted,
           context: strictContext,
           contributionPreference,
@@ -5025,7 +5291,7 @@ export async function POST(req: Request) {
           profilePriorityRules,
         })
       : strictSorted;
-    const sortedBasePool = chatStrictEnabled ? (precisionSorted.length > 0 ? precisionSorted : strictSorted) : strictSorted;
+    const sortedBasePool = expertStrictEnabled ? (precisionSorted.length > 0 ? precisionSorted : strictSorted) : strictSorted;
     const strategicRecallPool: Candidate[] = southYouthStartupProfile
       ? mapped
           .filter(
@@ -5050,7 +5316,13 @@ export async function POST(req: Request) {
         })
       : sortedBasePool;
 
-    const qualityThreshold = southYouthStartupProfile ? 0.35 : 0.56;
+    const centerNorthAutoimpiegoPriority = pinnedStrategicTitlesUnique.some((entry) =>
+      normalizeForMatch(entry).includes('autoimpiego centro nord'),
+    );
+    const pidnextPriority = pinnedStrategicTitlesUnique.some((entry) =>
+      PIDNEXT_TITLE_HINTS.some((hint) => normalizeForMatch(entry).includes(normalizeForMatch(hint))),
+    );
+    const qualityThreshold = southYouthStartupProfile ? 0.35 : centerNorthAutoimpiegoPriority ? 0.46 : pidnextPriority ? 0.5 : 0.56;
     const pickFrom = (pool: Candidate[]) => {
       return pool.filter((x) => x.result.score >= qualityThreshold && x.result.hardStatus !== 'not_eligible').slice(0, limit);
     };
@@ -5107,6 +5379,42 @@ export async function POST(req: Request) {
       }
     }
 
+    if (pickedCandidates.length === 0 && pinnedStrategicTitlesUnique.length > 0) {
+      const pinnedFallback = sorted.filter((candidate) => {
+        if (candidate.result.hardStatus === 'not_eligible') return false;
+        const titleNorm = normalizeForMatch(candidate.result.title);
+        return pinnedStrategicTitlesUnique.some((entry) => titleNorm.includes(normalizeForMatch(entry)));
+      });
+      if (pinnedFallback.length > 0) {
+        pickedCandidates = pinnedFallback.slice(0, limit);
+      }
+    }
+
+    const pickedIds = new Set(pickedCandidates.map((entry) => entry.result.id));
+    const nearMissPoolBase = sorted.filter((candidate) => {
+      if (pickedIds.has(candidate.result.id)) return false;
+      if (candidate.result.hardStatus === 'not_eligible') return false;
+
+      const score = candidate.result.score ?? candidate.result.matchScore ?? 0;
+      const borderlineScore = score >= Math.max(0.3, qualityThreshold - 0.18) && score < qualityThreshold;
+      const strictContributionMiss = contributionPrefInfo.strict && !candidate.contributionMatched && score >= 0.4;
+      const uncertainEligibility = candidate.result.hardStatus === 'unknown' && score >= 0.4;
+
+      return borderlineScore || strictContributionMiss || uncertainEligibility;
+    });
+
+    const nearMissCandidates = expertStrictEnabled
+      ? filterNearMissesForChat({
+          nearMisses: nearMissPoolBase,
+          context: strictContext,
+          contributionPreference,
+          targetAmount,
+          limit,
+          pinnedStrategicTitles: pinnedStrategicTitlesUnique,
+          profilePriorityRules,
+        })
+      : nearMissPoolBase.slice(0, Math.min(limit, 6));
+
     const items = pickedCandidates.map((c) => c.result);
     const itemsWithBooking = items.map((item) => ({
       ...item,
@@ -5116,7 +5424,19 @@ export async function POST(req: Request) {
         sector,
       }),
     }));
-    const topScore = itemsWithBooking[0]?.matchScore ?? null;
+    const nearMissesWithBooking = nearMissCandidates.map((candidate) => ({
+      ...candidate.result,
+      bookingUrl: buildBookingUrl(bookingBase, {
+        bandoId: candidate.result.id,
+        region,
+        sector,
+      }),
+    }));
+    const finalLocalDocsLookup = userRegionCanonical ? await getLocalDocsLookup().catch(() => null) : null;
+    const itemsRegionSafe = applyUserRegionHardFilter(itemsWithBooking, userRegionCanonical, finalLocalDocsLookup);
+    const nearMissesRegionSafe = applyUserRegionHardFilter(nearMissesWithBooking, userRegionCanonical, finalLocalDocsLookup);
+
+    const topScore = itemsRegionSafe[0]?.matchScore ?? null;
     const qualityBand = qualityBandFromScore(topScore);
     const refineQuestion = buildRefineQuestion({
       region,
@@ -5126,10 +5446,10 @@ export async function POST(req: Request) {
       budget,
       requestedContribution,
       topScore,
-      resultsCount: items.length
+      resultsCount: itemsRegionSafe.length
     });
 
-    const topPickBandoId = itemsWithBooking[0]?.id ?? null;
+    const topPickBandoId = itemsRegionSafe[0]?.id ?? null;
     const bookingUrl = buildBookingUrl(bookingBase, {
       bandoId: topPickBandoId,
       region,
@@ -5143,26 +5463,40 @@ export async function POST(req: Request) {
     const fitEngineResult = runUnifiedPipeline({
       profile: normalizedProfile,
       grants: items as unknown as IncentiviDoc[],
-      options: { channel: 'chat', strictness: 'high', maxResults: 8 },
+      options: { channel: 'scanner', strictness: 'high', maxResults: 8 },
     });
     const actionPlan = composeActionPlan(fitEngineResult, normalizedProfile);
+    const explanationBase = buildExplanation({
+      region,
+      sector,
+      fundingGoal,
+      contributionPreference,
+      strictPreferenceLabel: contributionPrefInfo.label,
+      strictPreferenceRequested: contributionPrefInfo.strict,
+      strictMatchesFound,
+      resultsCount: itemsWithBooking.length
+    });
+    const explanation =
+      itemsRegionSafe.length === 0 && nearMissesRegionSafe.length > 0
+        ? `${explanationBase} Ti mostro opportunità vicine che possono diventare idonee con pochi aggiustamenti del profilo.`
+        : explanationBase;
 
     return NextResponse.json({
       phase: mode,
       matchingVersion,
+      engineVersion,
+      profileHash,
       profilePriorityApplied,
-      explanation: buildExplanation({
-        region,
-        sector,
-        fundingGoal,
-        contributionPreference,
-        strictPreferenceLabel: contributionPrefInfo.label,
-        strictPreferenceRequested: contributionPrefInfo.strict,
-        strictMatchesFound,
-        resultsCount: itemsWithBooking.length
-      }),
-      results: itemsWithBooking,
-      nearMisses: [],
+      datasetVersion: datasetHealth.datasetVersion,
+      datasetFreshnessHours: datasetHealth.datasetFreshnessHours,
+      coverageStatus: datasetHealth.coverageStatus,
+      universeCount,
+      consideredCount: mapped.length,
+      excludedHardCount,
+      decisionProfileMeta,
+      explanation,
+      results: itemsRegionSafe,
+      nearMisses: nearMissesRegionSafe,
       qualityBand,
       refineQuestion: finalRefineQuestion ?? undefined,
       strategicAdvice: advice.strategicAdvice ?? undefined,
@@ -5170,8 +5504,18 @@ export async function POST(req: Request) {
       topPickBandoId,
       bookingUrl,
       actionPlan: {
-        strongFits: actionPlan.strongFits.map(f => ({ title: f.title, strengths: f.explanation.strengths })),
-        possibleFits: actionPlan.possibleFits.map(f => ({ title: f.title, caveats: f.explanation.caveats })),
+        strongFits: actionPlan.strongFits.map(f => ({ 
+          title: f.title, 
+          strengths: f.explanation.strengths,
+          feasibility: f.explanation.feasibilityScore,
+          expertTips: f.explanation.alerts.filter(a => a.type === 'expert').map(a => a.message)
+        })),
+        possibleFits: actionPlan.possibleFits.map(f => ({ 
+          title: f.title, 
+          caveats: f.explanation.caveats,
+          feasibility: f.explanation.feasibilityScore,
+          expertTips: f.explanation.alerts.filter(a => a.type === 'expert').map(a => a.message)
+        })),
         excluded: actionPlan.excluded.map(f => ({ title: f.title, reason: f.exclusionReason })),
         nextActions: actionPlan.nextActions,
         profileCompleteness: actionPlan.gapAnalysis.completenessScore,

@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 
@@ -50,10 +50,13 @@ export async function loginAction(formData: FormData) {
       ? await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle()
       : await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
-    if (signedProfile?.role && hasOpsAccess(signedProfile.role)) {
+    if (signedProfile?.role && hasAdminAccess(signedProfile.role)) {
       redirect('/admin');
+    }
+    if (signedProfile?.role && hasConsultantAccess(signedProfile.role)) {
+      redirect('/consultant');
     }
   }
 
-  redirect('/dashboard');
+  redirect('/dashboard/pratiche');
 }

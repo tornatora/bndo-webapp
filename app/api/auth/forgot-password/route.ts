@@ -10,8 +10,20 @@ const ForgotPasswordSchema = z.object({
   email: z.string().trim().email().max(160)
 });
 
-function redirectWithMessage(key: 'error' | 'success', message: string) {
-  const url = buildAbsoluteUrl(APP_URL, '/forgot-password');
+function redirectWithMessage(request: NextRequest, key: 'error' | 'success', message: string) {
+  const requestHost = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  ).split(',')[0].trim().toLowerCase();
+  
+  const isPreview =
+    requestHost.endsWith('.netlify.app') ||
+    requestHost.startsWith('localhost') ||
+    requestHost.startsWith('127.0.0.1');
+
+  const targetBaseUrl = isPreview ? request.nextUrl.origin : APP_URL;
+  const url = buildAbsoluteUrl(targetBaseUrl, '/forgot-password');
   url.searchParams.set(key, message);
   return NextResponse.redirect(url, { status: 303 });
 }
@@ -36,7 +48,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (!parsed.success) {
-    return redirectWithMessage('error', 'Inserisci una email valida.');
+    return redirectWithMessage(request, 'error', 'Inserisci una email valida.');
   }
 
   if (mode === 'admin' || requestHost === adminHost) {
@@ -66,14 +78,25 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createClient();
-  const redirectTo = buildAbsoluteUrl(APP_URL, '/reset-password').toString();
+  const requestHostForRedirect = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  ).split(',')[0].trim().toLowerCase();
+  const isPreviewForRedirect =
+    requestHostForRedirect.endsWith('.netlify.app') ||
+    requestHostForRedirect.startsWith('localhost') ||
+    requestHostForRedirect.startsWith('127.0.0.1');
+  const targetBaseUrl = isPreviewForRedirect ? request.nextUrl.origin : APP_URL;
+
+  const redirectTo = buildAbsoluteUrl(targetBaseUrl, '/reset-password').toString();
   const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
     redirectTo
   });
 
   if (error) {
-    return redirectWithMessage('error', 'Impossibile inviare la mail di recupero. Riprova.');
+    return redirectWithMessage(request, 'error', 'Impossibile inviare la mail di recupero. Riprova.');
   }
 
-  return redirectWithMessage('success', 'Email inviata. Controlla inbox e spam per il link di reset.');
+  return redirectWithMessage(request, 'success', 'Email inviata. Controlla inbox e spam per il link di reset.');
 }

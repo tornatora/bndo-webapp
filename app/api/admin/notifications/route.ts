@@ -67,7 +67,7 @@ export async function GET(request: Request) {
   const messages = (recentMessages ?? []) as unknown as MessageRow[];
   const threadIds = [...new Set(messages.map((m) => m.thread_id))];
 
-  const [{ data: participants, error: participantError }, { data: threads, error: threadsError }] = await Promise.all([
+  const [{ data: participants, error: participantError }, { data: threads, error: threadsError }, { data: adminNotifications, error: adminErr }] = await Promise.all([
     threadIds.length
       ? db
           .from('consultant_thread_participants')
@@ -77,11 +77,18 @@ export async function GET(request: Request) {
       : Promise.resolve({ data: [] as ParticipantRow[], error: null }),
     threadIds.length
       ? db.from('consultant_threads').select('id, company_id, companies(name)').in('id', threadIds)
-      : Promise.resolve({ data: [] as ThreadRow[], error: null })
+      : Promise.resolve({ data: [] as ThreadRow[], error: null }),
+    db
+      .from('admin_notifications')
+      .select('id, type, title, body, entity_id, created_at')
+      .is('read_at', null)
+      .order('created_at', { ascending: false })
+      .limit(limit)
   ]);
 
   if (participantError) return NextResponse.json({ error: participantError.message }, { status: 500 });
   if (threadsError) return NextResponse.json({ error: threadsError.message }, { status: 500 });
+  if (adminErr) return NextResponse.json({ error: adminErr.message }, { status: 500 });
 
   const lastReadByThread = new Map<string, string>();
   for (const p of (participants ?? []) as unknown as ParticipantRow[]) lastReadByThread.set(p.thread_id, p.last_read_at);
@@ -89,7 +96,20 @@ export async function GET(request: Request) {
   const threadById = new Map<string, ThreadRow>();
   for (const t of (threads ?? []) as unknown as ThreadRow[]) threadById.set(t.id, t);
 
-  const items: Array<{ id: string; threadId: string; companyId: string; title: string; body: string; createdAt: string }> = [];
+  const items: Array<{ id: string; type: string; threadId?: string; companyId?: string; entityId?: string; title: string; body: string; createdAt: string }> = [];
+  
+  // Add direct admin notifications
+  for (const an of adminNotifications ?? []) {
+    items.push({
+      id: an.id,
+      type: an.type,
+      entityId: an.entity_id ?? undefined,
+      title: an.title,
+      body: an.body,
+      createdAt: an.created_at
+    });
+  }
+
   const seenThread = new Set<string>();
 
   for (const m of messages) {
@@ -105,6 +125,7 @@ export async function GET(request: Request) {
 
     items.push({
       id: m.id,
+      type: 'message',
       threadId: m.thread_id,
       companyId: thread.company_id,
       title: `${companyNameFromThread(thread)} ti ha inviato un messaggio`,
@@ -112,8 +133,10 @@ export async function GET(request: Request) {
       createdAt: m.created_at
     });
     seenThread.add(m.thread_id);
-    if (items.length >= limit) break;
   }
 
-  return NextResponse.json({ ok: true, count: items.length, items }, { status: 200 });
+  // Sort by date and limit
+  const sorted = items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, limit);
+
+  return NextResponse.json({ ok: true, count: sorted.length, items: sorted }, { status: 200 });
 }

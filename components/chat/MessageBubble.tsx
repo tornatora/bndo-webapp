@@ -1,8 +1,8 @@
-'use client';
+import { memo } from 'react';
 
 export type ChatRole = 'user' | 'assistant';
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   role,
   body,
   footer,
@@ -16,10 +16,10 @@ export function MessageBubble({
   return (
     <div className={`msg-row ${role}`}>
       <div className="msg-bubble">
-        {body ? <div>{body}</div> : null}
+        {body !== undefined ? <div>{body}</div> : null}
         {children}
       </div>
       {footer ? <div className="msg-footer">{footer}</div> : null}
     </div>
   );
-}
+});

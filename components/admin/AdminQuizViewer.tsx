@@ -93,7 +93,12 @@ export function AdminQuizViewer({
         typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean'
           ? String(raw)
           : JSON.stringify(raw);
-      out.push({ key, question: key, answer });
+      const labelByKey: Record<string, string> = {
+        _blocked_question: 'Punto di stop (domanda)',
+        _blocked_from_step: 'Punto di stop (step)',
+        _captured_after_question: 'Contatti raccolti dopo'
+      };
+      out.push({ key, question: labelByKey[key] ?? key, answer });
     }
 
     return out;
@@ -166,7 +171,9 @@ export function AdminQuizViewer({
           {data ? (
             <>
               <div className="admin-quiz-meta">
-                <span className="meta-tag">Compilato: {new Date(data.created_at).toLocaleString('it-IT')}</span>
+                <span className="meta-tag">
+                  Compilato: {new Date(data.created_at).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}
+                </span>
                 <span className={`meta-tag ${data.eligibility === 'eligible' ? 'tag-ok' : 'tag-warn'}`}>
                   Esito: {data.eligibility === 'eligible' ? 'Idoneo' : 'Non idoneo'}
                 </span>

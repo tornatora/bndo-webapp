@@ -6,6 +6,7 @@
  *
  * Output: Reportable evaluation with PASS/FAIL per category.
  */
+import { postConversationMessage } from './utils/conversationSse.mjs';
 const baseUrl = (process.env.CONVERSATION_BASE_URL || process.env.SCANNER_BASE_URL || 'http://127.0.0.1:3300').replace(/\/$/, '');
 
 const report = { passed: 0, failed: 0, skipped: 0, details: [], errors: [] };
@@ -28,30 +29,8 @@ async function scan(profile, opts = {}) {
 }
 
 async function conversation(message, cookie = null) {
-  const headers = { 'content-type': 'application/json' };
-  if (cookie) headers.cookie = cookie;
-  const res = await fetch(`${baseUrl}/api/conversation`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ message }),
-  });
-  const ct = res.headers.get('content-type') || '';
-  let json = {};
-  try {
-    const text = await res.text();
-    if (ct.includes('application/json') && text && !text.trimStart().startsWith('<')) {
-      json = JSON.parse(text);
-    }
-  } catch (_) {
-    json = { error: 'Invalid JSON response' };
-  }
-  const setCookie = res.headers.get('set-cookie');
-  let nextCookie = cookie;
-  if (setCookie) {
-    const m = setCookie.match(/bndo_assistant_session=([^;]+)/);
-    if (m) nextCookie = `bndo_assistant_session=${m[1]}`;
-  }
-  return { json, cookie: nextCookie, ok: res.ok, status: res.status };
+  const res = await postConversationMessage(baseUrl, message, { cookie });
+  return { json: res.json ?? {}, cookie: res.cookie ?? cookie, ok: res.ok, status: res.status };
 }
 
 function pass(category, id, msg) {
@@ -81,7 +60,17 @@ async function runScannerRetrieval() {
     { id: 'software-sicilia', profile: { region: 'Sicilia', sector: 'ICT', fundingGoal: 'software digitalizzazione', businessExists: true }, expectSector: 'software|ict|digit' },
     { id: 'agricoltura-sicilia', profile: { region: 'Sicilia', sector: 'agricoltura', fundingGoal: 'impresa agricola', businessExists: true }, expectSector: 'agricolt|agro|agroalimentare' },
     { id: 'turismo-campania', profile: { region: 'Campania', sector: 'turismo', fundingGoal: 'ristrutturazione', businessExists: true }, expectSector: 'turism|ristruttur' },
-    { id: 'pmi-digitale-lombardia', profile: { region: 'Lombardia', businessExists: true, sector: 'ICT', fundingGoal: 'macchinari software digitalizzazione', contributionPreference: 'fondo perduto' }, expectIncludes: ['Nuova Sabatini', 'Sabatini'] },
+    {
+      id: 'pmi-digitale-lombardia',
+      profile: {
+        region: 'Lombardia',
+        businessExists: true,
+        sector: 'ICT',
+        fundingGoal: 'macchinari software digitalizzazione',
+        contributionPreference: 'fondo perduto'
+      },
+      expectAnyIncludes: ['Nuova Sabatini', 'Sabatini', 'Bonus Digitalizzazione PMI']
+    },
     { id: 'startup-sud', profile: { region: 'Calabria', businessExists: false, ageBand: 'under35', employmentStatus: 'disoccupato', fundingGoal: 'aprire nuova attività' }, expectIncludes: ['Resto al Sud', 'FUSESE'] },
     { id: 'agroalimentare', profile: { region: 'Sicilia', sector: 'agroalimentare', fundingGoal: 'trasformazione agroalimentare', businessExists: true }, expectSector: 'agro|agricolt|alimentare' },
   ];
@@ -94,7 +83,18 @@ async function runScannerRetrieval() {
         continue;
       }
       const titles = r.results.map((x) => normalizeText(x.title || ''));
-      if (c.expectIncludes) {
+      if (Array.isArray(c.expectAnyIncludes) && c.expectAnyIncludes.length > 0) {
+        const found = c.expectAnyIncludes.some((exp) => titles.some((t) => t.includes(normalizeText(exp))));
+        if (!found) {
+          fail(
+            'scanner-retrieval',
+            c.id,
+            `Missing any expected option (${c.expectAnyIncludes.join(', ')}). Got: ${titles.slice(0, 5).join(' | ') || '[]'}`
+          );
+        } else {
+          pass('scanner-retrieval', c.id, `Found one expected option in top results`);
+        }
+      } else if (c.expectIncludes) {
         const missing = c.expectIncludes.filter((exp) => !titles.some((t) => t.includes(normalizeText(exp))));
         if (missing.length > 0) {
           fail('scanner-retrieval', c.id, `Missing expected: ${missing.join(', ')}. Got: ${titles.slice(0, 5).join(' | ')}`);

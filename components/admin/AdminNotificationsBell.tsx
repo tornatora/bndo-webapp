@@ -6,7 +6,7 @@ import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/re
 
 export function AdminNotificationsBell() {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Array<{ id: string; threadId: string; companyId: string; title: string; body: string; createdAt: string }>>([]);
+  const [items, setItems] = useState<Array<{ id: string; type: string; threadId?: string; companyId?: string; entityId?: string; title: string; body: string; createdAt: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,6 +73,10 @@ export function AdminNotificationsBell() {
             if (refreshTimer.current) clearTimeout(refreshTimer.current);
             refreshTimer.current = setTimeout(() => void refresh(true), 250);
           })
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'admin_notifications' }, () => {
+            if (refreshTimer.current) clearTimeout(refreshTimer.current);
+            refreshTimer.current = setTimeout(() => void refresh(true), 250);
+          })
           .subscribe(),
       'admin notifications'
     );
@@ -113,8 +117,22 @@ export function AdminNotificationsBell() {
 
   async function onOpen(item: (typeof items)[number]) {
     setOpen(false);
-    // Mark-as-read is handled when admin opens the client chat (ChatPanel marks read on mount).
-    window.location.href = `/admin/clients/${item.companyId}?tab=chat`;
+    if (item.type === 'message') {
+      window.location.href = `/admin/clients/${item.companyId}?tab=chat`;
+    } else if (item.type === 'quiz_submission') {
+      const qs = item.entityId ? `?submission_id=${encodeURIComponent(item.entityId)}` : '';
+      window.location.href = `/admin/quiz-responses${qs}`;
+    } else if (item.type === 'system' && item.entityId?.includes(':')) {
+      const [companyId, applicationId] = item.entityId.split(':');
+      if (companyId && applicationId) {
+        window.location.href = `/admin/clients/${companyId}?tab=practice:${applicationId}`;
+        return;
+      }
+      window.location.href = `/admin`;
+    } else {
+      // generic or system
+      window.location.href = `/admin`;
+    }
   }
 
   return (
@@ -161,7 +179,10 @@ export function AdminNotificationsBell() {
                 style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
                 onClick={() => void onOpen(it)}
               >
-                <div className="notification-title">💬 {it.title}</div>
+                <div className="notification-title">
+                  {it.type === 'message' ? '💬 ' : '🧩 '}
+                  {it.title}
+                </div>
                 <div className="notification-message">{it.body}</div>
                 <div className="notification-time">{new Date(it.createdAt).toLocaleString('it-IT')}</div>
               </button>

@@ -3,7 +3,8 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useMemo, useState, useRef, useEffect, memo, type MouseEvent } from 'react';
+import { LogOut, User, ChevronDown } from 'lucide-react';
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import {
   buildLogoutPath,
@@ -20,7 +21,7 @@ type DashboardShellClientProps = {
   viewerProfileId: string;
 };
 
-function Icon({ name }: { name: DashboardShellItem['icon'] }) {
+const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) {
   const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', xmlns: 'http://www.w3.org/2000/svg' };
   const stroke = { stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 
@@ -58,19 +59,62 @@ function Icon({ name }: { name: DashboardShellItem['icon'] }) {
       </svg>
     );
   }
+  if (name === 'new_practice') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" {...stroke} />
+        <path {...stroke} d="M12 8v8M8 12h8" />
+      </svg>
+    );
+  }
+  if (name === 'catalogo_bandi') {
+    return (
+      <svg {...common}>
+        <path
+          {...stroke}
+          d="M12 20s-6.5-3.9-8.4-7.6C2.2 9.9 3.3 7 5.9 6.2A4.7 4.7 0 0 1 12 8.4a4.7 4.7 0 0 1 6.1-2.2c2.6.8 3.7 3.7 2.3 6.2C18.5 16.1 12 20 12 20Z"
+        />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <path {...stroke} d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
       <path {...stroke} d="M4.5 21a7.5 7.5 0 1 1 15 0" />
     </svg>
   );
-}
+});
 
 export function DashboardShellClient({ children, username, viewerProfileId }: DashboardShellClientProps) {
   const pathname = usePathname();
   const activeKey = resolveDashboardNavKey(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarUserMenuOpen, setSidebarUserMenuOpen] = useState(false);
+  const [topbarUserMenuOpen, setTopbarUserMenuOpen] = useState(false);
+  const [navReady, setNavReady] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const topbarMenuRef = useRef<HTMLDivElement>(null);
   const logoutUrl = buildLogoutPath(resolveAssistantHomeUrl());
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(() => {
+      setNavReady(true);
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event: any) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setSidebarUserMenuOpen(false);
+      }
+      if (topbarMenuRef.current && !topbarMenuRef.current.contains(event.target)) {
+        setTopbarUserMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
 
@@ -81,6 +125,40 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
       event.preventDefault();
     }
   };
+
+  const renderShellItem = (item: DashboardShellItem) =>
+    item.external ? (
+      <a key={item.key} className="sidebar-item" href={item.href} title={item.label}>
+        <span className="sidebar-ico" aria-hidden="true">
+          <Icon name={item.icon} />
+        </span>
+        {sidebarOpen ? (
+          <span className="sidebar-label">{item.label}</span>
+        ) : (
+          <span className="sidebar-tip" aria-hidden="true">
+            {item.label}
+          </span>
+        )}
+      </a>
+    ) : (
+      <Link
+        key={item.key}
+        className={`sidebar-item ${activeKey === item.key ? 'active' : ''}`}
+        href={item.href}
+        title={item.label}
+      >
+        <span className="sidebar-ico" aria-hidden="true">
+          <Icon name={item.icon} />
+        </span>
+        {sidebarOpen ? (
+          <span className="sidebar-label">{item.label}</span>
+        ) : (
+          <span className="sidebar-tip" aria-hidden="true">
+            {item.label}
+          </span>
+        )}
+      </Link>
+    );
 
   return (
     <div className={sidebarOpen ? 'bndo-shell with-sidebar sidebar-open dashboard-auth-shell' : 'bndo-shell with-sidebar dashboard-auth-shell'}>
@@ -99,41 +177,8 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
           </button>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Voci dashboard">
-          {items.map((item) =>
-            item.external ? (
-              <a key={item.key} className="sidebar-item" href={item.href} title={item.label}>
-                <span className="sidebar-ico" aria-hidden="true">
-                  <Icon name={item.icon} />
-                </span>
-                {sidebarOpen ? (
-                  <span className="sidebar-label">{item.label}</span>
-                ) : (
-                  <span className="sidebar-tip" aria-hidden="true">
-                    {item.label}
-                  </span>
-                )}
-              </a>
-            ) : (
-              <Link
-                key={item.key}
-                className={`sidebar-item ${activeKey === item.key ? 'active' : ''}`}
-                href={item.href}
-                title={item.label}
-              >
-                <span className="sidebar-ico" aria-hidden="true">
-                  <Icon name={item.icon} />
-                </span>
-                {sidebarOpen ? (
-                  <span className="sidebar-label">{item.label}</span>
-                ) : (
-                  <span className="sidebar-tip" aria-hidden="true">
-                    {item.label}
-                  </span>
-                )}
-              </Link>
-            )
-          )}
+        <nav className={navReady ? 'sidebar-nav sidebar-nav-ready' : 'sidebar-nav sidebar-nav-boot'} aria-label="Voci dashboard">
+          {items.map(renderShellItem)}
         </nav>
 
         <div className="sidebar-bottom">
@@ -145,19 +190,56 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
                 </span>
                 <div className="sidebar-user-meta">
                   <div className="sidebar-user-name">@{username}</div>
-                  <div className="sidebar-user-sub">Utente</div>
                 </div>
               </Link>
-              <a className="sidebar-logout-box" href={logoutUrl} onClick={onLogoutIntent}>
-                Logout
+              <a className="sidebar-user sidebar-logout-card" href={logoutUrl} onClick={onLogoutIntent}>
+                <span className="sidebar-avatar" aria-hidden="true">
+                  <LogOut size={16} />
+                </span>
+                <div className="sidebar-user-meta">
+                  <div className="sidebar-user-name">Logout</div>
+                  <div className="sidebar-user-sub">Esci dal tuo account</div>
+                </div>
               </a>
             </>
           ) : (
-            <Link className="sidebar-user sidebar-user-profile" href="/dashboard/profile" title="Apri profilo">
-              <span className="sidebar-avatar sidebar-avatar-link" data-tip="Profilo" aria-hidden="true">
-                B
-              </span>
-            </Link>
+            <div className="sidebar-user-container" ref={profileMenuRef}>
+              <button
+                type="button"
+                className={`sidebar-user sidebar-user-profile ${sidebarUserMenuOpen ? 'is-active' : ''}`}
+                title="Profilo & Logout"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSidebarUserMenuOpen(!sidebarUserMenuOpen);
+                }}
+              >
+                <span className="sidebar-avatar sidebar-avatar-link" aria-hidden="true">
+                  {username.charAt(0).toUpperCase()}
+                </span>
+                
+                {/* Logout shortcut on hover when sidebar is closed */}
+                {!sidebarUserMenuOpen && (
+                  <div className="sidebar-hover-logout">
+                    <a href={logoutUrl} onClick={onLogoutIntent} className="hover-logout-btn" title="Logout">
+                      <LogOut size={14} />
+                    </a>
+                  </div>
+                )}
+              </button>
+              {sidebarUserMenuOpen && (
+                <div className="sidebar-profile-dropdown">
+                  <div className="dropdown-header">@{username}</div>
+                  <Link href="/dashboard/profile" className="dropdown-item" onClick={() => setSidebarUserMenuOpen(false)}>
+                    <User className="h-4 w-4" />
+                    Profilo
+                  </Link>
+                  <a href={logoutUrl} className="dropdown-item is-logout" onClick={(e) => { setSidebarUserMenuOpen(false); onLogoutIntent(e); }}>
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </a>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </aside>
@@ -169,9 +251,36 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
           </a>
           <div className="nav-actions">
             <NotificationsBell viewerProfileId={viewerProfileId} />
-            <span className="nav-user" id="userName">
-              @{username}
-            </span>
+            <div className="nav-user-container" ref={topbarMenuRef}>
+              <button
+                type="button"
+                className={`nav-user-toggle ${topbarUserMenuOpen ? 'is-active' : ''}`}
+                id="userName"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setTopbarUserMenuOpen(!topbarUserMenuOpen);
+                }}
+              >
+                <span className="nav-user-avatar">
+                  {username.charAt(0).toUpperCase()}
+                </span>
+                <span className="nav-user-name">@{username}</span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${topbarUserMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {topbarUserMenuOpen && (
+                <div className="topbar-profile-dropdown">
+                  <div className="dropdown-header">Opzioni Account</div>
+                  <Link href="/dashboard/profile" className="dropdown-item" onClick={() => setTopbarUserMenuOpen(false)}>
+                    <User className="h-4 w-4" />
+                    Profilo
+                  </Link>
+                  <a href={logoutUrl} className="dropdown-item is-logout" onClick={(e) => { setTopbarUserMenuOpen(false); onLogoutIntent(e); }}>
+                    <LogOut className="h-4 w-4" />
+                    Esci (Logout)
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

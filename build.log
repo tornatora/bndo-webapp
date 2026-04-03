@@ -1,0 +1,117 @@
+
+> bndo-bandi-assistant@0.1.0 build
+> npm run clean && next build
+
+
+> bndo-bandi-assistant@0.1.0 clean
+> rm -rf .next
+
+  ▲ Next.js 14.2.35
+  - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+ ⚠ Using edge runtime on a page currently disables static generation for that page
+   Generating static pages (0/59) ...
+   Generating static pages (14/59) 
+   Generating static pages (29/59) 
+   Generating static pages (44/59) 
+ ✓ Generating static pages (59/59)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                   Size     First Load JS
+┌ ○ /                                         191 B           142 kB
+├ ○ /_not-found                               165 B          87.6 kB
+├ ƒ /admin                                    147 B           143 kB
+├ ƒ /admin/clients                            165 B          87.6 kB
+├ ƒ /admin/clients/[companyId]                13.8 kB         147 kB
+├ ƒ /admin/quiz-responses                     3.84 kB         128 kB
+├ ƒ /api/admin/applications/upload            0 B                0 B
+├ ƒ /api/admin/billing                        0 B                0 B
+├ ƒ /api/admin/billing/invoice-send           0 B                0 B
+├ ƒ /api/admin/billing/invoice-upload         0 B                0 B
+├ ƒ /api/admin/billing/payment-link           0 B                0 B
+├ ƒ /api/admin/client-info                    0 B                0 B
+├ ƒ /api/admin/client-summary                 0 B                0 B
+├ ƒ /api/admin/company-crm                    0 B                0 B
+├ ƒ /api/admin/document-reminder              0 B                0 B
+├ ƒ /api/admin/notifications                  0 B                0 B
+├ ƒ /api/admin/practice-progress              0 B                0 B
+├ ƒ /api/admin/quiz-answers                   0 B                0 B
+├ ƒ /api/admin/quiz-submissions               0 B                0 B
+├ ƒ /api/applications/upload                  0 B                0 B
+├ ƒ /api/auth/forgot-password                 0 B                0 B
+├ ƒ /api/auth/login                           0 B                0 B
+├ ƒ /api/auth/logout                          0 B                0 B
+├ ƒ /api/auth/register                        0 B                0 B
+├ ƒ /api/auth/session                         0 B                0 B
+├ ƒ /api/chat/mark-read                       0 B                0 B
+├ ƒ /api/chat/messages                        0 B                0 B
+├ ƒ /api/chat/sync                            0 B                0 B
+├ ƒ /api/chat/thread-context                  0 B                0 B
+├ ƒ /api/checkout                             0 B                0 B
+├ ƒ /api/conversation                         0 B                0 B
+├ ƒ /api/dashboard/applications-summary       0 B                0 B
+├ ƒ /api/dashboard/stats                      0 B                0 B
+├ ƒ /api/dev/provision                        0 B                0 B
+├ ƒ /api/dev/seed-client-data                 0 B                0 B
+├ ƒ /api/documents/signed-url                 0 B                0 B
+├ ƒ /api/grants/[id]                          0 B                0 B
+├ ƒ /api/grants/[id]/explainability           0 B                0 B
+├ ƒ /api/health                               0 B                0 B
+├ ƒ /api/jobs/refresh-bandi                   0 B                0 B
+├ ƒ /api/onboarding-credentials               0 B                0 B
+├ ƒ /api/onboarding/after-payment/complete    0 B                0 B
+├ ƒ /api/onboarding/complete                  0 B                0 B
+├ ƒ /api/onboarding/wizard-state              0 B                0 B
+├ ƒ /api/payments/attach-customer             0 B                0 B
+├ ƒ /api/payments/create-intent               0 B                0 B
+├ ƒ /api/payments/session-status              0 B                0 B
+├ ƒ /api/payments/start-practice              0 B                0 B
+├ ƒ /api/practices/[id]                       0 B                0 B
+├ ƒ /api/practices/flow/[applicationId]       0 B                0 B
+├ ƒ /api/practices/flow/[applicationId]/quiz  0 B                0 B
+├ ƒ /api/practices/flow/start                 0 B                0 B
+├ ƒ /api/practices/request                    0 B                0 B
+├ ƒ /api/practices/upload-document            0 B                0 B
+├ ƒ /api/profile/update                       0 B                0 B
+├ ƒ /api/quiz/submit                          0 B                0 B
+├ ƒ /api/scan-bandi                           0 B                0 B
+├ ƒ /api/stripe/checkout-session              0 B                0 B
+├ ƒ /api/stripe/webhook                       0 B                0 B
+├ ƒ /api/visura/parse                         0 B                0 B
+├ ƒ /checkout/success                         2.08 kB        89.5 kB
+├ ○ /cookie-policy                            198 B           101 kB
+├ ƒ /dashboard/[[...slug]]                    154 B           185 kB
+├ ○ /demo                                     193 B          96.3 kB
+├ ƒ /embed/landing                            0 B                0 B
+├ ƒ /forbidden                                193 B          96.3 kB
+├ ƒ /forgot-password                          196 B          96.3 kB
+├ ○ /gdpr                                     200 B           101 kB
+├ ƒ /grants/[id]                              183 B           142 kB
+├ ○ /landing                                  3.59 kB         105 kB
+├ ƒ /login                                    195 B          96.3 kB
+├ ƒ /onboarding                               9.53 kB         114 kB
+├ ƒ /onboarding/after-payment                 165 B          87.6 kB
+├ ƒ /payment/[grantSlug]                      3.75 kB        99.8 kB
+├ ƒ /payment/[grantSlug]/success              3.62 kB        96.2 kB
+├ ○ /privacy                                  198 B           101 kB
+├ ○ /quiz                                     165 B          87.6 kB
+├ ○ /quiz/autoimpiego                         8.82 kB         105 kB
+├ ƒ /register                                 193 B          96.3 kB
+├ ○ /reset-password                           1.75 kB         135 kB
+└ ○ /termini                                  200 B           101 kB
++ First Load JS shared by all                 87.4 kB
+  ├ chunks/2117-aa93f9232ff867a6.js           31.7 kB
+  ├ chunks/fd9d1056-e360b4dcde54000d.js       53.7 kB
+  └ other shared chunks (total)               2.04 kB
+
+
+ƒ Middleware                                  58.2 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

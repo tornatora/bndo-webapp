@@ -59,29 +59,35 @@ function detectRegionByDemonym(message: string): string | null {
  */
 function hasRegionNegation(message: string, regionNorm: string): boolean {
   const norm = normalizeForMatch(message);
-  // Look for negation tokens within ~3 words before the region name
-  const negations = ['non sono in', 'non siamo in', 'non opero in', 'non operiamo in',
-    'non ho sede in', 'non abbiamo sede in', 'non mi trovo in', 'non e in',
-    'non e a', 'fuori da', 'fuori dalla', 'escluso', 'esclusa', 'tranne',
-    'non', // generic: check proximity
+  
+  // Strong direct negative phrases encompassing region
+  const strongNegations = [
+    `non sono in ${regionNorm}`, `non siamo in ${regionNorm}`, 
+    `non opero in ${regionNorm}`, `non operiamo in ${regionNorm}`,
+    `non ho sede in ${regionNorm}`, `non abbiamo sede in ${regionNorm}`, 
+    `non mi trovo in ${regionNorm}`, `non e in ${regionNorm}`,
+    `non e a ${regionNorm}`, `fuori da ${regionNorm}`, 
+    `fuori dalla ${regionNorm}`, `fuori dal ${regionNorm}`,
+    `escluso ${regionNorm}`, `esclusa ${regionNorm}`, `tranne ${regionNorm}`,
+    `ad eccezione di ${regionNorm}`, `tutto tranne ${regionNorm}`,
+    `tranne in ${regionNorm}`, `escluso in ${regionNorm}`
   ];
-  // Simple approach: check if 'non' appears within 4 words of the region token
+
+  for (const pattern of strongNegations) {
+    if (norm.includes(pattern) || norm.includes(pattern.replace(/\s+/g, ''))) return true;
+  }
+
   const words = norm.split(/\s+/);
   const regionIdx = words.findIndex(w => w === regionNorm || regionNorm.startsWith(w));
   if (regionIdx === -1) return false;
   
-  // Check for specific negation phrases that involve this region
-  for (const pattern of ['non sono in', 'non siamo in', 'non opero in', 'non operiamo in',
-      'non ho sede in', 'non abbiamo sede in', 'non mi trovo in', 'escluso da',
-      'fuori dalla regione', 'fuori da']) {
-    if (norm.includes(pattern + ' ' + regionNorm) || norm.includes(pattern + ' ' + regionNorm.split(' ')[0])) {
-      return true;
-    }
-  }
-  
   // Check if 'non' is within 3 words before the region
   const nonIdx = words.lastIndexOf('non', regionIdx);
   if (nonIdx !== -1 && regionIdx - nonIdx <= 3) {
+    // Make sure it's not a positive reinforcement like "non credo ci siano problemi per la calabria" 
+    // Usually a "non" close to a region implies "I am not in" unless there's a strong context of "non solo"
+    const between = words.slice(nonIdx, regionIdx).join(' ');
+    if (between.includes('solo')) return false; // "non solo in calabria" -> means YES
     return true;
   }
   
@@ -95,7 +101,21 @@ export function detectRegionSignal(message: string): RegionSignal | null {
     if (` ${norm} `.includes(` ${rn} `)) {
       // Check for negation before confirming
       if (hasRegionNegation(message, rn)) return null;
-      return { region: r, source: 'explicit' };
+
+      // PROACTIVE FIX: if user says "in [Region]", "a [Region]", "sede in [Region]", 
+      // we are highly confident and don't need confirmation.
+      const confidencePatterns = [
+        `in ${rn}`, `a ${rn}`, `nella ${rn}`, `nelle ${rn}`, 
+        `sede a ${rn}`, `sede in ${rn}`, `operiamo in ${rn}`, `operiamo a ${rn}`,
+        `comune di ${rn}`, `provincia di ${rn}`
+      ];
+      const isVeryConfident = confidencePatterns.some(p => norm.includes(p)) || norm === rn;
+
+      return { 
+        region: r, 
+        source: 'explicit',
+        isHighConfidence: isVeryConfident
+      } as any; // Cast as any since we are adding a temporary flag for the extractor bridge
     }
   }
   const demonymRegion = detectRegionByDemonym(message);
@@ -152,16 +172,22 @@ export function parseRegionAndMunicipality(message: string): { region: string | 
 export function parseBudgetEUR(message: string): number | null {
   const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
   if (!lowered) return null;
+  // Anti-collision with age
   if (/\b\d{1,3}\s+anni\b/.test(lowered) || /\beta(?:')?\s*(?:di)?\s*\d{1,3}\b/.test(lowered)) return null;
+  // Anti-collision with turnover (handled separately to avoid stealing budget)
+  if (/(fatturat|ricavi|volume|vendit)/.test(lowered)) return null;
+
   const m = lowered.match(/(\d+(?:[.,]\d+)?)(?:\s*)(k|m|mila|milioni|milione)?/i);
   if (!m) return null;
   const rawNum = m[1]!.replace(/\./g, '').replace(',', '.');
   const base = Number.parseFloat(rawNum);
   if (!Number.isFinite(base) || base < 0) return null;
+
   const hasBudgetSignal =
-    /\b(budget|investiment|spesa|fatturat|ricav|euro|eur|contribut|finanziament|importo|capitale)\b/.test(lowered) ||
+    /\b(budget|investiment|spesa|euro|eur|contribut|finanziament|importo|capitale|progetto|serve|servono|costo|costa)\b/.test(lowered) ||
     /\b\d+\s*(k|m|mila|milioni|milione)\b/.test(lowered) ||
-    (/^\s*\d+(?:[.,]\d+)?\s*$/.test(lowered) && base >= 1000);
+    (/^\s*\d+(?:[.,]\d+)?\s*$/.test(lowered) && base >= 1000); // 1000+ as pure number is likely budget
+
   if (!hasBudgetSignal) return null;
   const mult = (m[2] ?? '').toLowerCase();
   if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
@@ -199,10 +225,17 @@ export function parseBusinessExistsFromMessage(message: string): boolean | null 
 
 export function parseAge(message: string): number | null {
   const lowered = message.toLowerCase();
+  
+  // Anti-collision with business foundation age (e.g. "l'azienda ha 25 anni")
+  const isBusinessAgeContext = /(azienda|societ|ditta|impresa|attivita|negozio|aperta da|esiste da)\s+(?:ha\s+)?(?:\d{1,3})\s+anni/i.test(lowered);
+  if (isBusinessAgeContext) return null;
+
   const match =
-    lowered.match(/\bho\s+(\d{2})\s+anni\b/) ??
+    lowered.match(/\b(?:io\s+)?(?:ho\s+)(\d{2})\s+anni\b/) ??
     lowered.match(/\b(\d{2})\s+anni\b/) ??
-    lowered.match(/\beta(?:')?\s*(?:di)?\s*(\d{2})\b/);
+    lowered.match(/\bet[aà](?:')?\s*(?:di)?\s*(\d{2})\b/) ??
+    lowered.match(/\b(\d{2})\s+enne\b/);
+    
   if (!match?.[1]) return null;
   const age = Number.parseInt(match[1], 10);
   if (!Number.isFinite(age) || age < 16 || age > 100) return null;
@@ -238,7 +271,8 @@ export function parseLegalForm(message: string): string | null {
   if (/\bsnc\b/.test(n)) return 'SNC';
   if (/\bsas\b/.test(n)) return 'SAS';
   if (/\bcooperativ/.test(n)) return 'Cooperativa';
-  if (/\bditta individuale\b/.test(n)) return 'Ditta individuale';
+  if (/\bditta individuale\b|\bindividuale\b|\bditta\b/.test(n)) return 'Ditta individuale';
+  if (/\blibero professionista\b|\bprofessionista\b|\bpartita iva\b/.test(n)) return 'Libero Professionista';
   return null;
 }
 
@@ -311,18 +345,18 @@ export function extractSectorFromMessage(message: string): string | null {
 
 export function extractFundingGoalFromMessage(message: string): string | null {
   const raw = message.trim();
-  if (raw.length < 8) return null;
+  if (raw.length < 3) return null;
   const n = normalizeForMatch(raw);
-  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta)\b/.test(n);
+  const hasConcreteSignal = /\b(macchinar|software|digitalizz|attrezzatur|impiant|ristruttur|assunzion|marketing|ecommerce|sito web|negozio|laboratorio|arredi|mezzi|furgon|veicol|autoimpiego|startup|agricol|agriturism|fotovolta|liquidit|stipendi|affitto|bollette|scorte|materie prime|utenze)\b/.test(n);
   const humanConsultantOnly = /\b(consulen|persona|umano|ricontatt|richiam|farmi chiam|telefon|parlare con)\b/.test(n) && !hasConcreteSignal;
   if (humanConsultantOnly) return null;
-  const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco'];
+  const triggers = ['voglio', 'vorrei', 'mi serve', 'mi servono', 'devo', 'necessito', 'obiettivo', 'finanziare', 'acquistare', 'cercando', 'cerco', 'sia', 'siano'];
   const hit = triggers.find((t) => n.includes(t));
   if (hit) {
     const after = raw.slice(Math.max(0, raw.toLowerCase().indexOf(hit.split(' ')[0] ?? hit) + (hit.split(' ')[0] ?? hit).length));
     const cleaned = after.replace(/^[:\-–—\s]+/, '').trim();
     const isGenericFinancialTerm = /^(bando|bandi|contributo|contributi|fondo perduto|finanziamento|finanziamenti|agevolazione|agevolazioni|incentivo|incentivi|misura|misure)$/i.test(cleaned);
-    if (cleaned.length > 5 && !isGenericFinancialTerm) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
+    if (cleaned.length >= 3 && !isGenericFinancialTerm) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
   const prefixMatch = n.match(/^(bando|bandi|contributo|contributi|agevolazione|agevolazioni|finanziamento|finanziamenti)\s+(per|su)\s+/);
   if (prefixMatch) {
@@ -331,6 +365,67 @@ export function extractFundingGoalFromMessage(message: string): string | null {
     if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
   if (hasConcreteSignal && raw.split(' ').length >= 3) return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
+  return null;
+}
+
+export function parseFoundationYear(message: string): number | null {
+  const norm = normalizeForMatch(message);
+  if (!norm) return null;
+  
+  const currentYear = new Date().getFullYear();
+
+  // Look for year patterns: 19XX or 20XX
+  // Context: "nata nel 2020", "fondata nel 1995", "dal 2018"
+  const yearMatch = message.match(/\b(19|20)\d{2}\b/);
+  if (yearMatch) {
+      const year = parseInt(yearMatch[0], 10);
+      if (year > 1900 && year <= currentYear) {
+        // Check for "seniority" context to avoid false positives 
+        const hasContext = /(fondat|nat|costituit|aperta|aperto|attiv|iscrizion|registro|dal\s+(19|20)\d{2}|anno\s+(19|20)\d{2}|creata)/i.test(norm);
+        if (hasContext || year < currentYear - 100) return year; // 100 years old is definitively a company, not a founder
+      }
+  }
+
+  // Handle "l'azienda ha 5 anni" 
+  const relativeAgeMatch = message.match(/(?:azienda|societ|ditta|impresa|attivita|negozio)\s+(?:ha\s+)?(\d{1,3})\s+anni/i);
+  if (relativeAgeMatch) {
+      const yearsAgo = parseInt(relativeAgeMatch[1], 10);
+      return Math.max(1900, currentYear - yearsAgo);
+  }
+  
+  return null;
+}
+
+export function parseAnnualTurnover(message: string): number | null {
+  const norm = normalizeForMatch(message);
+  if (!norm) return null;
+  // Look for turnover keywords: fatturato, ricavi, volume d'affari
+  const hasTurnoverContext = /(fatturat|ricav|volume d affari|fatturiam|incass|bilanci)/.test(norm);
+  if (!hasTurnoverContext) return null;
+  
+  const lowered = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  const m = lowered.match(/(\d+(?:[.,]\d+)?)(?:\s*)(k|m|mila|milioni|milione)?/i);
+  if (!m) return null;
+  
+  const rawNum = m[1]!.replace(/\./g, '').replace(',', '.');
+  const base = Number.parseFloat(rawNum);
+  if (!Number.isFinite(base) || base < 0) return null;
+
+  const mult = (m[2] ?? '').toLowerCase();
+  if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
+  if (mult === 'm' || mult === 'milione' || mult === 'milioni') return Math.round(base * 1_000_000);
+  
+  return base >= 1000 ? Math.round(base) : null;
+}
+
+export function parseIsInnovative(message: string): boolean | null {
+  const norm = normalizeForMatch(message);
+  if (!norm) return null;
+  if (/(startup innovativ|pmi innovativ|registro special|sezione special|sezione innovativ)/.test(norm)) {
+    // Check for negation
+    if (/(non siamo|non sono|senza|non iscritt)/.test(norm)) return false;
+    return true;
+  }
   return null;
 }
 
@@ -377,7 +472,8 @@ export function extractProfileFromMessage(message: string): ExtractedProfile {
 
   if (detectedRegion) {
     updates.location = { region: detectedRegion, municipality: null };
-    updates.locationNeedsConfirmation = !isStatingLocation && detectedRegionSignal?.source !== 'explicit';
+    const isHighConfidence = (detectedRegionSignal as any).isHighConfidence === true;
+    updates.locationNeedsConfirmation = !isStatingLocation && !isHighConfidence;
     slotSource.location = detectedRegionSignal?.source ?? 'explicit';
   }
 
@@ -471,6 +567,24 @@ export function extractProfileFromMessage(message: string): ExtractedProfile {
     updates.ateco = explicitAteco;
     updates.atecoAnswered = true;
     slotSource.ateco = 'explicit';
+  }
+
+  const explicitFoundation = parseFoundationYear(message);
+  if (explicitFoundation !== null) {
+    updates.foundationYear = explicitFoundation;
+    slotSource.foundationYear = 'explicit';
+  }
+
+  const explicitTurnover = parseAnnualTurnover(message);
+  if (explicitTurnover !== null) {
+    updates.annualTurnover = explicitTurnover;
+    slotSource.annualTurnover = 'explicit';
+  }
+
+  const explicitInnovative = parseIsInnovative(message);
+  if (explicitInnovative !== null) {
+    updates.isInnovative = explicitInnovative;
+    slotSource.isInnovative = 'explicit';
   }
 
   return { updates, slotSource };

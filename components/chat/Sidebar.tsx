@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { resolveAppAuthOrigin } from '@/shared/config';
+import { useEffect, useMemo, useState, memo } from 'react';
+import Link from 'next/link';
 
 type NavItem = {
   id: string;
   label: string;
-  icon: 'home' | 'chat' | 'search' | 'practice';
+  icon: 'home' | 'chat' | 'search' | 'practice' | 'favorite';
   onClick?: () => void;
 };
 
@@ -25,8 +25,10 @@ function Icon({ name }: { name: NavItem['icon'] }) {
   if (name === 'chat') {
     return (
       <svg {...common}>
-        <path {...stroke} d="M7 18l-3 3V6.5A3.5 3.5 0 0 1 7.5 3h9A3.5 3.5 0 0 1 20 6.5v7A3.5 3.5 0 0 1 16.5 17H7Z" />
-        <path {...stroke} d="M8 8h8M8 11.5h6" />
+        {/* AI sparkles (3 stars) */}
+        <path d="M8.2 3.1 9.25 6 12.1 7.05 9.25 8.1 8.2 11 7.15 8.1 4.3 7.05 7.15 6 8.2 3.1Z" fill="currentColor" />
+        <path d="M16.35 4.8 17.1 6.75 19.05 7.5 17.1 8.25 16.35 10.2 15.6 8.25 13.65 7.5 15.6 6.75 16.35 4.8Z" fill="currentColor" />
+        <path d="M14.9 12.2 16 15.1 18.9 16.2 16 17.3 14.9 20.2 13.8 17.3 10.9 16.2 13.8 15.1 14.9 12.2Z" fill="currentColor" />
       </svg>
     );
   }
@@ -47,6 +49,16 @@ function Icon({ name }: { name: NavItem['icon'] }) {
       </svg>
     );
   }
+  if (name === 'favorite') {
+    return (
+      <svg {...common}>
+        {/* Catalog icon style (compact, same stroke weight) */}
+        <path {...stroke} d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v12H9.7A2.7 2.7 0 0 0 7 21.7V4.5Z" />
+        <path {...stroke} d="M7 19h12.5" />
+        <path {...stroke} d="M10 9h6.5M10 12h6.5M10 15h4.5" />
+      </svg>
+    );
+  }
   return null;
 }
 
@@ -57,7 +69,7 @@ type SessionPayload = {
   email?: string | null;
 };
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   open,
   onToggle,
   onNewChat,
@@ -72,8 +84,8 @@ export function Sidebar({
 }) {
   const [authState, setAuthState] = useState<AuthState>('guest');
   const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [redirectTarget, setRedirectTarget] = useState('https://bndo.it/');
-  const authAppOrigin = resolveAppAuthOrigin();
+  const [redirectTarget, setRedirectTarget] = useState('/');
+  const [showLegalInfo, setShowLegalInfo] = useState(false);
 
   useEffect(() => {
     setRedirectTarget(`${window.location.origin}/`);
@@ -85,7 +97,7 @@ export function Sidebar({
 
     const readSession = async () => {
       try {
-        const response = await fetch(`${authAppOrigin}/api/auth/session`, {
+        const response = await fetch('/api/auth/session', {
           method: 'GET',
           credentials: 'include',
           signal: controller.signal,
@@ -118,12 +130,12 @@ export function Sidebar({
       active = false;
       controller.abort();
     };
-  }, [authAppOrigin]);
+  }, []);
 
   const topItems = useMemo<NavItem[]>(
     () =>
       items ?? [
-        { id: 'chat', label: 'Chat', icon: 'chat', onClick: onNewChat },
+        { id: 'chat', label: 'Chat AI', icon: 'chat', onClick: onNewChat },
         { id: 'search', label: 'Cerca', icon: 'search' }
       ],
     [items, onNewChat]
@@ -131,9 +143,9 @@ export function Sidebar({
 
   const recents = recent ?? [];
   const guestCard = authState !== 'authenticated';
-  const loginUrl = `${authAppOrigin}/login`;
-  const dashboardUrl = `${authAppOrigin}/dashboard`;
-  const logoutUrl = `${authAppOrigin}/api/auth/logout?redirect=${encodeURIComponent(redirectTarget)}`;
+  const loginUrl = '/login';
+  const dashboardUrl = '/dashboard/pratiche';
+  const logoutUrl = `/api/auth/logout?redirect=${encodeURIComponent(redirectTarget)}`;
   const collapsedActionUrl = authState === 'authenticated' ? dashboardUrl : loginUrl;
 
   const onItemClick = (it: NavItem) => {
@@ -170,47 +182,63 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-bottom">
-        <div className={`${open ? 'sidebar-user sidebar-user-open' : 'sidebar-user'}${guestCard ? ' sidebar-user-guest' : ''}`}>
-          <a
-            className="sidebar-avatar sidebar-avatar-link"
-            aria-label={authState === 'guest' ? 'Login a BNDO Assistant' : 'Apri dashboard BNDO Assistant'}
-            href={collapsedActionUrl}
-            data-tip={authState === 'guest' ? 'Login su app.bndo.it' : 'Apri dashboard'}
+        <div className="sidebar-bottom-stack">
+          <button
+            type="button"
+            className={`sidebar-legal-trigger${showLegalInfo ? ' is-open' : ''}`}
+            aria-label="Informazioni legali BNDO"
+            aria-expanded={showLegalInfo}
+            onClick={() => setShowLegalInfo((prev) => !prev)}
           >
-            B
-          </a>
-          {open ? (
-            <div className="sidebar-user-meta">
-              <div className="sidebar-user-sub">
-                {authState === 'authenticated' ? (
-                  authEmail ? (
-                    <span className="sidebar-user-substack">
-                      <span className="sidebar-user-sub-label">Utente</span>
-                      <span className="sidebar-user-sub-email">{authEmail}</span>
-                    </span>
-                  ) : (
-                    'Connesso'
-                  )
-                ) : authState === 'loading' ? (
-                  'Verifica sessione…'
-                ) : (
-                  'Non connesso'
-                )}
-              </div>
-              <div className="sidebar-auth-actions">
-                <a className="sidebar-auth-btn" href={authState === 'authenticated' ? dashboardUrl : loginUrl}>
-                  {authState === 'authenticated' ? 'Dashboard' : 'Login'}
-                </a>
-                {authState === 'authenticated' ? (
-                  <a className="sidebar-auth-btn sidebar-auth-btn-ghost" href={logoutUrl}>
-                    Logout
-                  </a>
-                ) : null}
-              </div>
+            i
+          </button>
+          {showLegalInfo ? (
+            <div className="sidebar-legal-popover" role="note">
+              BNDO È UN PRODOTTO TCONSULTING P.IVA 03166440805 - TUTTI I DIRITTI SONO RISERVATI
             </div>
           ) : null}
+          <div className={`${open ? 'sidebar-user sidebar-user-open' : 'sidebar-user'}${guestCard ? ' sidebar-user-guest' : ''}`}>
+            <Link
+              className="sidebar-avatar sidebar-avatar-link"
+              aria-label={authState === 'guest' ? 'Login a BNDO Assistant' : 'Apri dashboard BNDO Assistant'}
+              href={collapsedActionUrl}
+              data-tip={authState === 'guest' ? 'Login area clienti' : 'Apri dashboard'}
+            >
+              B
+            </Link>
+            {open ? (
+              <div className="sidebar-user-meta">
+                <div className="sidebar-user-sub">
+                  {authState === 'authenticated' ? (
+                    authEmail ? (
+                      <span className="sidebar-user-substack">
+                        <span className="sidebar-user-sub-label">Utente</span>
+                        <span className="sidebar-user-sub-email">{authEmail}</span>
+                      </span>
+                    ) : (
+                      'Connesso'
+                    )
+                  ) : authState === 'loading' ? (
+                    'Verifica sessione…'
+                  ) : (
+                    'Non connesso'
+                  )}
+                </div>
+                <div className="sidebar-auth-actions">
+                  <a className="sidebar-auth-btn" href={authState === 'authenticated' ? dashboardUrl : loginUrl}>
+                    {authState === 'authenticated' ? 'Dashboard' : 'Login'}
+                  </a>
+                  {authState === 'authenticated' ? (
+                    <a className="sidebar-auth-btn sidebar-auth-btn-ghost" href={logoutUrl}>
+                      Logout
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </aside>
   );
-}
+});

@@ -134,8 +134,9 @@ export function normalizeProfile(rawProfile: Record<string, unknown>): Normalize
     cleanString(rawProfile.employmentStatus, 80) ??
     cleanString(rawProfile.occupationalStatus, 80) ??
     cleanString(rawProfile.workStatus, 80);
-  const budget = cleanNumber(rawProfile.revenueOrBudgetEUR);
-  const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR);
+  const annualTurnover = cleanNumber(rawProfile.annualTurnover ?? rawProfile.revenueOrBudgetEUR);
+  const budget = cleanNumber(rawProfile.budget ?? rawProfile.projectCost);
+  const requestedContribution = cleanNumber(rawProfile.requestedContributionEUR ?? rawProfile.requestedContribution);
   const atecoDigits = typeof ateco === 'string' ? extractAtecoDigitsFromText(ateco) : [];
   
   let businessExists = typeof rawProfile.businessExists === 'boolean' ? rawProfile.businessExists : null;
@@ -148,7 +149,7 @@ export function normalizeProfile(rawProfile: Record<string, unknown>): Normalize
     }
   }
 
-  return {
+  const result: NormalizedMatchingProfile = {
     businessExists,
     region,
     investmentRegion,
@@ -163,7 +164,34 @@ export function normalizeProfile(rawProfile: Record<string, unknown>): Normalize
     ageBand,
     employmentStatus,
     budget,
+    annualTurnover,
     requestedContribution,
     atecoDigits,
+    teamMajority: rawProfile.teamMajority as "female" | "youth" | "mixed" | "none" | null ?? null,
+    agricultureStatus: rawProfile.agricultureStatus as "has_land_iap" | "no_land_iap" | "unknown" | null ?? null,
+    tech40: typeof rawProfile.tech40 === 'boolean' ? rawProfile.tech40 : null,
+    professionalRegister: typeof rawProfile.professionalRegister === 'boolean' ? rawProfile.professionalRegister : null,
+    isThirdSector: typeof rawProfile.isThirdSector === 'boolean' ? rawProfile.isThirdSector : null,
+    propertyStatus: rawProfile.propertyStatus as 'owned' | 'rented_registered' | 'none' | null ?? null,
+    foundationYear: cleanNumber(rawProfile.foundationYear),
+    isInnovative: typeof rawProfile.isInnovative === 'boolean' ? rawProfile.isInnovative : null,
   };
+
+  // EU Company Size Inference (Raccomandazione 2003/361/CE)
+  if (result.businessExists !== false && (result.employees !== null || result.annualTurnover !== null)) {
+    const emp = result.employees ?? 0;
+    const fatt = result.annualTurnover ?? 0;
+
+    if (emp >= 250 || fatt >= 50_000_000) {
+      result.companySize = 'grande';
+    } else if ((emp >= 50 && emp < 250) || (fatt >= 10_000_000 && fatt < 50_000_000)) {
+      result.companySize = 'media';
+    } else if ((emp >= 10 && emp < 50) || (fatt >= 2_000_000 && fatt < 10_000_000)) {
+      result.companySize = 'piccola';
+    } else if (emp < 10 && fatt < 2_000_000) {
+      result.companySize = 'micro';
+    }
+  }
+
+  return result;
 }

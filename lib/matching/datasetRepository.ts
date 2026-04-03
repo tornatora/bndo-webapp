@@ -1,12 +1,14 @@
-import { createHash } from 'node:crypto';
 import { readBandiCache, readBundledBandiSeed, writeBandiCache } from '@/lib/bandiCache';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { getStrategicDatasetDocs } from '@/lib/matching/datasetStrategic';
 import { getRegionalGrantsDocs } from '@/lib/matching/regionalGrants';
+import { mergeIncentiviDocs } from '@/lib/matching/fetchIncentiviShared';
+import { loadLatestIngestionRun } from '@/lib/matching/ingestionRunRepository';
 import type { DatasetSnapshot, IncentiviDoc } from '@/lib/matching/types';
 
 const SNAPSHOT_SOURCE_INCENTIVI = 'incentivi.gov.it';
 const MEMORY_TTL_MS = 10 * 60 * 1000;
+const MIN_ACCEPTABLE_ACTIVE_SNAPSHOT_DOCS = 300;
 
 type SnapshotRow = {
   id: string;
@@ -24,6 +26,14 @@ type MemoryCacheState = {
 };
 
 let memoryCache: MemoryCacheState | null = null;
+let hybridMemoryCache: {
+  docs: IncentiviDoc[];
+  source: 'supabase' | 'tmp-cache' | 'bundled-seed';
+  fetchedAt: string | null;
+  expiresAt: number;
+} | null = null;
+
+const HYBRID_TTL_MS = 5 * 60 * 1000; // 5 minutes for the full merged set
 
 function cloneDocs(docs: IncentiviDoc[]) {
   return docs.map((doc) => ({ ...doc }));
@@ -46,7 +56,7 @@ function rowToSnapshot(row: SnapshotRow): DatasetSnapshot {
   };
 }
 
-function computeVersionHash(docs: IncentiviDoc[]) {
+async function computeVersionHash(docs: IncentiviDoc[]) {
   const payload = JSON.stringify(
     docs
       .map((doc) => ({
@@ -63,7 +73,12 @@ function computeVersionHash(docs: IncentiviDoc[]) {
       }))
       .sort((a, b) => String(a.id ?? '').localeCompare(String(b.id ?? ''))),
   );
-  return createHash('sha256').update(payload).digest('hex');
+
+  const msgUint8 = new TextEncoder().encode(payload);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
 }
 
 function setMemorySnapshot(snapshot: DatasetSnapshot | null) {
@@ -131,7 +146,7 @@ export async function saveActiveDatasetSnapshotToSupabase(args: {
   const docs = cloneDocs(args.docs);
   const source = args.source ?? SNAPSHOT_SOURCE_INCENTIVI;
   const fetchedAt = args.fetchedAt ?? new Date().toISOString();
-  const versionHash = computeVersionHash(docs);
+  const versionHash = await computeVersionHash(docs);
 
   const admin = getSupabaseAdmin();
 
@@ -163,6 +178,7 @@ export async function saveActiveDatasetSnapshotToSupabase(args: {
 }
 
 export async function loadScrapedRegionalDocs(): Promise<IncentiviDoc[]> {
+  if (!hasRealServiceRoleKey()) return [];
   try {
     const supabase = await getSupabaseAdmin();
     const { data, error } = await supabase
@@ -171,13 +187,18 @@ export async function loadScrapedRegionalDocs(): Promise<IncentiviDoc[]> {
       .eq('status', 'active');
       
     if (error) {
-      console.warn('[datasetRepository] Non-fatal error loading scraped docs:', error.message);
+      if (!error.message.includes('Invalid API key')) {
+        console.warn('[datasetRepository] Non-fatal error loading scraped docs:', error.message);
+      }
       return [];
     }
     
     return (data || []).map(row => row.doc_json as IncentiviDoc);
   } catch (err) {
-    console.error('[datasetRepository] Failed to load scraped docs:', err);
+    const message = (err as Error).message ?? '';
+    if (!message.includes('Invalid API key')) {
+      console.error('[datasetRepository] Failed to load scraped docs:', err);
+    }
     return [];
   }
 }
@@ -187,35 +208,112 @@ export async function loadHybridDatasetDocs(): Promise<{
   source: 'supabase' | 'tmp-cache' | 'bundled-seed';
   fetchedAt: string | null;
 }> {
+  // Ultra-Fast Singleton Check
+  if (hybridMemoryCache && hybridMemoryCache.expiresAt > Date.now()) {
+    return {
+      docs: hybridMemoryCache.docs, // Note: returning reference for speed, matching engine should not mutate
+      source: hybridMemoryCache.source,
+      fetchedAt: hybridMemoryCache.fetchedAt,
+    };
+  }
+
   const strategic = getStrategicDatasetDocs();
   const regional = getRegionalGrantsDocs();
-  const curated = [...strategic, ...regional];
+  const scraped = await loadScrapedRegionalDocs();
+  const curated = mergeIncentiviDocs(strategic, regional, scraped);
   const activeSnapshot = await loadActiveDatasetSnapshotFromSupabase();
-  if (activeSnapshot && activeSnapshot.docs.length > 0) {
-    return {
-      docs: [...activeSnapshot.docs, ...curated],
-      source: 'supabase',
-      fetchedAt: activeSnapshot.fetchedAt,
-    };
-  }
 
-  const cached = await readBandiCache<IncentiviDoc>();
-  if ((cached?.docs?.length ?? 0) > 0) {
-    return {
-      docs: [...(cached?.docs ?? []), ...curated],
-      source: 'tmp-cache',
-      fetchedAt: cached?.fetchedAt ?? null,
-    };
-  }
-
-  const bundled = await readBundledBandiSeed<IncentiviDoc>();
-  return {
-    docs: [...(bundled?.docs ?? []), ...curated],
-    source: 'bundled-seed',
-    fetchedAt: bundled?.fetchedAt ?? null,
+  let result: {
+    docs: IncentiviDoc[];
+    source: 'supabase' | 'tmp-cache' | 'bundled-seed';
+    fetchedAt: string | null;
   };
+
+  if (activeSnapshot && activeSnapshot.docs.length > 0) {
+    const snapshotLooksDegraded = activeSnapshot.docs.length < MIN_ACCEPTABLE_ACTIVE_SNAPSHOT_DOCS;
+    if (!snapshotLooksDegraded) {
+      result = {
+        docs: mergeIncentiviDocs(activeSnapshot.docs, curated),
+        source: 'supabase',
+        fetchedAt: activeSnapshot.fetchedAt,
+      };
+    } else {
+      // Never do heavy live fetches during user requests: it can cause timeout/Failed to fetch.
+      // If active snapshot is degraded, serve immediately from bundled seed as safe high-coverage fallback.
+      const bundled = await readBundledBandiSeed<IncentiviDoc>();
+      if ((bundled?.docs?.length ?? 0) > activeSnapshot.docs.length) {
+        result = {
+          docs: mergeIncentiviDocs(bundled?.docs ?? [], curated),
+          source: 'bundled-seed',
+          fetchedAt: bundled?.fetchedAt ?? activeSnapshot.fetchedAt,
+        };
+      } else {
+        result = {
+          docs: mergeIncentiviDocs(activeSnapshot.docs, curated),
+          source: 'supabase',
+          fetchedAt: activeSnapshot.fetchedAt,
+        };
+      }
+    }
+  } else {
+    const cached = await readBandiCache<IncentiviDoc>();
+    if ((cached?.docs?.length ?? 0) > 0) {
+      result = {
+        docs: mergeIncentiviDocs(cached?.docs ?? [], curated),
+        source: 'tmp-cache',
+        fetchedAt: cached?.fetchedAt ?? null,
+      };
+    } else {
+      const bundled = await readBundledBandiSeed<IncentiviDoc>();
+      result = {
+        docs: mergeIncentiviDocs(bundled?.docs ?? [], curated),
+        source: 'bundled-seed',
+        fetchedAt: bundled?.fetchedAt ?? null,
+      };
+    }
+  }
+
+  // Update Singleton
+  hybridMemoryCache = {
+    ...result,
+    expiresAt: Date.now() + HYBRID_TTL_MS,
+  };
+
+  return result;
 }
 
 export async function refreshRuntimeCacheFile(docs: IncentiviDoc[]) {
   return writeBandiCache(docs);
+}
+
+export async function loadDatasetHealthStatus(): Promise<{
+  datasetVersion: string | null;
+  datasetFreshnessHours: number | null;
+  coverageStatus: 'ok' | 'degraded' | 'failed';
+  lastRunAt: string | null;
+  alerts: string[];
+}> {
+  const snapshot = await loadActiveDatasetSnapshotFromSupabase();
+  const lastRun = await loadLatestIngestionRun();
+  const now = Date.now();
+  const fetchedAt = snapshot?.fetchedAt ? new Date(snapshot.fetchedAt).getTime() : null;
+  const freshnessHours = fetchedAt ? Math.max(0, (now - fetchedAt) / (1000 * 60 * 60)) : null;
+
+  const snapshotFreshEnough = freshnessHours !== null ? freshnessHours <= 28 : false;
+  const runStatus = lastRun?.status ?? null;
+  const hasRecentRun = lastRun?.finishedAt
+    ? now - new Date(lastRun.finishedAt).getTime() <= 28 * 60 * 60 * 1000
+    : false;
+
+  let coverageStatus: 'ok' | 'degraded' | 'failed' = 'degraded';
+  if (snapshotFreshEnough && runStatus === 'ok' && hasRecentRun) coverageStatus = 'ok';
+  else if (!snapshot || !hasRecentRun || runStatus === 'failed') coverageStatus = 'failed';
+
+  return {
+    datasetVersion: snapshot?.versionHash ?? lastRun?.metrics.datasetVersion ?? null,
+    datasetFreshnessHours: freshnessHours !== null ? Number(freshnessHours.toFixed(2)) : null,
+    coverageStatus,
+    lastRunAt: lastRun?.finishedAt ?? snapshot?.fetchedAt ?? null,
+    alerts: lastRun?.alerts ?? [],
+  };
 }

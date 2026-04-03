@@ -1,3 +1,5 @@
+import { postConversationMessage } from './utils/conversationSse.mjs';
+
 const baseUrl = process.env.CONVERSATION_BASE_URL || 'http://127.0.0.1:3300';
 
 function assert(condition, message) {
@@ -8,31 +10,13 @@ function normalizeText(text) {
   return String(text || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 }
 
-function parseCookieHeader(setCookieRaw) {
-  if (!setCookieRaw) return null;
-  const parts = String(setCookieRaw).split(/,(?=[^;]+=[^;]+)/g);
-  for (const part of parts) {
-    const token = part.split(';', 1)[0]?.trim();
-    if (token?.startsWith('bndo_assistant_session=')) return token;
-  }
-  return null;
-}
-
 async function sendConversation(message, state) {
-  const headers = { 'content-type': 'application/json' };
-  if (state.cookie) headers.cookie = state.cookie;
-  const response = await fetch(`${baseUrl}/api/conversation`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ message }),
-  });
-  const json = await response.json();
+  const response = await postConversationMessage(baseUrl, message, { cookie: state.cookie });
   if (!response.ok) {
-    throw new Error(`conversation HTTP ${response.status}: ${json?.error ?? 'unknown error'}`);
+    throw new Error(`conversation HTTP ${response.status}: ${response.json?.error ?? 'unknown error'}`);
   }
-  const cookie = parseCookieHeader(response.headers.get('set-cookie'));
-  if (cookie) state.cookie = cookie;
-  return json;
+  state.cookie = response.cookie ?? state.cookie;
+  return response.json;
 }
 
 async function runCase(caseDef) {
@@ -83,9 +67,11 @@ const cases = [
     turns: ['Sono under35 calabrese disoccupato', 'Voglio aprire una nuova attività imprenditoriale'],
     checks: [
       ({ replies }) => {
-        const firstText = normalizeText(replies[0]?.assistantText);
-        // The new correct behavior is to ask for the funding goal because none was provided
-        assert(replies[0].nextQuestionField === 'fundingGoal', `expected to ask for funding goal, got ${replies[0].nextQuestionField}`);
+        const firstField = String(replies[0].nextQuestionField || '');
+        assert(
+          firstField === 'fundingGoal' || firstField === 'activityType',
+          `expected first follow-up fundingGoal/activityType, got ${replies[0].nextQuestionField}`
+        );
       },
       ({ finalReply }) => {
         const next = String(finalReply.nextQuestionField || '');

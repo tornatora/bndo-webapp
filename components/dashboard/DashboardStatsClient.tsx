@@ -2,13 +2,6 @@
 
 import { useEffect, useState } from 'react';
 
-type StatsPayload = {
-  ok?: boolean;
-  docsCount?: number;
-  unreadCount?: number;
-  error?: string;
-};
-
 export function DashboardStatsClient({
   initialDocsCount,
   initialUnreadCount
@@ -21,23 +14,45 @@ export function DashboardStatsClient({
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
+
+    const refreshStats = async () => {
       try {
         const res = await fetch('/api/dashboard/stats', { cache: 'no-store' });
-        const json = (await res.json().catch(() => ({}))) as StatsPayload;
-        if (!res.ok) return;
-        if (cancelled) return;
+        const json = (await res.json().catch(() => ({}))) as {
+          docsCount?: number;
+          unreadCount?: number;
+        };
+        if (!res.ok || cancelled) return;
         if (typeof json.docsCount === 'number') setDocsCount(json.docsCount);
         if (typeof json.unreadCount === 'number') setUnreadCount(json.unreadCount);
       } catch {
-        // silent
+        // refresh best-effort
       }
     };
-    // Small delay so navigation feels instant; stats update after render.
-    const t = setTimeout(run, 200);
+
+    const delayed = window.setTimeout(() => {
+      void refreshStats();
+    }, 180);
+    const interval = window.setInterval(() => {
+      void refreshStats();
+    }, 25000);
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshStats();
+    };
+    const onFocus = () => {
+      void refreshStats();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      window.clearTimeout(delayed);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
@@ -58,4 +73,3 @@ export function DashboardStatsClient({
     </div>
   );
 }
-

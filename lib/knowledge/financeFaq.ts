@@ -55,7 +55,7 @@ export const FINANCE_FAQ: FinanceFaq[] = [
     topic: 'Resto al Sud 2.0',
     keywords: ['resto al sud', 'invitalia sud', 'resto al sud 2.0', 'dl coesione', 'mezzogiorno avvio'],
     answer:
-      "Resto al Sud 2.0 (DL Coesione 2024) è una misura specifica per l'AVVIO di nuove attività (startup, liberi professionisti) da parte di GIOVANI UNDER 35, disoccupati da almeno 6 mesi, inoccupati o lavoratori in condizioni svantaggiate. È attiva nelle regioni del Mezzogiorno (Sicilia, Sardegna, Calabria, Puglia, Basilicata, Campania, Molise, Abruzzo) e aree del sisma (Centro Italia). NON confondere con la precedente misura 'Resto al Sud' che arrivava ai 55 anni. Questa nuova versione è molto più restrittiva sull'età (Under 35). Finanzia investimenti (contributi fino al 75%) e spese di avvio (voucher fino a 50k). Per imprese già attive o soggetti over 35, questa misura NON è applicabile."
+      "Resto al Sud 2.0 (DL Coesione 2024) è una misura specifica per l'AVVIO di nuove attività (startup, ditta individuale, liberi professionisti) da parte di GIOVANI UNDER 35. NOVITÀ CRITICA: Prevede un VOUCHER fino a 40.000€ (50.000€ per acquisto beni tecnologici/green) a FONDO PERDUTO AL 100% per l'avvio. REQUISITI: Bisogna essere disoccupati da almeno 6 mesi, o inoccupati, o lavoratori svantaggiati. È attiva nel Mezzogiorno e aree del sisma. Se hai più di 35 anni, puoi accedere solo se in società con un Under 35 che detenga la maggioranza."
   },
   {
     id: 'autoimpiego',
@@ -106,4 +106,95 @@ export const FINANCE_FAQ: FinanceFaq[] = [
     answer:
       "Le date di apertura e scadenza dei bandi cambiano frequentemente. Non posso garantire le date attuali senza conoscere il bando specifico. Per la situazione aggiornata conviene verificare il sito istituzionale del gestore (MIMIT, Invitalia, Regione) o il Registro Trasparente Aiuti."
   },
+  {
+    id: 'startup-strategy',
+    topic: 'Strategia Startup',
+    keywords: ['non ho azienda', 'senza azienda', 'come ricevere fondi', 'aprire per fondi', 'creare societa'],
+    answer:
+      "Se non hai ancora un'azienda, molti bandi (come Resto al Sud 2.0 o Nuove Imprese a Tasso Zero) ti permettono di candidarti come 'persona fisica' con l'impegno di costituire la società solo dopo l'approvazione del finanziamento. Questa è la strategia più sicura per non anticipare costi inutili."
+  },
+  {
+    id: 'professionista-vs-ditta',
+    topic: 'Libero Professionista vs Ditta',
+    keywords: ['professionista', 'ditta individuale', 'partita iva', 'iscritti ordini', 'differenza'],
+    answer:
+      "Molti bandi regionali e voucher (es. Fiere o Digitalizzazione) ora equiparano i Liberi Professionisti alle PMI. Tuttavia, alcuni bandi sono riservati solo a chi è iscritto al Registro Imprese della Camera di Commercio. Se sei un professionista iscritto a un ordine (es. avvocato, architetto), dobbiamo verificare se lo specifico bando ammette le 'partite iva non iscritte in camera di commercio'."
+  },
+  {
+    id: 'resto-sud-partnership',
+    topic: 'Partnership Resto al Sud 2.0',
+    keywords: ['socio under 35', 'oltre 35 anni', 'over 35 resto al sud', 'societa con giovane', 'maggioranza quote'],
+    answer:
+      "CONSIGLIO STRATEGICO: Se hai più di 35 anni, puoi comunque accedere a Resto al Sud 2.0 costituendo una società in cui almeno uno dei soci sia Under 35 e detenga la maggioranza del capitale (almeno il 51%). Questo ti permette di partecipare a una misura altrimenti preclusa."
+  },
+  {
+    id: 'debiti',
+    topic: 'Consolidamento Debiti',
+    keywords: ['debiti', 'consolidamento debiti', 'pagare debiti', 'pagare tasse', 'coprire rosso', 'scoperto'],
+    answer:
+      "ATTENZIONE: Nessun bando pubblico a fondo perduto finanzia mai il pagamento di debiti pregressi, il rifinanziamento, o il pagamento di tasse e sanzioni. I fondi pubblici servono solo per nuovi investimenti di sviluppo o nuova liquidità per la crescita aziendale."
+  },
+  {
+    id: 'quote-soci',
+    topic: 'Acquisto Quote Societarie',
+    keywords: ['comprare quote', 'rilevare quote', 'liquidare un socio', 'uscita socio', 'acquisto societa', 'rilevare azienda'],
+    answer:
+      "ATTENZIONE: L'acquisto di quote societarie (M&A) o la liquidazione di un socio uscente NON sono operazioni finanziabili con contributi a fondo perduto. I bandi supportano l'acquisto di beni strumentali, assunzioni, o servizi, ma raramente i passaggi di proprietà aziendale puri."
+  },
+  {
+    id: 'auto-privata',
+    topic: 'Acquisto Auto Privata',
+    keywords: ['macchina nuova', 'auto per me', 'comprare macchina', 'veicolo privato', 'uso personale'],
+    answer:
+      "ATTENZIONE: I bandi di finanza agevolata finanziano solo veicoli AZIENDALI ad uso esclusivo dell'attività (furgoni, autocarri, veicoli speciali o auto immatricolate come autocarri). L'acquisto di un'auto per uso privato o personale NON è mai finanziabile."
+  },
+  {
+    id: 'affitto-turistico',
+    topic: 'Affitto Turistico Privato',
+    keywords: ['casa vacanze', 'airbnb', 'affittacamere privato', 'rendita'],
+    answer:
+      "ATTENZIONE: Per ricevere contributi nel settore turistico, è necessario operare come Impresa (es. Società, Ditta Individuale) o struttura regolarmente iscritta ai registri regionali. Gli affitti brevi gestiti da privati in forma non imprenditoriale sono generalmente esclusi dai bandi."
+  },
+  {
+    id: 'tasse-sanzioni',
+    topic: 'Tasse e Sanzioni',
+    keywords: ['pagare tasse', 'cartelle esattoriali', 'multe', 'sanzioni', 'iva'],
+    answer:
+      "ATTENZIONE: Nessun bando pubblico può finanziare il pagamento di tasse, imposte, IVA (se detraibile), o sanzioni amministrative. I fondi pubblici sono destinati esclusivamente a nuovi progetti di sviluppo."
+  },
+  {
+    id: 'smart-start',
+    topic: 'Smart&Start Italia',
+    keywords: ['smart and start', 'startup innovative', 'smart&start', 'invitalia startup'],
+    answer:
+      "Smart&Start Italia (Invitalia) è il bando principale per le STARTUP INNOVATIVE. Finanzia piani di impresa tra 100.000€ e 1,5 milioni di€ con mutuo a tasso zero (fino all'80% delle spese) e una quota a fondo perduto per le startup del Sud o fondate da donne/giovani. Copre acquisto beni strumentali, servizi cloud, personale e consulenze."
+  },
+  {
+    id: 'on-tasso-zero',
+    topic: 'ON - Oltre Nuove Imprese a Tasso Zero',
+    keywords: ['oltre nuove imprese', 'on tasso zero', 'donne giovani invitalia', 'nuove imprese giovani', 'finanziamento donne'],
+    answer:
+      "Oltre Nuove Imprese a Tasso Zero (ON) è rivolto a micro e piccole imprese composte prevalentemente da GIOVANI (18-35 anni) o DONNE (senza limiti di età). Supporta l'avvio o lo sviluppo di imprese nei settori manifatturiero, servizi, commercio e turismo. Offre un mix di finanziamento a tasso zero e fondo perduto (fino al 90% delle spese ammissibili)."
+  },
+  {
+    id: 'voucher-export',
+    topic: 'Voucher Internazionalizzazione',
+    keywords: ['voucher export', 'voucher internazionalizzazione', 'tem manager', 'mercati esteri', 'export pmi'],
+    answer:
+      "Il Voucher per l'Internazionalizzazione supporta le PMI che vogliono espandersi sui mercati esteri tramite l'inserimento temporaneo in azienda di un Temporary Export Manager (TEM) o Digital Temporary Export Manager (D-TEM). Aiuta a strutturare strategie di export, ricerca partner e gestione di marketplace internazionali."
+  },
+  {
+    id: 'fondo-competenze',
+    topic: 'Fondo Nuove Competenze',
+    keywords: ['fondo nuove competenze', 'anpal competenze', 'formazione dipendenti', 'formazione finanziata'],
+    answer:
+      "Il Fondo Nuove Competenze (Anpal) rimborsa alle imprese il costo del personale (contributi e parte del salario) per le ore destinate alla FORMAZIONE dei dipendenti in seguito a innovazioni tecnologiche o organizzative. Permette di aggiornare le competenze della forza lavoro a costo quasi zero per l'azienda."
+  },
+  {
+    id: 'transizione-5-0',
+    topic: 'Transizione 5.0',
+    keywords: ['transizione 5.0', 'credito imposta 5.0', 'risparmio energetico', 'industria 5.0', 'bonus energia'],
+    answer:
+      "Transizione 5.0 è l'evoluzione del piano 4.0, focalizzata sul RISPARMIO ENERGETICO. Offre crediti d'imposta per investimenti in beni strumentali (4.0) che portino a una riduzione certificata dei consumi energetici (almeno il 3% per l'azienda o il 5% per il processo). Include anche impianti per l'autoconsumo da fonti rinnovabili e formazione."
+  }
 ];

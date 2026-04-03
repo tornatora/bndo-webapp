@@ -10,3 +10,9 @@
 
 [functions.refresh-bandi]
   schedule = "0 3 * * *"
+
+[functions.refresh-bandi-incremental]
+  schedule = "0 15 * * *"
+
+[functions.scrape-regional-grants]
+  schedule = "0 4 * * *"
