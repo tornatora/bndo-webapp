@@ -247,21 +247,6 @@ function shouldUseLegacyAutoimpiegoQuiz(grantId?: string | null) {
   );
 }
 
-function shouldAutoScanAfterAssistantPromise(text: string) {
-  const norm = normalizeText(text);
-  if (!norm) return false;
-  const hasAnalyzeCue =
-    norm.includes('procedero a esaminare') ||
-    norm.includes('procedero ad esaminare') ||
-    norm.includes('sto analizzando le opportunita') ||
-    norm.includes('analizzero le opportunita') ||
-    norm.includes('esaminare le opportunita');
-  const hasUpdateCue =
-    norm.includes('ti aggiornero presto') ||
-    norm.includes('ti aggiornero sulle migliori opzioni') ||
-    norm.includes('ti aggiorno presto');
-  return hasAnalyzeCue || hasUpdateCue;
-}
 
 function hasMinimumSignalsForScan(profile: UserProfile) {
   const hasRegion = Boolean(profile.location?.region && String(profile.location.region).trim());
@@ -1247,39 +1232,20 @@ export function ChatWindow({
         const profileHash = buildScanProfileHash(metadata.userProfile);
         const hasProfileDelta = profileHash !== lastRenderedScanHashRef.current;
         const assistantFinalText = (streamingAssistantBodyRef.current || metadata.assistantText || '').trim();
-        const autoScanCue = shouldAutoScanAfterAssistantPromise(assistantFinalText);
         const canRunFromMetadata =
           (metadata.action === 'run_scan' || metadata.action === 'refine_after_scan') &&
           (lastRenderedScanHashRef.current === null || hasProfileDelta || metadata.readyToScan);
-        const canRunFromCue =
-          autoScanCue &&
-          hasMinimumSignalsForScan(metadata.userProfile) &&
-          (lastRenderedScanHashRef.current === null || hasProfileDelta || metadata.readyToScan);
-        const shouldRunScan = (canRunFromMetadata || canRunFromCue) && !scanInFlightRef.current;
+
+        const shouldRunScan = canRunFromMetadata && !scanInFlightRef.current;
 
         if (shouldRunScan) {
-          if (autoScanCue) {
-            pendingAutoScanTimeoutRef.current = window.setTimeout(() => {
-              pendingAutoScanTimeoutRef.current = null;
-              if (interactionVersionRef.current !== interactionVersion) return;
-              if (scanInFlightRef.current) return;
-              void runScan(
-                metadata.userProfile,
-                metadata.step,
-                profileHash,
-                interactionVersion,
-                metadata.scanHash ?? null
-              );
-            }, 2200);
-          } else {
-            await runScan(
-              metadata.userProfile,
-              metadata.step,
-              profileHash,
-              interactionVersion,
-              metadata.scanHash ?? null,
-            );
-          }
+          await runScan(
+            metadata.userProfile,
+            metadata.step,
+            profileHash,
+            interactionVersion,
+            metadata.scanHash ?? null,
+          );
         }
       }
 
@@ -1491,7 +1457,6 @@ export function ChatWindow({
               title="Catalogo Bandi"
               subtitle="Tutti i bandi attivi da fonti italiane"
               onOpenDetail={(grantId) => onOpenGrantDetailForPractice(grantId, 'scanner')}
-              onVerify={(grantId) => onSelectGrantForPractice(grantId, 'scanner')}
             />
           </div>
         ) : null}

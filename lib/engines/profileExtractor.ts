@@ -177,22 +177,28 @@ export function parseBudgetEUR(message: string): number | null {
   // Anti-collision with turnover (handled separately to avoid stealing budget)
   if (/(fatturat|ricavi|volume|vendit)/.test(lowered)) return null;
 
-  const m = lowered.match(/(\d+(?:[.,]\d+)?)(?:\s*)(k|m|mila|milioni|milione)?/i);
-  if (!m) return null;
-  const rawNum = m[1]!.replace(/\./g, '').replace(',', '.');
-  const base = Number.parseFloat(rawNum);
-  if (!Number.isFinite(base) || base < 0) return null;
-
   const hasBudgetSignal =
     /\b(budget|investiment|spesa|euro|eur|contribut|finanziament|importo|capitale|progetto|serve|servono|costo|costa)\b/.test(lowered) ||
-    /\b\d+\s*(k|m|mila|milioni|milione)\b/.test(lowered) ||
-    (/^\s*\d+(?:[.,]\d+)?\s*$/.test(lowered) && base >= 1000); // 1000+ as pure number is likely budget
+    /\b\d+(?:[.,]\d+)?\s*(mila|milioni|milione|k|m)\b/.test(lowered) ||
+    /€/.test(lowered);
 
   if (!hasBudgetSignal) return null;
-  const mult = (m[2] ?? '').toLowerCase();
-  if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
-  if (mult === 'm' || mult === 'milione' || mult === 'milioni') return Math.round(base * 1_000_000);
-  return Math.round(base);
+
+  const unitMatch = lowered.match(/\b(\d+(?:[.,]\d+)?)(?:\s*)(mila|milioni|milione|k|m)\b/i);
+  if (unitMatch) {
+    const base = Number.parseFloat(unitMatch[1]!.replace(/\./g, '').replace(',', '.'));
+    if (!Number.isFinite(base) || base < 0) return null;
+    const mult = unitMatch[2]!.toLowerCase();
+    if (mult === 'k' || mult === 'mila') return Math.round(base * 1000);
+    if (mult === 'm' || mult === 'milione' || mult === 'milioni') return Math.round(base * 1_000_000);
+  }
+
+  const amountMatch = lowered.match(/\b(\d{1,3}(?:[.\s]\d{3})+|\d{4,9})(?:,\d+)?\b/);
+  if (!amountMatch) return null;
+  const normalizedRaw = amountMatch[1]!.replace(/[.\s]/g, '');
+  const base = Number.parseInt(normalizedRaw, 10);
+  if (!Number.isFinite(base) || base < 0) return null;
+  return base;
 }
 
 export function parseRequestedContributionEUR(message: string): number | null {
@@ -208,10 +214,15 @@ export function parseEmployees(message: string): number | null {
   const lowered = message.toLowerCase();
   if (/\bsolo io\b|\bda solo\b|\bda sola\b/.test(lowered)) return 1;
   if (/\bnessun\b|\bzero\b/.test(lowered)) return 0;
-  const m = lowered.match(/(\d{1,6})/);
+
+  const hasEmployeesSignal = /(dipendent|addett|collaborator|team|staff|organico|person[ae])/.test(lowered);
+  if (!hasEmployeesSignal) return null;
+  if (/(euro|eur|budget|investiment|spesa|fatturat|ricav)/.test(lowered)) return null;
+
+  const m = lowered.match(/\b(\d{1,4})\b/);
   if (!m) return null;
   const n = Number.parseInt(m[1]!, 10);
-  if (!Number.isFinite(n) || n < 0 || n > 500000) return null;
+  if (!Number.isFinite(n) || n < 0 || n > 50000) return null;
   return n;
 }
 
@@ -316,8 +327,8 @@ export function extractSectorFromMessage(message: string): string | null {
   if (raw.length < 3) return null;
   const n = normalizeForMatch(raw);
   const known = [
-    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare'] },
-    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b', 'alberghiero'] },
+    { sector: 'agricoltura', hints: ['agricoltura', 'agricolo', 'agricola', 'agriturismo', 'agroalimentare', 'azienda agricola', 'impresa agricola', 'trasformazione alimentare', 'vivaio', 'coltivazione', 'allevamento', 'vitivinicolo', 'oleario'] },
+    { sector: 'turismo', hints: ['turismo', 'turistica', 'turistico', 'ricettiva', 'ospitalita', 'hotel', 'b&b', 'b and b', 'bnb', 'b n b', 'beb', 'affittacamere', 'alberghiero', 'casa vacanze', 'struttura ricettiva', 'resort', 'ostello', 'campeggio'] },
     { sector: 'ristorazione', hints: ['ristorazione', 'ristorante', 'bar', 'pizzeria', 'food'] },
     { sector: 'commercio', hints: ['commercio', 'negozio', 'retail', 'ecommerce', 'e commerce'] },
     { sector: 'manifattura', hints: ['manifattura', 'industria', 'produzione', 'fabbrica'] },
@@ -364,7 +375,20 @@ export function extractFundingGoalFromMessage(message: string): string | null {
     const cleaned = raw.slice(startIdx).trim();
     if (cleaned.length > 5) return cleaned.length > 180 ? `${cleaned.slice(0, 180).trim()}…` : cleaned;
   }
-  if (hasConcreteSignal && raw.split(' ').length >= 3) return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
+  // SHORT MESSAGE HEURISTIC: if the message is very short (1-4 words) and contains
+  // a concrete spending keyword, treat the whole message as a funding goal.
+  // This handles cases like "srl, ristrutturazioni" where "ristrutturazioni" is a spending goal.
+  const wordCount = raw.split(/[\s,;]+/).filter(Boolean).length;
+  if (hasConcreteSignal && wordCount <= 4) {
+    // Extract only the spending-related part (skip legal form tokens)
+    const spendingPart = raw.split(/[,;]+/).map(s => s.trim()).filter(part => {
+      const pn = normalizeForMatch(part);
+      // Skip parts that are just legal forms
+      return !/^(srl|srls|spa|snc|sas|ditta individuale|cooperativa|professionista)$/i.test(pn);
+    }).join(', ').trim();
+    if (spendingPart.length >= 3) return spendingPart;
+  }
+  if (hasConcreteSignal && wordCount >= 3) return raw.length > 180 ? `${raw.slice(0, 180).trim()}…` : raw;
   return null;
 }
 

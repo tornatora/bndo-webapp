@@ -54,6 +54,9 @@ const MEASURE_ALIASES: Array<{ id: string; name: string; aliases: string[] }> = 
   { id: 'fusese', name: 'FUSESE', aliases: ['fusese', 'fund for self employment', 'fund self employment', 'self entrepreneurship'] },
   { id: 'transizione-40', name: 'Transizione 4.0 / 5.0', aliases: ['transizione 4.0', 'transizione 4 0', 'industria 4.0', 'industria 4 0', 'piano transizione'] },
   { id: 'fondo-garanzia', name: 'Fondo di Garanzia PMI', aliases: ['fondo garanzia', 'fondo di garanzia', 'garanzia pmi', 'mediocredito centrale'] },
+  { id: 'zes-unica', name: 'ZES Unica', aliases: ['zes', 'zes unica', 'zona economica speciale', 'bonus sud'] },
+  { id: 'simest', name: 'SIMEST Fondo 394', aliases: ['simest', 'fondo 394', 'export simest'] },
+  { id: 'contratto-sviluppo', name: 'Contratto di Sviluppo', aliases: ['contratto di sviluppo', 'cds invitalia', 'grandi investimenti'] },
 ];
 
 function detectMeasureId(message: string): { id: string; name: string } | null {
@@ -663,6 +666,66 @@ export async function answerGroundedMeasureQuestion(
     };
   }
 
+  // --- ZES Unica ---
+  if (measure.id === 'zes-unica') {
+    const faq = getFaqById('zes');
+    if (!faq)
+      return {
+        outcome: 'not_confirmable',
+        text: buildPrudentReply(measure.name),
+        measureId: measure.id,
+        factSource: 'none',
+        groundingStatus: 'none',
+      };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+      factSource: 'faq',
+      groundingStatus: 'grounded',
+    };
+  }
+
+  // --- SIMEST ---
+  if (measure.id === 'simest') {
+    const faq = getFaqById('simest-394'); // Needs to match actual ID from financeFaq.ts if any, assuming generic for now
+    if (!faq)
+      return {
+        outcome: 'not_confirmable',
+        text: `Il fondo SIMEST sostiene l'internazionalizzazione delle imprese italiane (es. fiere, e-commerce, insediamento all'estero) con finanziamenti agevolati e quote a fondo perduto. ${buildPrudentReply(measure.name)}`,
+        measureId: measure.id,
+        factSource: 'none',
+        groundingStatus: 'none',
+      };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+      factSource: 'faq',
+      groundingStatus: 'grounded',
+    };
+  }
+
+  // --- Contratto di Sviluppo ---
+  if (measure.id === 'contratto-sviluppo') {
+    const faq = getFaqById('contratto-sviluppo');
+    if (!faq)
+      return {
+        outcome: 'not_confirmable',
+        text: `Il Contratto di Sviluppo finanzia grandi progetti di investimento (solitamente oltre i 20 milioni di euro, o 7.5 milioni per trasformazione agricola o turismo). ${buildPrudentReply(measure.name)}`,
+        measureId: measure.id,
+        factSource: 'none',
+        groundingStatus: 'none',
+      };
+    return {
+      outcome: 'yes_under_conditions',
+      text: faq.answer,
+      measureId: measure.id,
+      factSource: 'faq',
+      groundingStatus: 'grounded',
+    };
+  }
+
   // --- Resto al Sud 2.0 ---
   if (measure.id === 'resto-al-sud-20') {
     const faq = getFaqById('resto-sud');
@@ -740,7 +803,7 @@ export async function answerGroundedMeasureQuestion(
     if (n.includes('over 35') || n.includes('più di 35') || n.includes('36 anni') || n.includes('40 anni') || n.includes('50 anni')) {
         return {
             outcome: 'yes_under_conditions',
-            text: `Dipende. Resto al Sud 2.0 è pensato principalmente per under 35; oltre questa soglia l’accesso non è automatico e va verificata la configurazione societaria prevista dal bando vigente.`,
+            text: `Per gli over 35 l'accesso a Resto al Sud 2.0 è possibile solo in forma societaria, a condizione che la compagine includa soci under 35 (disoccupati) che detengano almeno il 51% delle quote societarie.`,
             measureId: measure.id,
             measureName: measure.name,
             factSource: 'faq',

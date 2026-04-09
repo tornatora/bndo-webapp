@@ -1134,6 +1134,12 @@ export function OnboardingWizardClient({
         fd.set('guestCredentialMode', guestCredentialMode);
       }
 
+      const resolvedMode = resolvedOnboardingMode ?? (isDashboardMode ? 'dashboard_client' : 'legacy');
+      fd.set('onboardingMode', resolvedMode);
+      if (skipPayment || isDashboardMode) {
+        fd.set('skipPayment', 'yes');
+      }
+
       if (needsGuestCredentials && guestCredentialMode === 'new') {
         fd.set('password', password);
       } else if (!isDashboardMode) {
@@ -1141,7 +1147,16 @@ export function OnboardingWizardClient({
         fd.set('password', password);
       }
 
-      const response = await fetch('/api/onboarding/complete', {
+      const endpoint = new URL('/api/onboarding/complete', window.location.origin);
+      if (resolvedMode) endpoint.searchParams.set('onboarding_mode', resolvedMode);
+      if ((skipPayment ?? isDashboardMode) || resolvedMode === 'dashboard_client') {
+        endpoint.searchParams.set('skip_payment', '1');
+      }
+      if (activeApplicationId) endpoint.searchParams.set('applicationId', activeApplicationId);
+      if (grantId) endpoint.searchParams.set('grantId', grantId);
+      if (grantSlug) endpoint.searchParams.set('grantSlug', grantSlug);
+      if (practiceType) endpoint.searchParams.set('practice', practiceType);
+      const response = await fetch(endpoint.toString(), {
         method: 'POST',
         body: fd,
       });

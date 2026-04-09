@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { sendDocumentReminderEmail } from '@/lib/services/email';
 
@@ -24,7 +25,18 @@ export async function POST(request: Request) {
     .select('admin_fields')
     .eq('company_id', body.data.companyId)
     .maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isMissingTable(error, 'company_crm')) {
+      return NextResponse.json(
+        {
+          error:
+            'CRM avanzato non ancora attivo su questo ambiente: invio fattura da pannello billing temporaneamente non disponibile.'
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   const adminFields = ((data?.admin_fields ?? {}) as Record<string, unknown>) ?? {};
   const billing = adminFields.billing && typeof adminFields.billing === 'object' && !Array.isArray(adminFields.billing) ? (adminFields.billing as Record<string, unknown>) : null;

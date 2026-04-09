@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { splitCommission } from '@/lib/ops/finance';
 import { logAdminAudit } from '@/lib/ops/audit';
@@ -100,6 +101,24 @@ export async function POST(request: Request) {
         status: parsedUpdate.data.status,
       },
     });
+
+    if (parsedUpdate.data.status === 'approved' || parsedUpdate.data.status === 'paid') {
+      void emitNotificationEvent({
+        eventType: parsedUpdate.data.status === 'approved' ? 'payout_approved' : 'payout_paid',
+        actorProfileId: profile.id,
+        actorRole: profile.role as 'ops_admin',
+        consultantProfileId: data.consultant_profile_id ?? null,
+        amountCents: Number(data.consultant_share_cents ?? 0),
+        currency: 'EUR',
+        practiceTitle: `Periodo ${String(data.period_start ?? '')} - ${String(data.period_end ?? '')}`,
+        payoutId: data.id,
+        metadata: {
+          payoutId: data.id,
+          status: parsedUpdate.data.status,
+          paymentReference: parsedUpdate.data.paymentReference ?? null
+        }
+      }).catch(() => undefined);
+    }
     return NextResponse.json({ ok: true, row: data });
   }
 
@@ -170,6 +189,23 @@ export async function POST(request: Request) {
       platformShareCents: split.platformShareCents,
     },
   });
+
+  void emitNotificationEvent({
+    eventType: 'payout_created',
+    actorProfileId: profile.id,
+    actorRole: profile.role as 'ops_admin',
+    consultantProfileId: parsed.data.consultantProfileId,
+    amountCents: split.consultantShareCents,
+    currency: 'EUR',
+    practiceTitle: `Periodo ${parsed.data.periodStart} - ${parsed.data.periodEnd}`,
+    payoutId: data.id,
+    metadata: {
+      payoutId: data.id,
+      grossAmountCents,
+      consultantShareCents: split.consultantShareCents,
+      platformShareCents: split.platformShareCents
+    }
+  }).catch(() => undefined);
 
   return NextResponse.json({ ok: true, row: data });
 }

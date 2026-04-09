@@ -70,7 +70,7 @@ export default function OnboardingPage({
       : undefined;
   const skipPayment = searchParams.skip_payment === '1';
   const explicitMode = parseOnboardingMode(searchParams.onboarding_mode);
-  const inferDashboardMode = !sessionId && Boolean(applicationId);
+  const inferDashboardMode = !sessionId && Boolean(applicationId || grantId || grantSlug || skipPayment);
   const onboardingMode: OnboardingMode =
     explicitMode ??
     (inferDashboardMode ? 'dashboard_client' : 'legacy');

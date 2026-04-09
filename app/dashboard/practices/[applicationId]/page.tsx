@@ -79,7 +79,17 @@ export default async function ClientPracticePage({
     .eq('application_id', application.id)
     .order('created_at', { ascending: false })
     .limit(120);
-  let typedDocs = (docsRaw ?? []) as DocRow[];
+  const dedupeDocs = <T extends { file_name?: string | null }>(rows: T[]) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = String(row.file_name ?? '').toLowerCase();
+      if (!key) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  let typedDocs = dedupeDocs((docsRaw ?? []) as DocRow[]);
   if (hasRealServiceRoleKey()) {
     try {
       const admin = getSupabaseAdmin();
@@ -89,8 +99,9 @@ export default async function ClientPracticePage({
         .eq('application_id', application.id)
         .order('created_at', { ascending: false })
         .limit(120);
-      if ((adminDocs ?? []).length >= typedDocs.length) {
-        typedDocs = (adminDocs ?? []) as DocRow[];
+      const adminDeduped = dedupeDocs((adminDocs ?? []) as DocRow[]);
+      if (adminDeduped.length >= typedDocs.length) {
+        typedDocs = adminDeduped;
       }
     } catch {
       // Keep user-scoped docs if admin fallback fails.

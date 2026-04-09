@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { createClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -126,6 +127,20 @@ export async function POST(request: Request) {
           sender_profile_id: profile.id,
           body: `Ho caricato il documento ${fileName}${requirementKey ? ` (requisito: ${requirementKey})` : ''} per la mia pratica.`
         });
+
+        void emitNotificationEvent({
+          eventType: 'document_uploaded_by_client',
+          actorProfileId: profile.id,
+          actorRole: 'client_admin',
+          companyId: profile.company_id,
+          applicationId,
+          threadId,
+          documentLabel: documentLabel || fileName,
+          metadata: {
+            requirementKey,
+            fileName
+          }
+        }).catch(() => undefined);
       }
     } catch {
       // Non bloccare upload in caso di errore notifica chat.

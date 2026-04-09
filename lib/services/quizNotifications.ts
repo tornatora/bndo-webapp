@@ -128,7 +128,7 @@ type PracticeQuizNotificationInput = {
   practiceTitle: string;
   grantTitle: string;
   sourceChannel: PracticeSourceChannel;
-  eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+  eligibility: 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
   createdAtIso: string;
   answers?: Record<string, string | number | boolean | null | undefined>;
 };
@@ -144,6 +144,8 @@ export async function dispatchPracticeQuizNotifications(input: PracticeQuizNotif
   const eligibilityLabel =
     input.eligibility === 'eligible'
       ? 'Idoneo'
+      : input.eligibility === 'likely_eligible'
+        ? 'Probabilmente idoneo'
       : input.eligibility === 'needs_review'
         ? 'Da verificare'
         : 'Non idoneo';

@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Loader2 } from 'lucide-react';
 import { practiceTypeFromGrantSlug } from '@/lib/bandi';
+import { computeMonotonicQuizProgress } from '@/lib/practices/quizProgress';
 import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
 import '@/app/quiz/quiz.css';
 
 import type { PracticeQuizQuestion } from '@/components/dashboard/PracticeEligibilityQuiz';
 
-type PracticeEligibility = 'eligible' | 'not_eligible' | 'needs_review';
+type PracticeEligibility = 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
 type SourceChannel = 'scanner' | 'chat' | 'direct' | 'admin';
 type AnswerValue = string | number | boolean | null;
 
@@ -68,6 +69,41 @@ function parseExpectedChoiceSet(value: string | null | undefined) {
       .split(/[|,]/g)
       .map((item) => normalizeToken(item))
       .filter(Boolean)
+  );
+}
+
+type TransitionTarget = {
+  answerValue: string;
+  to: string | null;
+};
+
+function readTransitionTargets(question: PracticeQuizQuestion): TransitionTarget[] {
+  const metadata =
+    question.metadata && typeof question.metadata === 'object'
+      ? (question.metadata as Record<string, unknown>)
+      : null;
+  const raw = metadata?.transitionTargets;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const record = entry as Record<string, unknown>;
+      const answerValue = typeof record.answerValue === 'string' ? record.answerValue : '';
+      const to = typeof record.to === 'string' ? record.to : null;
+      if (!answerValue) return null;
+      return { answerValue, to };
+    })
+    .filter((entry): entry is TransitionTarget => Boolean(entry));
+}
+
+function resolveTransitionTarget(question: PracticeQuizQuestion, chosenValue: unknown) {
+  const targets = readTransitionTargets(question);
+  if (targets.length === 0) return null;
+  const chosen = normalizeToken(chosenValue);
+  return (
+    targets.find((target) => normalizeToken(target.answerValue) === chosen) ??
+    targets.find((target) => normalizeToken(target.answerValue) === 'any') ??
+    null
   );
 }
 
@@ -194,6 +230,7 @@ export function PracticeGrantQuizPage({
   const [reviewChatError, setReviewChatError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [currentStep, setCurrentStep] = useState(0);
+  const [maxProgressReached, setMaxProgressReached] = useState(0);
 
   const [flow, setFlow] = useState<PracticeFlowState | null>(null);
   const [latestSubmission, setLatestSubmission] = useState<LatestSubmission | null>(null);
@@ -406,6 +443,17 @@ export function PracticeGrantQuizPage({
     };
   }, [showConfetti]);
 
+  useEffect(() => {
+    if (!flow) return;
+    if (flow.questions.length === 0 && !outcome) {
+      setOutcome('needs_review');
+      setReviewReasons([
+        'Requisiti del bando non sufficientemente strutturati per una verifica automatica affidabile.',
+        'È necessaria una verifica umana per confermare l’ammissibilità.'
+      ]);
+    }
+  }, [flow, outcome]);
+
   const visibleQuestions = useMemo(() => {
     if (!flow) return [] as PracticeQuizQuestion[];
     return flow.questions.filter((question) => isQuestionVisible(question, flow.questions, answers));
@@ -419,9 +467,51 @@ export function PracticeGrantQuizPage({
     });
   }, [visibleQuestions.length]);
 
-  const progress = visibleQuestions.length
-    ? Math.round((currentStep / visibleQuestions.length) * 100)
+  useEffect(() => {
+    setMaxProgressReached(0);
+  }, [flow?.applicationId, grantId]);
+
+  const rawProgress = visibleQuestions.length
+    ? Math.round(((Math.min(currentStep, visibleQuestions.length - 1) + 1) / visibleQuestions.length) * 100)
     : 0;
+
+  useEffect(() => {
+    setMaxProgressReached((previous) => Math.max(previous, rawProgress));
+  }, [rawProgress]);
+
+  const progress = computeMonotonicQuizProgress({
+    currentStep,
+    visibleQuestionsCount: visibleQuestions.length,
+    previousMaxProgress: maxProgressReached
+  });
+
+  const navigateFromTransition = useCallback(
+    (question: PracticeQuizQuestion, chosenValue: unknown, nextAnswers: Record<string, AnswerValue>) => {
+      if (!flow) return { handled: false, terminal: false } as const;
+      const target = resolveTransitionTarget(question, chosenValue);
+      if (!target) return { handled: false, terminal: false } as const;
+
+      if (target.to === 'blocked') {
+        setBlockedQuestionKey(question.questionKey);
+        setOutcome('not_eligible');
+        return { handled: true, terminal: true } as const;
+      }
+      if (target.to === 'success') {
+        void submitQuiz(undefined, nextAnswers);
+        return { handled: true, terminal: true } as const;
+      }
+      if (!target.to) return { handled: false, terminal: false } as const;
+
+      const nextVisible = flow.questions.filter((candidate) => isQuestionVisible(candidate, flow.questions, nextAnswers));
+      const nextIndex = nextVisible.findIndex((candidate) => candidate.questionKey === target.to);
+      if (nextIndex >= 0) {
+        setCurrentStep(nextIndex);
+        return { handled: true, terminal: false } as const;
+      }
+      return { handled: false, terminal: false } as const;
+    },
+    [flow, submitQuiz]
+  );
 
   const backPath = SOURCE_BACK_PATH[sourceChannel];
   const successPath = flow
@@ -521,9 +611,11 @@ export function PracticeGrantQuizPage({
           : null
       );
 
-      if (eligibility === 'eligible') {
+      if (eligibility && eligibility !== 'not_eligible') {
         setNextPath(payload.nextPath ?? `/dashboard/practices/${flow.applicationId}?docs=missing`);
-        setShowConfetti(true);
+        if (eligibility === 'eligible' || eligibility === 'likely_eligible') {
+          setShowConfetti(true);
+        }
       } else {
         setNextPath(null);
       }
@@ -646,12 +738,7 @@ export function PracticeGrantQuizPage({
           <form onSubmit={submitQuiz}>
             <h1>{flow.grantTitle}</h1>
             <p className="subtitle">Rispondi alle domande per verificare l’idoneità prima dell’avvio pratica.</p>
-            {activeQuestion?.reasoning ? (
-              <div className="quiz-requirement-note">
-                <span className="quiz-requirement-note-title">Nota requisito</span>
-                <p>{activeQuestion.reasoning}</p>
-              </div>
-            ) : null}
+            {null}
 
             {(() => {
               const question = visibleQuestions[currentStep];
@@ -676,6 +763,12 @@ export function PracticeGrantQuizPage({
                   return;
                 }
                 setFormError(null);
+                const previewAnswers = {
+                  ...answers,
+                  [question.questionKey]: value ?? null
+                };
+                const transitionNavigation = navigateFromTransition(question, value ?? 'any', previewAnswers);
+                if (transitionNavigation.handled) return;
                 if (isLastStep) {
                   void submitQuiz();
                   return;
@@ -732,6 +825,11 @@ export function PracticeGrantQuizPage({
                                 setOutcome('not_eligible');
                                 return;
                               }
+                            }
+
+                            const transitionNavigation = navigateFromTransition(question, option.value, newAnswers);
+                            if (transitionNavigation.handled) {
+                              return;
                             }
 
                             if (isLastStep) {
@@ -818,12 +916,18 @@ export function PracticeGrantQuizPage({
           </form>
         ) : null}
 
-        {!loading && flow && outcome === 'eligible' ? (
+        {!loading && flow && (outcome === 'eligible' || outcome === 'likely_eligible') ? (
           <div className="success-page">
             <div className="success-icon">🎉</div>
-            <h1>Perfetto, sei idoneo</h1>
+            <h1>{outcome === 'likely_eligible' ? 'Buone notizie, sei probabilmente idoneo' : 'Perfetto, sei idoneo'}</h1>
             <p className="subtitle">
-              Il tuo profilo rispetta i requisiti base per procedere con il bando <strong>{flow.grantTitle}</strong>.
+              {outcome === 'likely_eligible'
+                ? (
+                    <>Il tuo profilo risulta compatibile con i requisiti principali del bando <strong>{flow.grantTitle}</strong>. Procediamo con l’onboarding per completare la verifica documentale.</>
+                  )
+                : (
+                    <>Il tuo profilo rispetta i requisiti base per procedere con il bando <strong>{flow.grantTitle}</strong>.</>
+                  )}
             </p>
             <div className="buttons buttons--eligible" style={{ marginTop: '32px' }}>
               <Link className="btn-next btn-next-eligible" href={successPath}>
@@ -861,6 +965,9 @@ export function PracticeGrantQuizPage({
               >
                 Torna ai risultati
               </button>
+              <Link className="btn-next" href={successPath}>
+                Continua con onboarding
+              </Link>
               <button
                 type="button"
                 className="btn-next"

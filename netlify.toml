@@ -1,9 +1,12 @@
 [build]
-  command = "npm run build"
+  command = "npm run build:app"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
+  CHAT_BACKEND_PROXY_MODE = "on"
+  CHAT_PROXY_BASE_URL = "https://69ce95a19126a43a447cb472--cheerful-cobbler-f23efc.netlify.app"
+  CHAT_PROXY_TIMEOUT_MS = "30000"
 
 [functions]
   directory = "netlify/functions"

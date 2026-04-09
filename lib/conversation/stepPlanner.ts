@@ -32,6 +32,24 @@ export function nextStepFromProfile(profile: UserProfile): Step {
       return 'activityType';
     case 'budgetOrPreference':
       return profile.contributionPreference ? 'budget' : 'contributionPreference';
+    case 'agricultureStatus':
+      return 'agricultureStatus';
+    case 'professionalRegister':
+      return 'professionalRegister';
+    case 'tech40':
+      return 'tech40';
+    case 'propertyStatus':
+      return 'propertyStatus';
+    case 'isThirdSector':
+      return 'isThirdSector';
+    case 'foundationYear':
+      return 'foundationYear';
+    case 'teamMajority':
+      return 'teamMajority';
+    case 'annualTurnover':
+      return 'annualTurnover';
+    case 'isInnovative':
+      return 'isInnovative';
     default:
       return 'budget';
   }

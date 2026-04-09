@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireOpsOrConsultantProfile } from '@/lib/auth';
 import { ensurePracticeThreadForApplication, ensurePracticeThreadParticipants } from '@/lib/ops/assignments';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 const ParamsSchema = z.object({
@@ -35,8 +36,36 @@ export async function GET(
     .eq('status', 'active')
     .maybeSingle();
 
-  if (assignmentError) return NextResponse.json({ error: assignmentError.message }, { status: 500 });
-  if (profile.role === 'consultant' && assignment?.consultant_profile_id !== profile.id) {
+  let effectiveAssignment = assignment;
+  if (assignmentError && !isMissingTable(assignmentError, 'consultant_practice_assignments')) {
+    return NextResponse.json({ error: assignmentError.message }, { status: 500 });
+  }
+  if (assignmentError && isMissingTable(assignmentError, 'consultant_practice_assignments')) {
+    const { data: legacyThread } = await admin
+      .from('consultant_threads')
+      .select('id')
+      .eq('company_id', application.company_id)
+      .maybeSingle();
+    if (legacyThread?.id) {
+      const { data: consultantParticipants } = await admin
+        .from('consultant_thread_participants')
+        .select('profile_id, created_at')
+        .eq('thread_id', legacyThread.id)
+        .eq('participant_role', 'consultant')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const selected = (consultantParticipants ?? [])[0] as { profile_id?: string; created_at?: string } | undefined;
+      if (selected?.profile_id) {
+        effectiveAssignment = {
+          consultant_profile_id: selected.profile_id,
+          assigned_at: selected.created_at ?? null,
+          note: null,
+          status: 'active'
+        } as any;
+      }
+    }
+  }
+  if (profile.role === 'consultant' && effectiveAssignment?.consultant_profile_id !== profile.id) {
     return NextResponse.json({ error: 'Pratica non assegnata al consulente corrente.' }, { status: 403 });
   }
 
@@ -55,7 +84,7 @@ export async function GET(
     await ensurePracticeThreadParticipants({
       threadId,
       clientProfileId: clientProfile?.id ?? null,
-      consultantProfileId: assignment?.consultant_profile_id ?? (profile.role === 'consultant' ? profile.id : null),
+      consultantProfileId: effectiveAssignment?.consultant_profile_id ?? (profile.role === 'consultant' ? profile.id : null),
       opsProfileId: profile.role === 'ops_admin' ? profile.id : null,
     });
   } catch (cause) {
@@ -78,7 +107,9 @@ export async function GET(
       .order('created_at', { ascending: true }),
   ]);
 
-  if (requirementsRes.error) return NextResponse.json({ error: requirementsRes.error.message }, { status: 500 });
+  if (requirementsRes.error && !isMissingTable(requirementsRes.error, 'practice_document_requirements')) {
+    return NextResponse.json({ error: requirementsRes.error.message }, { status: 500 });
+  }
   if (documentsRes.error) return NextResponse.json({ error: documentsRes.error.message }, { status: 500 });
 
   return NextResponse.json({
@@ -97,10 +128,16 @@ export async function GET(
             assignedAt: assignment.assigned_at as string,
             note: (assignment.note ?? null) as string | null,
           }
+        : effectiveAssignment
+        ? {
+            consultantProfileId: effectiveAssignment.consultant_profile_id as string,
+            assignedAt: (effectiveAssignment.assigned_at ?? null) as string | null,
+            note: (effectiveAssignment.note ?? null) as string | null,
+          }
         : null,
       threadId,
     },
-    requirements: requirementsRes.data ?? [],
+    requirements: requirementsRes.error ? [] : requirementsRes.data ?? [],
     documents: documentsRes.data ?? [],
   });
 }

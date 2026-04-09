@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { PROGRESS_STEPS, progressToApplicationStatus, upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { sendPracticeProgressEmail } from '@/lib/services/email';
 
 const PayloadSchema = z.object({
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
 
     const { data: app } = await supabase
       .from('tender_applications')
-      .select('id, notes')
+      .select('id, notes, company_id')
       .eq('id', payload.applicationId)
       .maybeSingle();
 
@@ -61,6 +62,21 @@ export async function POST(request: Request) {
       practiceTitle: payload.practiceTitle,
       stepLabel: step.label
     });
+
+    void emitNotificationEvent({
+      eventType: 'practice_progress_updated',
+      actorProfileId: profile.id,
+      actorRole: 'ops_admin',
+      companyId: app?.company_id ?? null,
+      applicationId: payload.applicationId,
+      threadId: payload.threadId,
+      practiceTitle: payload.practiceTitle,
+      progressLabel: step.label,
+      metadata: {
+        stepKey: step.key,
+        status: nextStatus
+      }
+    }).catch(() => undefined);
 
     return NextResponse.json({ ok: true, email: emailResult }, { status: 200 });
   } catch (error) {

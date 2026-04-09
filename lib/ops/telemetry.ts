@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import type { Json } from '@/lib/supabase/database.types';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { redactJson } from '@/lib/ops/redaction';
 
@@ -41,6 +42,48 @@ export async function logPlatformEvent(payload: EventPayload) {
       channel: payload.channel ?? null,
       metadata: redactJson(payload.metadata ?? {}),
     });
+
+    const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
+    if (payload.eventType === 'quiz_completed') {
+      void emitNotificationEvent({
+        eventType: 'quiz_completed',
+        actorProfileId: payload.actorProfileId ?? null,
+        actorRole: (payload.actorRole as any) ?? null,
+        companyId: payload.companyId ?? null,
+        applicationId: payload.applicationId ?? null,
+        metadata: payload.metadata ?? {}
+      });
+    } else if (payload.eventType === 'practice_created') {
+      void emitNotificationEvent({
+        eventType: 'practice_created',
+        actorProfileId: payload.actorProfileId ?? null,
+        actorRole: (payload.actorRole as any) ?? null,
+        companyId: payload.companyId ?? null,
+        applicationId: payload.applicationId ?? null,
+        metadata: payload.metadata ?? {}
+      });
+    } else if (payload.eventType === 'assignment_updated') {
+      void emitNotificationEvent({
+        eventType: 'assignment_updated',
+        actorProfileId: payload.actorProfileId ?? null,
+        actorRole: (payload.actorRole as any) ?? null,
+        companyId: payload.companyId ?? null,
+        applicationId: payload.applicationId ?? null,
+        consultantProfileId: typeof metadata.consultantProfileId === 'string' ? metadata.consultantProfileId : null,
+        metadata: payload.metadata ?? {}
+      });
+    } else if (payload.eventType === 'consultant_practice_message_sent') {
+      void emitNotificationEvent({
+        eventType: 'chat_message_new',
+        actorProfileId: payload.actorProfileId ?? null,
+        actorRole: (payload.actorRole as any) ?? null,
+        companyId: payload.companyId ?? null,
+        applicationId: payload.applicationId ?? null,
+        threadId: typeof metadata.threadId === 'string' ? metadata.threadId : null,
+        messagePreview: typeof metadata.preview === 'string' ? metadata.preview : null,
+        metadata: payload.metadata ?? {}
+      });
+    }
   } catch {
     // Best effort only.
   }

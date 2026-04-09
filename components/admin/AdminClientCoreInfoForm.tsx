@@ -173,7 +173,7 @@ export function AdminClientCoreInfoForm({
       if (!res.ok) throw new Error(json?.error ?? 'Salvataggio non riuscito.');
 
       // Save acquisition/referral in company_crm.admin_fields (internal-only, but part of the same "scheda cliente").
-      await fetch('/api/admin/company-crm', {
+      const crmRes = await fetch('/api/admin/company-crm', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -195,6 +195,10 @@ export function AdminClientCoreInfoForm({
           }
         })
       });
+      const crmJson = (await crmRes.json().catch(() => null)) as { error?: string } | null;
+      if (!crmRes.ok) {
+        throw new Error(crmJson?.error ?? 'Salvataggio CRM non riuscito.');
+      }
 
       setOk('Salvato.');
       setEditing(false);

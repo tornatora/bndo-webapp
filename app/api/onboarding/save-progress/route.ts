@@ -206,16 +206,41 @@ export async function POST(request: Request) {
     ]);
     const quoteRequirementKey = quoteRequirement?.requirement_key ?? null;
 
+    const removedRequirementKeys = new Set(formData.getAll('removedRequirementKeys').map(String));
+
+    const { data: existingDocsRaw } = await admin
+      .from('application_documents')
+      .select('requirement_key, file_name')
+      .eq('application_id', application.id);
+    const existingRequirementKeys = new Set(
+      (existingDocsRaw ?? [])
+        .map((row) => (typeof row.requirement_key === 'string' ? row.requirement_key.trim() : ''))
+        .filter((key) => key && !removedRequirementKeys.has(key))
+    );
+    const existingFileNames = new Set(
+      (existingDocsRaw ?? [])
+        .map((row) => String(row.file_name ?? '').toLowerCase())
+        .filter(Boolean)
+    );
+
     const uploadedRequirementKeys = new Set<string>();
     const uploadedFileNames: string[] = [];
 
     const uploadApplicationDocument = async (args: { file: File; label: string; requirementKey: string | null }) => {
       if (args.requirementKey && isDashboardExcludedRequirement(args.requirementKey, args.label)) return null;
+      if (args.requirementKey && existingRequirementKeys.has(args.requirementKey)) {
+        uploadedRequirementKeys.add(args.requirementKey);
+        return null;
+      }
 
       const timestamp = Date.now();
       const safeOriginal = safeFileName(args.file.name);
       const safeLabel = safeFileName(args.label).slice(0, 80) || 'documento';
       const fileName = `${safeLabel}__${safeOriginal}`;
+      if (existingFileNames.has(fileName.toLowerCase())) {
+        if (args.requirementKey) uploadedRequirementKeys.add(args.requirementKey);
+        return null;
+      }
       const storagePath = `${profile.company_id}/${application.id}/${timestamp}_${crypto.randomUUID()}_${fileName}`;
       const fileBuffer = Buffer.from(await args.file.arrayBuffer());
 
@@ -271,8 +296,6 @@ export async function POST(request: Request) {
         requirementKey: quoteRequirementKey
       });
     }
-
-    const removedRequirementKeys = new Set(formData.getAll('removedRequirementKeys').map(String));
 
     const { data: existingRequirementDocs, error: existingRequirementDocsError } = await admin
       .from('application_documents')

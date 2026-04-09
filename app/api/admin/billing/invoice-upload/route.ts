@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireOpsProfile } from '@/lib/auth';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import type { Json } from '@/lib/supabase/database.types';
 
@@ -27,6 +28,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'File troppo grande. Max 25MB.' }, { status: 422 });
     }
 
+    const { data: existing, error: readErr } = await supabaseAdmin
+      .from('company_crm')
+      .select('admin_fields')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (readErr) {
+      if (isMissingTable(readErr, 'company_crm')) {
+        return NextResponse.json(
+          {
+            error:
+              'CRM avanzato non ancora attivo su questo ambiente: upload fatture temporaneamente non disponibile.'
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json({ error: readErr.message }, { status: 500 });
+    }
+
     const timestamp = Date.now();
     const storagePath = `${companyId}/invoices/${timestamp}_${safeName(file.name)}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
@@ -41,13 +60,6 @@ export async function POST(request: Request) {
     const url = signed?.signedUrl ?? null;
 
     // Persist invoice list in company_crm.admin_fields.billing.invoices
-    const { data: existing, error: readErr } = await supabaseAdmin
-      .from('company_crm')
-      .select('admin_fields')
-      .eq('company_id', companyId)
-      .maybeSingle();
-    if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 });
-
     const adminFields = ((existing?.admin_fields ?? {}) as Record<string, unknown>) ?? {};
     const billing =
       adminFields.billing && typeof adminFields.billing === 'object' && !Array.isArray(adminFields.billing)

@@ -12,6 +12,7 @@ import {
   type PracticeQuizQuestion,
   type PracticeSourceChannel
 } from '@/lib/practices/orchestrator';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { dispatchPracticeQuizNotifications } from '@/lib/services/quizNotifications';
 
 export const runtime = 'nodejs';
@@ -187,9 +188,9 @@ function buildFallbackFlow(args: {
     questions: [
       {
         questionKey: 'requisiti_base',
-        label: 'Confermi di rispettare i requisiti base del bando?',
-        description: 'Seleziona Sì solo se i requisiti risultano compatibili con il tuo profilo.',
-        reasoning: 'La verifica preliminare evita avvii pratica non coerenti.',
+        label: 'Il progetto sarà realizzato nel territorio indicato dal bando?',
+        description: 'Questa è una verifica preliminare bloccante.',
+        reasoning: 'La localizzazione del progetto è uno dei criteri principali di ammissibilità.',
         questionType: 'boolean',
         options: [
           { value: 'yes', label: 'Sì' },
@@ -515,6 +516,38 @@ export async function POST(request: Request, context: { params: { applicationId:
       console.error('[PRACTICE_QUIZ_NOTIFY_ERROR]', notificationError);
     }
 
+    void emitNotificationEvent({
+      eventType: 'quiz_completed',
+      actorProfileId: profile.id,
+      actorRole: 'client_admin',
+      companyId: profile.company_id,
+      applicationId: params.applicationId,
+      customerName: profile.full_name,
+      practiceTitle: tender?.title ?? flow.grantTitle,
+      metadata: {
+        submissionId: result.submissionId,
+        eligibility: result.eligibility,
+        sourceChannel: flow.sourceChannel
+      }
+    }).catch(() => undefined);
+
+    if (result.eligibility !== 'not_eligible') {
+      void emitNotificationEvent({
+        eventType: 'quiz_passed',
+        actorProfileId: profile.id,
+        actorRole: 'client_admin',
+        companyId: profile.company_id,
+        applicationId: params.applicationId,
+        customerName: profile.full_name,
+        practiceTitle: tender?.title ?? flow.grantTitle,
+        metadata: {
+          submissionId: result.submissionId,
+          eligibility: result.eligibility,
+          sourceChannel: flow.sourceChannel
+        }
+      }).catch(() => undefined);
+    }
+
     return NextResponse.json({
       ok: true,
       eligibility: result.eligibility,
@@ -522,7 +555,10 @@ export async function POST(request: Request, context: { params: { applicationId:
       completedAt: result.completedAt,
       reviewReasons: result.reviewNotes ?? [],
       requirementStatus,
-      nextPath: result.eligibility === 'eligible' ? `/dashboard/practices/${params.applicationId}?docs=missing` : null
+      nextPath:
+        result.eligibility !== 'not_eligible'
+          ? `/dashboard/practices/${params.applicationId}?docs=missing`
+          : null
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

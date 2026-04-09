@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { runStreamingChat } from '@/lib/ai/conversationOrchestrator';
-import { nextBestFieldFromStep } from '@/lib/conversation/questionPlanner';
+import { naturalBridgeQuestion, nextBestFieldFromStep, questionFor } from '@/lib/conversation/questionPlanner';
 import { profileCompletenessScore } from '@/lib/matching/refineQuestion';
 import { normalizeProfile } from '@/lib/matching/profileNormalizer';
 import { checkRateLimit } from '@/lib/security/rateLimit';
 import { publicError, rejectCrossSiteMutation } from '@/lib/security/http';
-import { evaluateScanReadiness } from '@/lib/conversation/scanReadiness';
 import { evaluateAdaptiveScanReadiness } from '@/lib/conversation/adaptiveScanReadiness';
 import { nextStepFromProfile, scanReadinessReasonForStep } from '@/lib/conversation/stepPlanner';
+import { extractProfileFromMessage } from '@/lib/engines/profileExtractor';
 import {
   buildRollingSummary,
   decodeLegacySessionCookie,
@@ -22,13 +22,26 @@ import {
 import type { ConversationMode, Session, Step, UserProfile } from '@/lib/conversation/types';
 import type { ChatAction } from '@/lib/ai/ChatDecisionModel';
 
-export const runtime = 'edge';
+// Usiamo il runtime standard per maggiore affidabilità e compatibilità con la logica complessa dei bandi
+export const dynamic = 'force-dynamic';
 
 const COOKIE_NAME = 'bndo_assistant_session';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 8;
 const RATE_COOKIE = 'bndo_assistant_rl';
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX_PER_WINDOW = 40;
+const CHAT_BACKEND_PROXY_MODE_RAW = (process.env.CHAT_BACKEND_PROXY_MODE ?? 'off').trim().toLowerCase();
+const CHAT_BACKEND_PROXY_MODE =
+  CHAT_BACKEND_PROXY_MODE_RAW === 'on' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === 'true' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === '1' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === 'yes';
+const CHAT_PROXY_BASE_URL =
+  (process.env.CHAT_PROXY_BASE_URL || 'https://69ce95a19126a43a447cb472--cheerful-cobbler-f23efc.netlify.app').replace(
+    /\/+$/,
+    ''
+  );
+const CHAT_PROXY_TIMEOUT_MS = Number.parseInt(process.env.CHAT_PROXY_TIMEOUT_MS || '30000', 10);
 
 const payloadSchema = z.object({
   message: z.string().min(1).max(1200),
@@ -143,6 +156,45 @@ function computeScanHash(profile: UserProfile) {
   return bits.map((bit) => String(bit ?? '')).join('|');
 }
 
+function buildFallbackAssistantText(args: { message: string; step: Step; interactionId: string }) {
+  const normalized = args.message.toLowerCase();
+  if (
+    normalized.includes('cosa puoi fare') ||
+    normalized.includes('in cosa mi aiuti') ||
+    normalized.includes('come funzioni')
+  ) {
+    return [
+      'Posso aiutarti a trovare i bandi giusti, spiegarti requisiti e importi in modo semplice e guidarti passo passo fino alla selezione più adatta.',
+      "Partiamo dal tuo caso: l'attività è già operativa o la devi ancora avviare?"
+    ].join(' ');
+  }
+
+  const bridge = naturalBridgeQuestion(args.step, 1);
+  if (bridge) return bridge;
+
+  const seededQuestion = questionFor(args.step, args.interactionId, 1).trim();
+  if (seededQuestion) return seededQuestion;
+
+  return 'Per continuare in modo preciso, dimmi cosa vuoi finanziare in concreto.';
+}
+
+function applyHeuristicProfileUpdates(baseProfile: UserProfile, message: string): UserProfile {
+  const extracted = extractProfileFromMessage(message);
+  const updates = extracted.updates ?? {};
+  const mergedLocation = updates.location
+    ? {
+        region: updates.location.region ?? baseProfile.location?.region ?? null,
+        municipality: updates.location.municipality ?? baseProfile.location?.municipality ?? null,
+      }
+    : baseProfile.location;
+
+  return {
+    ...baseProfile,
+    ...updates,
+    location: mergedLocation ?? null,
+  };
+}
+
 function parseRateCookie(raw: string | null) {
   if (!raw) return { windowStartMs: Date.now(), count: 0 };
   const [tsRaw, countRaw] = raw.split(':');
@@ -226,6 +278,85 @@ function deleteRateCookie() {
   });
 }
 
+function buildProxyUrl(pathname: string) {
+  return `${CHAT_PROXY_BASE_URL}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
+}
+
+async function proxyChatRequest(request: Request, pathname: string, opts?: { stream?: boolean }) {
+  const controller = new AbortController();
+  const timeoutMs = Number.isFinite(CHAT_PROXY_TIMEOUT_MS) && CHAT_PROXY_TIMEOUT_MS > 0 ? CHAT_PROXY_TIMEOUT_MS : 30_000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const method = request.method.toUpperCase();
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const rawBody = hasBody ? await request.text() : null;
+
+    const headers = new Headers();
+    const contentType = request.headers.get('content-type');
+    if (contentType) headers.set('content-type', contentType);
+    const cookieHeader = request.headers.get('cookie');
+    if (cookieHeader) headers.set('cookie', cookieHeader);
+    const userAgent = request.headers.get('user-agent');
+    if (userAgent) headers.set('user-agent', userAgent);
+    const accept = request.headers.get('accept');
+    if (accept) headers.set('accept', accept);
+
+    const upstream = await fetch(buildProxyUrl(pathname), {
+      method,
+      headers,
+      body: hasBody ? rawBody : undefined,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+
+    const responseHeaders = new Headers();
+    const upstreamContentType = upstream.headers.get('content-type');
+    if (upstreamContentType) responseHeaders.set('content-type', upstreamContentType);
+    const upstreamCacheControl = upstream.headers.get('cache-control');
+    if (upstreamCacheControl) responseHeaders.set('cache-control', upstreamCacheControl);
+    const setCookie = upstream.headers.get('set-cookie');
+    if (setCookie) responseHeaders.append('set-cookie', setCookie);
+
+    if (opts?.stream) {
+      if (!responseHeaders.has('content-type')) responseHeaders.set('content-type', 'text/event-stream');
+      if (!responseHeaders.has('cache-control')) responseHeaders.set('cache-control', 'no-cache, no-transform');
+      responseHeaders.set('connection', 'keep-alive');
+      return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
+    }
+
+    const text = await upstream.text();
+    return new NextResponse(text, { status: upstream.status, headers: responseHeaders });
+  } catch (error) {
+    if (opts?.stream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: 'error',
+                content: "Mmm, c'è un piccolo intoppo nella connessione. Riprova tra un istante."
+              })}\n\n`
+            )
+          );
+          controller.close();
+        }
+      });
+      return new NextResponse(stream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+        }
+      });
+    }
+    return NextResponse.json({ error: publicError(error, "Mmm, c'è un piccolo intoppo nella connessione. Riprova tra un istante.") }, { status: 503 });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function ensureConversationId(provided?: string | null) {
   const byPayload = provided?.trim();
   if (byPayload && byPayload.startsWith('conv_')) return byPayload;
@@ -235,6 +366,10 @@ function ensureConversationId(provided?: string | null) {
 }
 
 export async function POST(request: Request) {
+  if (CHAT_BACKEND_PROXY_MODE) {
+    return proxyChatRequest(request, '/api/conversation', { stream: true });
+  }
+
   const csrf = rejectCrossSiteMutation(request);
   if (csrf) return csrf;
 
@@ -297,29 +432,104 @@ export async function POST(request: Request) {
 
     const stream = new ReadableStream({
       async start(controller) {
+        const emitFallbackMetadata = () => {
+          const latestSession = getSession(conversationId) ?? session;
+          const currentProfile = (latestSession.userProfile ?? seededUserProfile ?? {}) as UserProfile;
+          const mergedProfile = applyHeuristicProfileUpdates(currentProfile, trimmedMessage);
+          const adaptiveReadiness = evaluateAdaptiveScanReadiness(mergedProfile);
+          const scanHash = adaptiveReadiness.ready ? computeScanHash(mergedProfile) : null;
+          const shouldScanNow = Boolean(
+            (adaptiveReadiness.ready || (latestSession.lastAskedStep === 'preScanConfirm' && adaptiveReadiness.ready)) &&
+              scanHash !== latestSession.lastScanHash
+          );
+          const nextStep = shouldScanNow ? 'ready' : nextStepFromProfile(mergedProfile);
+          const fallbackText = shouldScanNow
+            ? 'Perfetto, ora ho i dati essenziali. Avvio subito la selezione dei bandi più adatti al tuo profilo.'
+            : buildFallbackAssistantText({
+                message: trimmedMessage,
+                step: nextStep,
+                interactionId,
+              });
+
+          const finalMeta = withConversationMeta({
+            userProfile: mergedProfile,
+            step: nextStep,
+            assistantText: fallbackText,
+            readyToScan: shouldScanNow,
+            mode: shouldScanNow ? 'scan_ready' : 'profiling',
+            action: shouldScanNow ? 'run_scan' : 'ask_clarification',
+            aiSource: 'error',
+            needsClarification: !shouldScanNow,
+            nextQuestionField: nextBestFieldFromStep(nextStep),
+            profileCompletenessScore: profileCompletenessScore(normalizeProfile(mergedProfile), adaptiveReadiness.missingSignals),
+            scanReadinessReason: scanReadinessReasonForStep(nextStep, mergedProfile),
+            scanHash: shouldScanNow ? scanHash : null,
+            interactionId,
+            conversationId,
+            modelUsed: undefined,
+            routingReason: 'deterministic_fallback',
+            confidence: 0.72,
+            citations: [],
+            estimatedWithWarning: false,
+            factSource: 'none',
+            groundingStatus: 'degraded',
+          });
+
+          const updatedTurns = Array.isArray(latestSession.recentTurns) ? [...latestSession.recentTurns] : [];
+          if (fallbackText) {
+            const last = updatedTurns[updatedTurns.length - 1];
+            if (!(last?.role === 'assistant' && last.text === fallbackText)) {
+              updatedTurns.push({ role: 'assistant', text: fallbackText });
+            }
+          }
+
+          const streamedSession = {
+            ...latestSession,
+            userProfile: mergedProfile,
+            step: nextStep,
+            qaMode: false,
+            lastAskedStep: nextStep === 'ready' ? latestSession.lastAskedStep ?? null : nextStep,
+            recentTurns: safeSliceTurns(updatedTurns, 24),
+            conversationSummary: buildRollingSummary({
+              profile: mergedProfile,
+              turns: safeSliceTurns(updatedTurns, 24),
+              action: shouldScanNow ? 'run_scan' : 'ask_clarification',
+            }),
+            updatedAt: new Date().toISOString(),
+          } as Session;
+          (streamedSession as any).pendingInteractionId = interactionId;
+          upsertSession(streamedSession);
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: fallbackText })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'metadata', content: finalMeta })}\n\n`));
+        };
+
         try {
           let finalAssistantText = '';
+          let metadataEmitted = false;
+          let fallbackEmitted = false;
           for await (const chunk of runStreamingChat(trimmedMessage, seededUserProfile, historyForOrchestrator, {
             strictFocusedGrant: shouldForceGrantFocus,
           })) {
             if (chunk.type === 'metadata') {
+              metadataEmitted = true;
               const rawMeta = chunk.content ?? {};
               const mergedProfile = rawMeta.mergedProfile as UserProfile;
-              const scanReadiness = evaluateScanReadiness(mergedProfile);
               const adaptiveReadiness = evaluateAdaptiveScanReadiness(mergedProfile);
-              const scanHash = scanReadiness.hardScanReady || adaptiveReadiness.ready ? computeScanHash(mergedProfile) : null;
+              const scanHash = adaptiveReadiness.ready ? computeScanHash(mergedProfile) : null;
+              
               const scanIntentRequested =
                 rawMeta.finalAction === 'run_scan' ||
                 rawMeta.finalAction === 'refine_after_scan' ||
-                rawMeta.intent === 'scan_ready' ||
-                rawMeta.intent === 'discovery';
+                rawMeta.intent === 'scan_ready';
+
               const technicalQaTurn = rawMeta.intent === 'measure_question' || rawMeta.intent === 'general_qa';
 
               const shouldScanNow = Boolean(
                 scanIntentRequested &&
                   !technicalQaTurn &&
-                  (scanReadiness.ready || adaptiveReadiness.ready || (session.lastAskedStep === 'preScanConfirm' && scanReadiness.hardScanReady)) &&
-                  (scanHash !== session.lastScanHash || rawMeta.intent === 'scan_ready' || rawMeta.intent === 'discovery')
+                  adaptiveReadiness.ready &&
+                  (scanHash !== session.lastScanHash || rawMeta.intent === 'scan_ready')
               );
 
               const nextStep = shouldScanNow ? 'ready' : nextStepFromProfile(mergedProfile);
@@ -339,7 +549,7 @@ export async function POST(request: Request) {
                 aiSource: rawMeta.response_text ? 'openai' : 'error',
                 needsClarification: !shouldScanNow && rawMeta.finalAction === 'ask_clarification',
                 nextQuestionField: nextBestFieldFromStep(nextStep),
-                profileCompletenessScore: profileCompletenessScore(normalizeProfile(mergedProfile), scanReadiness.missingSignals),
+                profileCompletenessScore: profileCompletenessScore(normalizeProfile(mergedProfile), adaptiveReadiness.missingSignals),
                 scanReadinessReason: scanReadinessReasonForStep(nextStep, mergedProfile),
                 scanHash: shouldScanNow ? scanHash : null,
                 strategicFeedback: rawMeta.strategicFeedback,
@@ -388,17 +598,22 @@ export async function POST(request: Request) {
             } else if (chunk.type === 'thinking') {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'thinking', content: Boolean(chunk.content) })}\n\n`));
             } else if (chunk.type === 'error') {
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'error', content: String(chunk.content ?? 'Errore conversazione.') })}\n\n`)
-              );
+              if (!metadataEmitted && !fallbackEmitted) {
+                fallbackEmitted = true;
+                emitFallbackMetadata();
+              } else {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: 'error', content: String(chunk.content ?? 'Errore conversazione.') })}\n\n`)
+                );
+              }
             }
           }
+          if (!metadataEmitted && !fallbackEmitted) {
+            emitFallbackMetadata();
+          }
         } catch (error) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: 'error', content: publicError(error, 'Errore nella generazione della risposta.') })}\n\n`
-            )
-          );
+          console.error('Conversation stream fatal fallback:', error);
+          emitFallbackMetadata();
         } finally {
           controller.close();
         }
@@ -421,6 +636,10 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  if (CHAT_BACKEND_PROXY_MODE) {
+    return proxyChatRequest(request, '/api/conversation');
+  }
+
   const csrf = rejectCrossSiteMutation(request);
   if (csrf) return csrf;
 
@@ -471,6 +690,10 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (CHAT_BACKEND_PROXY_MODE) {
+    return proxyChatRequest(request, '/api/conversation');
+  }
+
   const csrf = rejectCrossSiteMutation(request);
   if (csrf) return csrf;
 

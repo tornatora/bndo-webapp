@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-const LEGACY_AUTOIMPIEGO_QUIZ_URL = 'https://bndo.it/quiz/autoimpiego';
-
 type CatalogItem = {
   grantId: string;
   title: string;
@@ -96,7 +94,6 @@ type BandiCatalogViewProps = {
   title?: string;
   subtitle?: string;
   onOpenDetail?: (grantId: string) => void;
-  onVerify?: (grantId: string) => void;
 };
 
 function formatDeadline(value: string | null): string {
@@ -106,15 +103,10 @@ function formatDeadline(value: string | null): string {
   return `Scadenza: ${date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 }
 
-function openLegacyAutoimpiegoQuiz() {
-  window.location.href = LEGACY_AUTOIMPIEGO_QUIZ_URL;
-}
-
 export function BandiCatalogView({
   title = 'Catalogo Bandi',
   subtitle = 'Tutti i bandi attivi da fonti italiane',
   onOpenDetail,
-  onVerify,
 }: BandiCatalogViewProps) {
   const [items, setItems] = useState<CatalogItem[]>(() => catalogBootstrapData?.items ?? []);
   const [page, setPage] = useState(() => catalogBootstrapData?.page ?? 1);
@@ -222,15 +214,6 @@ export function BandiCatalogView({
     if (onOpenDetail) onOpenDetail(grantId);
     else window.location.href = `/dashboard/new-practice?mode=detail&grantId=${encodeURIComponent(grantId)}&source=scanner`;
   }, [onOpenDetail]);
-
-  const openVerify = useCallback((item: CatalogItem) => {
-    if (item.isLegacyQuizGrant) {
-      openLegacyAutoimpiegoQuiz();
-      return;
-    }
-    if (onVerify) onVerify(item.grantId);
-    else window.location.href = `/dashboard/new-practice?mode=quiz&grantId=${encodeURIComponent(item.grantId)}&source=scanner`;
-  }, [onVerify]);
 
   useEffect(() => {
     let cancelled = false;
@@ -492,17 +475,7 @@ export function BandiCatalogView({
                       openDetail(item.grantId);
                     }}
                   >
-                    <span>Vedi dettagli</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="practice-btn catalog-action-btn"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openVerify(item);
-                    }}
-                  >
-                    <span>Verifica requisiti</span>
+                    <span>Dettagli bndo</span>
                   </button>
                 </div>
               </article>

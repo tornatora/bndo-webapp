@@ -1,5 +1,6 @@
 import type { UserProfile } from '@/lib/conversation/types';
 import { normalizeForMatch } from '@/lib/conversation/intentRouter';
+import { evaluateProfileCompleteness } from '@/lib/conversation/profileCompleteness';
 
 export type ScanMissingSignal =
   | 'fundingGoal'
@@ -36,7 +37,21 @@ function isGenericFundingGoal(text: string) {
     'ricerca',
     'sviluppo',
     'marketing',
-    'e-commerce'
+    'e-commerce',
+    'bnb',
+    'be&b',
+    'be b',
+    'hotel',
+    'affittacamere',
+    'ristorante',
+    'pizzeria',
+    'officina',
+    'laboratorio',
+    'negozio',
+    'commercio',
+    'industria',
+    'e-bike',
+    'noleggio'
   ];
   if (words.some((w) => specificTerms.some((t) => w.includes(t)))) return false;
   const generic = [
@@ -77,18 +92,18 @@ function hasPrecisionSignal(profile: UserProfile) {
       profile.contributionPreference ||
       profile.atecoAnswered ||
       profile.sector ||
-      profile.employees !== null ||
-      profile.requestedContributionEUR !== null ||
-      ((profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35') && Boolean(profile.employmentStatus))
+      profile.employees != null ||
+      profile.requestedContributionEUR != null ||
+      ((profile.age != null || profile.ageBand === 'under35' || profile.ageBand === 'over35') && Boolean(profile.employmentStatus))
   );
 }
 
 function hasBusinessContext(profile: UserProfile) {
-  return profile.businessExists !== null || Boolean(profile.activityType?.trim());
+  return profile.businessExists != null || Boolean(profile.activityType?.trim());
 }
 
 function needsFounderEligibilityData(profile: UserProfile) {
-  const hasAgeSignal = profile.age !== null || profile.ageBand === 'under35' || profile.ageBand === 'over35';
+  const hasAgeSignal = profile.age != null || profile.ageBand === 'under35' || profile.ageBand === 'over35';
   return profile.businessExists === false && (!hasAgeSignal || !profile.employmentStatus);
 }
 
@@ -97,7 +112,7 @@ function isSouthYouthStartupPriorityProfile(profile: UserProfile) {
   const region = (profile.location?.region ?? '').trim();
   if (!region || !SOUTH_PRIORITY_REGIONS.has(region)) return false;
   const age = profile.age ?? null;
-  const youthByAge = age !== null && age >= 18 && age <= 35;
+  const youthByAge = age != null && age >= 18 && age <= 35;
   const youthByBand = profile.ageBand === 'under35';
   if (!youthByAge && !youthByBand) return false;
   const employmentNorm = normalizeForMatch(profile.employmentStatus ?? '');
@@ -118,19 +133,43 @@ export function evaluateAdaptiveScanReadiness(profile: UserProfile): ScanAdaptiv
   if (!hasContext) missingSignals.push('businessContext');
   if (profile.businessExists === false && needsFounderEligibilityData(profile)) missingSignals.push('founderEligibility');
 
+  // CRITICAL: Raise the bar for Scan Readiness. 
+  // No more "hasty" scans with just region and goal.
   const hasTopic = hasTopicSignal(profile);
   const hasPrecision = hasPrecisionSignal(profile);
-  const corePillarsOk = Boolean(goalText && !goalIsGeneric && hasRegion && hasContext);
-  const genericWithPrecisionOk = Boolean(goalIsGeneric && hasRegion && hasContext && (hasTopic || hasPrecision || southYouthStartupPriority));
+  
+  // To be ready, we need all basic pillars + at least one precision signal (sector/budget/age)
+  // For startups, founderEligibility is NON-NEGOTIABLE.
+  
+  let isReady = false;
+  const basicPillarsOk = Boolean(goalText && !goalIsGeneric && hasRegion && hasContext);
+  const hasCriticalMissing = missingSignals.includes('fundingGoal') || 
+                             missingSignals.includes('location') || 
+                             missingSignals.includes('businessContext') ||
+                             missingSignals.includes('founderEligibility');
 
-  if (!corePillarsOk && !genericWithPrecisionOk && !missingSignals.includes('topicPrecision')) {
-    missingSignals.push('topicPrecision');
+  if (basicPillarsOk && !hasCriticalMissing && (hasTopic || hasPrecision)) {
+    isReady = true;
   }
 
-  const isReady = corePillarsOk || missingSignals.length === 0;
+  // Final fail-safe 1: if it's a startup and we don't know the founder, we ARE NOT READY.
+  if (profile.businessExists === false && needsFounderEligibilityData(profile)) {
+    isReady = false;
+    if (!missingSignals.includes('founderEligibility')) missingSignals.push('founderEligibility');
+  }
+
+  // Final fail-safe 2: se l'engine di profile completeness ha intercettato domande esperte 
+  // (es. agricoltura, tech40, propertyStatus...), blocchiamo lo scan per forzarle.
+  const comp = evaluateProfileCompleteness(profile);
+  const expertFields = ['agricultureStatus', 'professionalRegister', 'tech40', 'propertyStatus', 'teamMajority', 'foundationYear', 'annualTurnover', 'isInnovative'];
+  if (isReady && comp.missingSignals.some(m => expertFields.includes(m))) {
+    isReady = false;
+    if (!missingSignals.includes('topicPrecision')) missingSignals.push('topicPrecision');
+  }
+
   return {
     ready: isReady,
-    missingSignals: corePillarsOk ? [] : missingSignals,
+    missingSignals: isReady ? [] : missingSignals,
     southYouthStartupPriority
   };
 }

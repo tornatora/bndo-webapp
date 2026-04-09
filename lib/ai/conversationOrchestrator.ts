@@ -22,7 +22,6 @@ import { ChatDecisionModel, ChatAction } from './ChatDecisionModel';
 import { STRUCTURED_EXTRACTION_SYSTEM_PROMPT } from './structuredPrompt';
 import { UserFundingProfile } from '../../types/userFundingProfile';
 import { UserProfile } from '../conversation/types';
-import { evaluateScanReadiness } from '../conversation/scanReadiness';
 import { WebSearchService } from './webSearchEngine';
 import { evaluateProfileCompleteness } from '../conversation/profileCompleteness';
 import { answerFaq, buildKnowledgeContext as buildKnowledgeContextFromRules } from '../knowledge/regoleBandi';
@@ -38,6 +37,8 @@ import { detectTurnIntent, isDiscoveryIntent, isQuestionLike } from '../conversa
 import { loadHybridDatasetDocs } from '../matching/datasetRepository';
 import { evaluateHardEligibility } from '../matching/eligibilityEngine';
 import { normalizeProfile } from '../matching/profileNormalizer';
+import { isSectorProtected } from '../conversation/sectorLogic';
+import { evaluateAdaptiveScanReadiness } from '../conversation/adaptiveScanReadiness';
 import { NormalizedMatchingProfile } from '../matching/types';
 
 const DEFAULT_SIMPLE_MODEL = 'gpt-4.1-mini';
@@ -318,7 +319,15 @@ export function validateAndMergeExtraction(
         };
     }
     if (extracted.ateco) updates.ateco = extracted.ateco;
-    if (extracted.settore) updates.sector = extracted.settore;
+    if (extracted.settore) {
+        // Global Sector Protection: don't overwrite a core sector with generic activity words
+        const s = extracted.settore;
+        if (isSectorProtected(currentMemory.sector as string | null, s as string | null)) {
+            // Probably a funding goal confused for a sector, ignore override
+        } else {
+            updates.sector = s;
+        }
+    }
     if (extracted.forma_giuridica) updates.legalForm = extracted.forma_giuridica;
     if (typeof extracted.startup === 'boolean') updates.businessExists = !extracted.startup;
     if (typeof extracted.impresa_gia_costituita === 'boolean') updates.businessExists = extracted.impresa_gia_costituita;
@@ -417,20 +426,14 @@ export function validateAndMergeExtraction(
         finalIntent = 'off_topic';
         // We set a marker for the route to know it's a foreign request
         (mergedProfile as any).isForeignRequest = true;
-    } else if (scanReady) {
+    } else if (completeness.level === 'strong_ready') {
         // Profilo strong_ready: andiamo allo scan a meno che non sia QA o esplicitamente piccola chiacchierata
         if (finalAction !== 'answer_measure_question' && finalAction !== 'answer_general_qa' && finalAction !== 'handoff_human' && finalIntent !== 'small_talk') {
             finalAction = 'run_scan';
         }
-    } else if (completeness.level === 'hard_scan_ready') {
-        // Profilo hard_scan_ready: BILANCIAMENTO. 
-        // Se il LLM ha deciso di chiedere ancora (ask_clarification), lo lasciamo fare.
-        // Se ha deciso di scansionare (run_scan), lo lasciamo fare.
-        if (finalAction !== 'run_scan' && finalAction !== 'ask_clarification') {
-             // Fallback: se ha deciso altro (es. QA), seguiamo il LLM.
-        }
     } else {
-        // Profilo non ancora sufficiente: blocca qualsiasi scan forzato
+        // PRODUCTION LOCK: Se non è strong_ready (profilo robusto completo), BLOCCHIAMO lo scanner.
+        // Il consulente deve chattare finché non ha tutto il necessario (Settore, Budget, Founder Data).
         if (finalAction === 'run_scan' || finalAction === 'refine_after_scan') {
             finalAction = 'ask_clarification';
         }
@@ -672,8 +675,9 @@ export async function runTwoPassChat(
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     
     if (!apiKey) {
-        // FALLBACK DETERMINISTICO: nessun OpenAI, logica pura
-        const scanReady = completeness.level === 'strong_ready';
+        const completeness = evaluateProfileCompleteness(baseProfile as UserProfile);
+        const scanReadiness = evaluateAdaptiveScanReadiness(baseProfile as UserProfile);
+        const scanReady = completeness.level === 'strong_ready' && scanReadiness.ready;
         const finalAction = scanReady ? 'run_scan' : 'ask_clarification';
         const intent = scanReady ? 'scan_ready' : 'profiling';
         return {
@@ -952,6 +956,15 @@ export async function* runStreamingChat(
 
     // PASS 1-3.5 (Deterministic + Knowledge) are fast; do not block TTFT on anything optional.
     const heuristic = extractProfileFromMessage(userMessage);
+
+    // SHORT MESSAGE GUARD: On messages ≤ 4 words, the heuristic extractor only sees
+    // the current message without conversation context. Ambiguous fields like sector,
+    // activityType, businessExists should NOT be overwritten because short answers
+    // (e.g. "srl, ristrutturazioni") need conversational context to interpret correctly.
+    // The LLM structured extraction (which sees full history) will handle these.
+    const messageWordCount = userMessage.trim().split(/[\s,;]+/).filter(Boolean).length;
+    const isShortAmbiguousMessage = messageWordCount <= 4;
+
     const updates: Partial<UserProfile> = {};
     if (heuristic.updates.location?.region) {
         updates.location = { 
@@ -959,15 +972,16 @@ export async function* runStreamingChat(
             municipality: currentMemory.location?.municipality ?? null 
         };
     }
-    if (heuristic.updates.sector) updates.sector = heuristic.updates.sector;
+    // Ambiguous fields: skip on short messages, let LLM with context decide
+    if (heuristic.updates.sector && !isShortAmbiguousMessage) updates.sector = heuristic.updates.sector;
     if (heuristic.updates.fundingGoal) {
         updates.fundingGoal = evolveFundingGoal(currentMemory.fundingGoal, heuristic.updates.fundingGoal);
     }
-    if (heuristic.updates.businessExists !== undefined) updates.businessExists = heuristic.updates.businessExists;
-    if (heuristic.updates.activityType) updates.activityType = heuristic.updates.activityType;
+    if (heuristic.updates.businessExists !== undefined && !isShortAmbiguousMessage) updates.businessExists = heuristic.updates.businessExists;
+    if (heuristic.updates.activityType && !isShortAmbiguousMessage) updates.activityType = heuristic.updates.activityType;
     if (heuristic.updates.age !== undefined && heuristic.updates.age !== null) updates.age = heuristic.updates.age;
     if (heuristic.updates.ageBand) updates.ageBand = heuristic.updates.ageBand;
-    if (heuristic.updates.employmentStatus) updates.employmentStatus = heuristic.updates.employmentStatus;
+    if (heuristic.updates.employmentStatus && !isShortAmbiguousMessage) updates.employmentStatus = heuristic.updates.employmentStatus;
     if (heuristic.updates.legalForm) updates.legalForm = heuristic.updates.legalForm;
     if (heuristic.updates.revenueOrBudgetEUR !== undefined && heuristic.updates.revenueOrBudgetEUR !== null) {
         updates.revenueOrBudgetEUR = heuristic.updates.revenueOrBudgetEUR;
@@ -1054,7 +1068,7 @@ export async function* runStreamingChat(
     };
 
     const completeness = evaluateProfileCompleteness(baseProfile as UserProfile);
-    const scanReadiness = evaluateScanReadiness(baseProfile as UserProfile);
+    const scanReadiness = evaluateAdaptiveScanReadiness(baseProfile as UserProfile);
 
     const directOnClosedQuestion = isClosedMeasureQuestion(userMessage);
     const directOnAmbiguousMeasure = measureAnswer?.measureId === 'resto-al-sud-ambiguous';
@@ -1208,7 +1222,7 @@ export async function* runStreamingChat(
                     ? 'measure_question'
                     : intentData.qaModeActive || isQuestion
                         ? 'general_qa'
-                        : scanReadiness.hardScanReady
+                        : (completeness.level === 'strong_ready' && scanReadiness.ready)
                             ? 'scan_ready'
                             : isDiscovery
                                 ? 'discovery'
@@ -1223,9 +1237,9 @@ export async function* runStreamingChat(
                     ? 'answer_measure_question'
                     : intent === 'general_qa'
                         ? 'answer_general_qa'
-                        : scanReadiness.ready
+                        : (completeness.level === 'strong_ready' && scanReadiness.ready)
                             ? 'run_scan'
-                            : 'ask_clarification'; // For hardScanReady, we still default to clarification unless strong_ready
+                            : 'ask_clarification'; 
 
 
     const nextFieldHint = completeness.nextPriorityField
@@ -1285,36 +1299,56 @@ export async function* runStreamingChat(
         groundingStatus = 'degraded';
     }
 
+    const isQaTurn = intent === 'measure_question' || intent === 'general_qa';
+    const isClarificationTurn = finalAction === 'ask_clarification';
+
     const enhancedPrompt = [
-        'Sei BNDO Sovereign V8: il massimo esperto di finanza agevolata in Italia. Sei un consulente senior carismatico, empatico e profondamente competente. Il tuo obiettivo è essere più utile e brillante di ChatGPT nel tuo dominio specifico.',
-        'CONTEXT RETENTION: Utilizza tutti i dettagli del profilo e della cronologia recente per dare risposte personalizzate. Ricorda SEMPRE quello che l\'utente ha già detto (es. regione, settore, obiettivo) e usalo per contestualizzare la risposta.',
-        'INTELLIGENCE & VALUE: Non limitarti a raccogliere dati. Sei qui per capire il progetto. Se hai i dati base ma senti che fare "una domanda in più" (es. fatturato, dipendenti, età) può sbloccare bandi più precisi, FALA con garbo. Non avere fretta di lanciare lo scanner se la conversazione è ancora fertile.',
-        'TONO: Professionale ma amichevole, caloroso, mai robotico o burocratico. Niente preamboli inutili.',
-        'STILE CONSULENZIALE OBBLIGATORIO: rispondi come un consulente umano senior. Evita etichette tecniche in output (es. "forma aiuto:", "copertura indicativa:", "stima forte BNDO:").',
-        'LINGUAGGIO: scrivi in italiano semplice e chiarissimo (livello utente non tecnico). Evita frasi complesse e parole burocratiche.',
-        'FORMATO: usa testo naturale in 1-2 paragrafi, senza elenchi puntati salvo richiesta esplicita dell’utente.',
-        'SE LA DOMANDA È CHIUSA (es. "è tutto a fondo perduto?"): apri sempre con "Sì." oppure "No." e poi spiega in modo chiaro e concreto.',
-        'FONTI: non mostrare mai URL o elenco fonti nella risposta all’utente. Integra invece una frase naturale tipo "abbiamo verificato fonti ufficiali e autorevoli".',
-        `LUNGHEZZA: ${
-            finalAction === 'ask_clarification'
-                ? '30–70 parole'
-                : intent === 'measure_question' || intent === 'general_qa'
-                    ? '6-8 frasi chiare (circa 90-180 parole)'
-                    : '60–150 parole'
-        }.`,
-        groundedContext
-            ? 'FONTE GROUNDED: Usa il contesto fornito come verità assoluta. Se mancano dati, dillo chiaramente.'
-            : 'CONOSCENZA: Usa la tua vasta conoscenza dei bandi italiani in modo prudente.',
+        '\u2501\u2501\u2501 IDENTIT\u00c0 \u2501\u2501\u2501',
+        'Sei un consulente senior di finanza agevolata italiana con 20 anni di esperienza operativa. Lavori per BNDO.',
+        'Non sei un chatbot generico. Sei un professionista serio che aiuta concretamente le imprese a ottenere finanziamenti pubblici.',
         '',
-        'REGOLE COMPORTAMENTALI:',
-        '- Se azione=run_scan: Annuncia con entusiasmo che il profilo è maturo e stai analizzando le opportunità.',
-        '- Se azione=ask_clarification: Fai UNA domanda mirata, motivando perché quella specifica informazione fa la differenza per trovare il bando perfetto.',
-        '- Se azione=answer_*: Rispondi in modo pratico e chiudi con un invito discreto a proseguire se mancano dati chiave.',
+        '\u2501\u2501\u2501 DOMINIO \u2501\u2501\u2501',
+        'Conosci in profondit\u00e0: Resto al Sud 2.0, Autoimpiego Centro-Nord, Nuova Sabatini, Smart&Start, ON Tasso Zero, Transizione 4.0/5.0, FUSESE, ZES Unica, SIMEST Fondo 394, Contratto di Sviluppo, Fondo Garanzia PMI, Voucher Internazionalizzazione, Fondo Nuove Competenze, PSR/CSR per agricoltura, Credito R&S/Innovazione, POR-FESR regionali, startup innovative L.221/2012, regimi de minimis e GBER.',
+        'Conosci i requisiti tecnici: ATECO eligibili/esclusi, soglie dimensionali PMI, intensit\u00e0 massima di aiuto per regime, cumulo tra misure, DURC, Antimafia, SAL e rendicontazione.',
+        '',
+        '\u2501\u2501\u2501 REGOLE ANTI-ERRORE (VINCOLANTI) \u2501\u2501\u2501',
+        '1. MAI inventare importi, percentuali, scadenze, date di apertura o nomi di misure inesistenti. Se incerto: \"Conviene verificare sul portale ufficiale del gestore prima della candidatura.\"',
+        '2. Per domande CHIUSE: INIZIA SEMPRE con \"S\u00ec.\", \"No.\" o \"Dipende.\" \u2014 poi spiega il perch\u00e9.',
+        '3. Se l\'utente \u00e8 NON ELIGIBLE per una misura, dillo subito in modo chiaro e proponi l\'alternativa pi\u00f9 concreta.',
+        '4. Prima fornisci valore (rispondi, analizza, consiglia), poi eventualmente chiedi il dato mancante.',
+        '5. Non mostrare mai URL, link grezzi o fonti esplicite. Usa frasi come \"secondo fonti ufficiali Invitalia\" o \"secondo il decreto MIMIT\".',
+        '6. Non usare mai tag interni (\"Forma aiuto:\", \"Copertura indicativa:\", \"Stima forte BNDO:\").',
+        '7. Non ripetere mai informazioni gi\u00e0 date. Vai avanti.',
+        '',
+        '\u2501\u2501\u2501 STILE \u2501\u2501\u2501',
+        'TONO: Professionale e caldo.',
+        'FORMATO: Prosa naturale in paragrafi. Usa elenchi puntati SOLO per requisiti specifici.',
+        'LINGUA: Italiano chiaro. Spiega brevemente i termini tecnici la prima volta.',
+        'APERTURA: Zero preamboli (\"Certamente!\", \"Grande domanda!\"). Inizia con il contenuto.',
+        '',
+        '\u2501\u2501\u2501 LUNGHEZZA \u2501\u2501\u2501',
+        isClarificationTurn
+          ? 'MAX 60 parole. Chiedi le informazioni necessarie per procedere. Niente liste.'
+          : isQaTurn
+            ? '8-12 frasi dettagliate (150-280 parole). Sii ESAUSTIVO. Non troncare.'
+            : '60-120 parole. Diretto e pratico.',
+        '',
+        '\u2501\u2501\u2501 AZIONE \u2501\u2501\u2501',
+        isClarificationTurn
+          ? 'Fai in modo diretto la domanda o le domande per raccogliere i dati mancanti necessari per i bandi. Spiega brevemente perché servono.'
+          : finalAction === 'run_scan'
+            ? 'Annuncia che il profilo \u00e8 pronto. Dai un\'anteprima di cosa stai cercando per questo profilo.'
+            : 'Rispondi in modo completo. Chiudi con al massimo una domanda di approfondimento se davvero utile.',
+        '',
+        groundedContext
+          ? '\u2501\u2501\u2501 FONTE DATI \u2501\u2501\u2501\\nIL CONTESTO FORNITO \u00c8 LA TUA FONTE DI VERIT\u00c0. Non inventare dati assenti. Se mancano: \"Non ho dati certi \u2014 verificare il sito del gestore.\"'
+          : '\u2501\u2501\u2501 CONOSCENZA \u2501\u2501\u2501\\nUsa la tua conoscenza della finanza agevolata italiana. Se il dato \u00e8 incerto (aliquota, scadenza), sii esplicito.',
         '',
         `AZIONE_ATTUALE=${finalAction}`,
         `INTENT_RILEVATO=${intent}`,
         nextFieldHint
     ].join('\n');
+
 
 
     try {
@@ -1444,6 +1478,24 @@ export async function* runStreamingChat(
           const mergedProfile = (extraction?.mergedProfile ?? baseProfile) as UserProfile;
           const mergedActiveMeasure = extraction?.activeMeasure ?? activeMeasure;
 
+          // CRITICAL OVERRIDE: Sync metadata action with structured decision
+          let validatedAction = finalAction;
+          let validatedIntent = intent;
+          if (extraction?.finalAction) {
+              // If extraction says it's NOT ready, we MUST obey.
+              if (extraction.finalAction === 'ask_clarification' && finalAction === 'run_scan') {
+                  validatedAction = 'ask_clarification';
+                  validatedIntent = 'profiling';
+              } else if (extraction.finalAction === 'run_scan' && finalAction === 'ask_clarification') {
+                  // Only allow promotion if the profile is objectively strong_ready
+                  const finalCompleteness = evaluateProfileCompleteness(mergedProfile);
+                  if (finalCompleteness.level === 'strong_ready') {
+                      validatedAction = 'run_scan';
+                      validatedIntent = 'scan_ready';
+                  }
+              }
+          }
+
           // Calculate strategic feedback if substantial profile info is present
           let strategicFeedback: string | undefined;
           if (mergedProfile.location?.region || mergedProfile.ateco || mergedProfile.revenueOrBudgetEUR) {
@@ -1454,8 +1506,8 @@ export async function* runStreamingChat(
               type: 'metadata',
               content: {
                   mergedProfile,
-                  finalAction,
-                  intent,
+                  finalAction: validatedAction,
+                  intent: validatedIntent,
                   missing_fields: extraction?.missing_fields ?? completeness.missingSignals,
                   ambiguities: extraction?.ambiguities ?? [],
                   groundedContext,
@@ -1467,8 +1519,8 @@ export async function* runStreamingChat(
                   modelUsed: generatingModel,
                   routingReason: routingDecision.routingReason,
                   confidence: computeConfidenceScore({
-                    intent,
-                    action: finalAction,
+                    intent: validatedIntent,
+                    action: validatedAction,
                     groundedContext,
                     citationsCount: citations.length,
                     estimatedWithWarning

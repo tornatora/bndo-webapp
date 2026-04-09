@@ -10,11 +10,15 @@ export function isQuestionLike(message: string) {
   const n = normalizeForMatch(t);
   return (
     n.startsWith('come ') ||
+    n.includes(' come ') ||
     n.startsWith('cosa ') ||
+    n.includes(' cosa ') ||
     n.startsWith('quali ') ||
+    n.includes(' quali ') ||
     n.startsWith('quanto ') ||
     n.startsWith('quando ') ||
     n.startsWith('posso ') ||
+    n.includes(' posso ') ||
     n.startsWith('mi conviene') ||
     n.includes('differenza tra') ||
     n.includes('che cos') ||
@@ -64,20 +68,30 @@ export function isSmallTalkOnly(message: string) {
     'salve'
   ];
   if (small.includes(compact)) return true;
-  return compact.length <= 3;
+  // If no spaces and 3 chars or less, but we don't want to flag "spa", "snc", "srl", "boh", "bar" as small talk
+  // if they might be valid profile info. It's safer to rely on the exact matches above.
+  if (compact.length <= 4 && /^(si|no|boh|uff|mah|boh|ok\s?ok)$/.test(compact)) return true;
+  return false;
 }
 
 export function isGreeting(message: string) {
   const n = normalizeForMatch(message);
   if (!n) return false;
+  const words = n.trim().split(/\s+/).length;
+  // If it's a very long sentence, it's not JUST a greeting.
+  if (words > 4) return false;
+  
+  // Exact matches or very short phrases starting with a greeting
   return (
     n === 'ciao' ||
     n === 'salve' ||
-    n.includes('buongiorno') ||
-    n.includes('buonasera') ||
-    n.includes('buon pomeriggio') ||
-    n.includes('hey') ||
-    n.includes('ehi')
+    n === 'buongiorno' ||
+    n === 'buonasera' ||
+    n === 'buon pomeriggio' ||
+    n === 'hey' ||
+    n === 'ehi' ||
+    n === 'ciao bndo' ||
+    n === 'buonasera bndo'
   );
 }
 
@@ -147,7 +161,7 @@ export function isEligibilityCheck(message: string) {
   if (!n) return false;
   return (
     (n.includes('posso accedere') || n.includes('ho i requisiti') || n.includes('va bene per me') || n.includes('posso partecipare')) &&
-    (n.includes('sono') || n.includes('abbiamo') || n.includes('ho'))
+    (n.includes('sono') || n.includes('abbiamo') || n.includes('ho') || n.includes('posso avere') || n.includes('spetta'))
   );
 }
 
@@ -155,7 +169,7 @@ export function isDiscoveryIntent(message: string) {
   const n = normalizeForMatch(message);
   if (!n) return false;
   return (
-    (n.includes('cerco') || n.includes('voglio') || n.includes('vorrei') || n.includes('mi serve') || n.includes('bando per')) &&
+    (n.includes('cerco') || n.includes('voglio') || n.includes('vorrei') || n.includes('mi serve') || n.includes('bando per') || n.includes('agevolazion') || n.includes('opportunit') || n.includes('posso avere') || n.includes('ci sono bandi') || n.includes('ho un') || n.includes('ho una') || n.includes('aprire') || n.includes('consigliami')) &&
     !isDirectQuestionOnMeasure(message)
   );
 }
@@ -236,6 +250,8 @@ export function detectTurnIntent(args: {
   else if (measureQuestion || directQuestionOnMeasure || comparison) fallbackAction = 'answer_measure_question';
   else if (qaModeActive || questionLike) fallbackAction = 'answer_general_qa';
   else if (proceedToMatching) fallbackAction = 'run_scan';
+  else if (discovery) fallbackAction = 'ask_clarification'; // Explicitly profiling for discovery
+
 
   return {
     questionLike,

@@ -1,25 +1,25 @@
 {
-  "passed": 14,
+  "passed": 16,
   "failed": 0,
-  "skipped": 3,
+  "skipped": 1,
   "details": [
     {
       "category": "scanner-retrieval",
       "id": "software-sicilia",
       "status": "PASS",
-      "msg": "Relevant results: 3 (sector match)"
+      "msg": "Relevant results: 6 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "agricoltura-sicilia",
-      "status": "SKIP",
-      "msg": "No results (dataset may not cover this profile)"
+      "status": "PASS",
+      "msg": "Relevant results: 8 (sector match)"
     },
     {
       "category": "scanner-retrieval",
       "id": "turismo-campania",
-      "status": "SKIP",
-      "msg": "No results (dataset may not cover this profile)"
+      "status": "PASS",
+      "msg": "Relevant results: 1 (sector match)"
     },
     {
       "category": "scanner-retrieval",
@@ -36,8 +36,8 @@
     {
       "category": "scanner-retrieval",
       "id": "agroalimentare",
-      "status": "SKIP",
-      "msg": "No results (dataset may not cover this profile)"
+      "status": "PASS",
+      "msg": "Results: 2 (sector match weak, dataset dependent)"
     },
     {
       "category": "regional",
@@ -48,8 +48,8 @@
     {
       "category": "regional",
       "id": "national-for-any-region",
-      "status": "PASS",
-      "msg": "National/regional mix: 1 results"
+      "status": "SKIP",
+      "msg": "No results to check"
     },
     {
       "category": "freshness",
@@ -79,7 +79,7 @@
       "category": "direct-qa",
       "id": "bando-copre-software",
       "status": "PASS",
-      "msg": "Reply provided"
+      "msg": "Grounded answer on measure"
     },
     {
       "category": "direct-qa",
@@ -107,5 +107,5 @@
     }
   ],
   "errors": [],
-  "timestamp": "2026-03-28T16:53:57.107Z"
+  "timestamp": "2026-04-07T08:52:18.995Z"
 }

@@ -39,6 +39,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <Link href="/admin/analytics" style={{ padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, color: '#0B1136', textDecoration: 'none', background: '#F1F5F9' }}>
               📊 Analytics
             </Link>
+            <Link href="/admin/notifications" style={{ padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, color: '#0B1136', textDecoration: 'none', background: '#F1F5F9' }}>
+              🔔 Notifiche
+            </Link>
             <Link href="/admin/audit" style={{ padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, color: '#0B1136', textDecoration: 'none', background: '#F1F5F9' }}>
               🔐 Audit
             </Link>

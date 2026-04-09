@@ -611,7 +611,7 @@ export type Database = {
           company_id: string;
           user_id: string;
           source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
-          eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+          eligibility: 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
           answers: Json;
           completed_at: string;
           created_at: string;
@@ -624,7 +624,7 @@ export type Database = {
           company_id: string;
           user_id: string;
           source_channel: 'scanner' | 'chat' | 'direct' | 'admin';
-          eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+          eligibility: 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
           answers?: Json;
           completed_at?: string;
           created_at?: string;
@@ -637,7 +637,7 @@ export type Database = {
           company_id?: string;
           user_id?: string;
           source_channel?: 'scanner' | 'chat' | 'direct' | 'admin';
-          eligibility?: 'eligible' | 'not_eligible' | 'needs_review';
+          eligibility?: 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
           answers?: Json;
           completed_at?: string;
           created_at?: string;
@@ -851,6 +851,132 @@ export type Database = {
           entity_id?: string | null;
           read_at?: string | null;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      notification_inbox: {
+        Row: {
+          id: string;
+          recipient_profile_id: string;
+          recipient_role: 'client_admin' | 'consultant' | 'ops_admin';
+          event_type: string;
+          event_group:
+            | 'lead_quiz'
+            | 'pratiche'
+            | 'documenti'
+            | 'pagamenti'
+            | 'chat'
+            | 'consulenti'
+            | 'sistema';
+          priority: 'high' | 'medium';
+          title: string;
+          body: string;
+          entity_type: string | null;
+          entity_id: string | null;
+          company_id: string | null;
+          application_id: string | null;
+          thread_id: string | null;
+          action_path: string | null;
+          payload: Json;
+          dedupe_key: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          recipient_profile_id: string;
+          recipient_role: 'client_admin' | 'consultant' | 'ops_admin';
+          event_type: string;
+          event_group:
+            | 'lead_quiz'
+            | 'pratiche'
+            | 'documenti'
+            | 'pagamenti'
+            | 'chat'
+            | 'consulenti'
+            | 'sistema';
+          priority?: 'high' | 'medium';
+          title: string;
+          body: string;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          company_id?: string | null;
+          application_id?: string | null;
+          thread_id?: string | null;
+          action_path?: string | null;
+          payload?: Json;
+          dedupe_key?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          recipient_profile_id?: string;
+          recipient_role?: 'client_admin' | 'consultant' | 'ops_admin';
+          event_type?: string;
+          event_group?:
+            | 'lead_quiz'
+            | 'pratiche'
+            | 'documenti'
+            | 'pagamenti'
+            | 'chat'
+            | 'consulenti'
+            | 'sistema';
+          priority?: 'high' | 'medium';
+          title?: string;
+          body?: string;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          company_id?: string | null;
+          application_id?: string | null;
+          thread_id?: string | null;
+          action_path?: string | null;
+          payload?: Json;
+          dedupe_key?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      notification_tasks: {
+        Row: {
+          id: string;
+          notification_id: string | null;
+          created_by_profile_id: string;
+          assigned_to_profile_id: string;
+          status: 'open' | 'in_progress' | 'done' | 'cancelled';
+          title: string;
+          description: string | null;
+          due_at: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          notification_id?: string | null;
+          created_by_profile_id: string;
+          assigned_to_profile_id: string;
+          status?: 'open' | 'in_progress' | 'done' | 'cancelled';
+          title: string;
+          description?: string | null;
+          due_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          notification_id?: string | null;
+          created_by_profile_id?: string;
+          assigned_to_profile_id?: string;
+          status?: 'open' | 'in_progress' | 'done' | 'cancelled';
+          title?: string;
+          description?: string | null;
+          due_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };

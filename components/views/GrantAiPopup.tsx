@@ -68,6 +68,7 @@ export default function GrantAiPopup({ grantId, grantTitle }: GrantAiPopupProps)
     const userId = uid();
     const assistantId = uid();
     setMessages((prev) => [...prev, { id: userId, role: 'user', text: message }, { id: assistantId, role: 'assistant', text: '' }]);
+    let streamedText = '';
 
     try {
       const response = await fetch('/api/conversation', {
@@ -94,6 +95,16 @@ export default function GrantAiPopup({ grantId, grantTitle }: GrantAiPopupProps)
 
       let buffer = '';
       let finalMeta: ConversationMetadata | null = null;
+      let streamError: Error | null = null;
+
+      const commitAssistantText = (value: string) => {
+        const cleaned = String(value ?? '').trim();
+        if (!cleaned) return false;
+        setMessages((prev) =>
+          prev.map((entry) => (entry.id === assistantId ? { ...entry, text: cleaned } : entry)),
+        );
+        return true;
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -109,38 +120,43 @@ export default function GrantAiPopup({ grantId, grantTitle }: GrantAiPopupProps)
           const payload = line.slice(6);
           if (payload === '[DONE]') continue;
 
+          let parsed: { type?: string; content?: unknown };
           try {
-            const parsed = JSON.parse(payload) as { type?: string; content?: unknown };
-            if (parsed.type === 'text') {
-              const chunk = String(parsed.content ?? '');
-              if (!chunk) continue;
-              setMessages((prev) =>
-                prev.map((entry) => (entry.id === assistantId ? { ...entry, text: `${entry.text}${chunk}` } : entry)),
-              );
-            } else if (parsed.type === 'metadata') {
-              finalMeta = (parsed.content ?? {}) as ConversationMetadata;
-              if (finalMeta.conversationId) setConversationId(finalMeta.conversationId);
-            } else if (parsed.type === 'error') {
-              throw new Error(String(parsed.content ?? 'Errore durante la generazione.'));
-            }
+            parsed = JSON.parse(payload) as { type?: string; content?: unknown };
           } catch (streamErr) {
             console.warn('[GrantAiPopup] SSE parse warning', streamErr);
+            continue;
+          }
+
+          if (parsed.type === 'text') {
+            const chunk = String(parsed.content ?? '');
+            if (!chunk) continue;
+            streamedText += chunk;
+            setMessages((prev) =>
+              prev.map((entry) => (entry.id === assistantId ? { ...entry, text: `${entry.text}${chunk}` } : entry)),
+            );
+          } else if (parsed.type === 'metadata') {
+            finalMeta = (parsed.content ?? {}) as ConversationMetadata;
+            if (finalMeta.conversationId) setConversationId(finalMeta.conversationId);
+          } else if (parsed.type === 'error') {
+            streamError = new Error(String(parsed.content ?? 'Errore durante la generazione.'));
+            break;
           }
         }
+        if (streamError) break;
       }
 
-      if (finalMeta?.assistantText) {
-        setMessages((prev) =>
-          prev.map((entry) => (entry.id === assistantId ? { ...entry, text: finalMeta!.assistantText || entry.text } : entry)),
-        );
-      } else {
-        setMessages((prev) =>
-          prev.map((entry) =>
-            entry.id === assistantId && !entry.text.trim()
-              ? { ...entry, text: 'Al momento non ho una risposta utile. Riprova con una domanda più specifica sul bando.' }
-              : entry,
-          ),
-        );
+      if (streamError) {
+        throw streamError;
+      }
+
+      const metadataText = String(finalMeta?.assistantText ?? '').trim();
+      const streamed = streamedText.trim();
+      if (
+        !commitAssistantText(metadataText) &&
+        !commitAssistantText(streamed)
+      ) {
+        commitAssistantText('Al momento non ho una risposta utile. Riprova con una domanda più specifica sul bando.');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Errore temporaneo.';

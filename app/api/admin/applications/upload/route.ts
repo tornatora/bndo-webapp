@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { requireOpsProfile } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { isMissingDbObjectError } from '@/lib/ops/dbErrorGuards';
 
 export const runtime = 'nodejs';
+
+function isMissingApplicationDocumentRequirementKeyColumn(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const message = String((error as { message?: string }).message ?? '').toLowerCase();
+  return isMissingDbObjectError(error as { message?: string }) && message.includes('requirement_key');
+}
 
 export async function POST(request: Request) {
   try {
@@ -55,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Upload storage fallito: ${storageError.message}` }, { status: 500 });
     }
 
-    const { error: docError } = await supabaseAdmin.from('application_documents').insert({
+    const payloadWithRequirement = {
       application_id: applicationId,
       uploaded_by: profile.id,
       file_name: fileName,
@@ -63,7 +70,21 @@ export async function POST(request: Request) {
       storage_path: storagePath,
       file_size: file.size,
       mime_type: file.type || 'application/octet-stream'
-    });
+    };
+    const payloadWithoutRequirement = {
+      application_id: applicationId,
+      uploaded_by: profile.id,
+      file_name: fileName,
+      storage_path: storagePath,
+      file_size: file.size,
+      mime_type: file.type || 'application/octet-stream'
+    };
+
+    let { error: docError } = await supabaseAdmin.from('application_documents').insert(payloadWithRequirement);
+    if (docError && isMissingApplicationDocumentRequirementKeyColumn(docError)) {
+      const retry = await supabaseAdmin.from('application_documents').insert(payloadWithoutRequirement);
+      docError = retry.error;
+    }
 
     if (docError) {
       return NextResponse.json({ error: `Inserimento record fallito: ${docError.message}` }, { status: 500 });

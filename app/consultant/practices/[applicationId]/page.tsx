@@ -2,8 +2,14 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { ConsultantPracticeChatPanel } from '@/components/consultant/ConsultantPracticeChatPanel';
+import { ConsultantPracticeDocumentsActions } from '@/components/consultant/ConsultantPracticeDocumentsActions';
+import { ConsultantPracticeProgressPanel } from '@/components/consultant/ConsultantPracticeProgressPanel';
+import { computeDocumentChecklist, computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { computeDerivedProgressKey, extractProgressFromNotes } from '@/lib/admin/practice-progress';
 import { requireOpsOrConsultantProfile } from '@/lib/auth';
+import { listApplicationDocumentsForSingleApplicationCompat } from '@/lib/db/applicationDocumentsCompat';
 import { ensurePracticeThreadForApplication, ensurePracticeThreadParticipants } from '@/lib/ops/assignments';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 const ParamsSchema = z.object({
@@ -17,6 +23,29 @@ type PracticeMessage = {
   body: string;
   created_at: string;
 };
+
+async function listMessagesCompat(admin: any, threadId: string) {
+  const primary = await admin
+    .from('consultant_practice_messages')
+    .select('id, thread_id, sender_profile_id, body, created_at')
+    .eq('thread_id', threadId)
+    .order('created_at', { ascending: true })
+    .limit(150);
+  if (!primary.error) return { rows: primary.data ?? [], error: null as { message?: string } | null };
+  if (!isMissingTable(primary.error, 'consultant_practice_messages')) {
+    return { rows: [] as PracticeMessage[], error: primary.error };
+  }
+  const fallback = await admin
+    .from('consultant_messages')
+    .select('id, thread_id, sender_profile_id, body, created_at')
+    .eq('thread_id', threadId)
+    .order('created_at', { ascending: true })
+    .limit(150);
+  return {
+    rows: fallback.data ?? [],
+    error: fallback.error ?? null,
+  };
+}
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return 'N/D';
@@ -39,20 +68,62 @@ export default async function ConsultantPracticeDetailPage({
 
   const { data: application, error: applicationError } = await admin
     .from('tender_applications')
-    .select('id, company_id, status, supplier_registry_status, notes, updated_at, tender:tenders(title), company:companies(name)')
+    .select(
+      'id, company_id, tender_id, status, supplier_registry_status, notes, updated_at, tender:tenders(title), company:companies(name)'
+    )
     .eq('id', applicationId)
     .maybeSingle();
 
   if (applicationError || !application) notFound();
 
-  const { data: assignment } = await admin
+  const { data: assignment, error: assignmentError } = await admin
     .from('consultant_practice_assignments')
     .select('consultant_profile_id, assigned_at, note, status')
     .eq('application_id', applicationId)
     .eq('status', 'active')
     .maybeSingle();
 
-  if (profile.role === 'consultant' && assignment?.consultant_profile_id !== profile.id) {
+  let effectiveAssignment = assignment;
+  if (assignmentError && !isMissingTable(assignmentError, 'consultant_practice_assignments')) {
+    return (
+      <section className="section-card">
+        <div className="section-title">
+          <span>⚠️</span>
+          <span>Errore caricamento assegnazione</span>
+        </div>
+        <p className="admin-item-sub" style={{ marginTop: 10 }}>
+          {assignmentError.message}
+        </p>
+      </section>
+    );
+  }
+  if (assignmentError && isMissingTable(assignmentError, 'consultant_practice_assignments')) {
+    const { data: legacyThread } = await admin
+      .from('consultant_threads')
+      .select('id')
+      .eq('company_id', application.company_id)
+      .maybeSingle();
+    if (legacyThread?.id) {
+      const { data: consultantParticipants } = await admin
+        .from('consultant_thread_participants')
+        .select('profile_id, created_at')
+        .eq('thread_id', legacyThread.id)
+        .eq('participant_role', 'consultant')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const selected = (consultantParticipants ?? [])[0] as { profile_id?: string; created_at?: string } | undefined;
+      if (selected?.profile_id) {
+        effectiveAssignment = {
+          consultant_profile_id: selected.profile_id,
+          assigned_at: selected.created_at ?? null,
+          note: null,
+          status: 'active'
+        } as any;
+      }
+    }
+  }
+
+  if (profile.role === 'consultant' && effectiveAssignment?.consultant_profile_id !== profile.id) {
     return (
       <section className="section-card">
         <div className="section-title">
@@ -86,45 +157,126 @@ export default async function ConsultantPracticeDetailPage({
     await ensurePracticeThreadParticipants({
       threadId,
       clientProfileId: clientProfile?.id ?? null,
-      consultantProfileId: assignment?.consultant_profile_id ?? (profile.role === 'consultant' ? profile.id : null),
+      consultantProfileId:
+        effectiveAssignment?.consultant_profile_id ?? (profile.role === 'consultant' ? profile.id : null),
       opsProfileId: profile.role === 'ops_admin' ? profile.id : null,
     });
   } catch (cause) {
     threadError = cause instanceof Error ? cause.message : 'Thread pratica non disponibile.';
   }
 
-  const [requirementsRes, documentsRes, messagesRes] = await Promise.all([
+  const [requirementsRes, documentsResult, messagesRes] = await Promise.all([
     admin
       .from('practice_document_requirements')
       .select('requirement_key, label, is_required, status')
       .eq('application_id', applicationId)
       .order('created_at', { ascending: true }),
-    admin
-      .from('application_documents')
-      .select('id, file_name, created_at')
-      .eq('application_id', applicationId)
-      .order('created_at', { ascending: true }),
-    threadId
-      ? admin
-          .from('consultant_practice_messages')
-          .select('id, thread_id, sender_profile_id, body, created_at')
-          .eq('thread_id', threadId)
-          .order('created_at', { ascending: true })
-          .limit(150)
-      : Promise.resolve({ data: [], error: null }),
+    listApplicationDocumentsForSingleApplicationCompat({
+      client: admin as unknown as Parameters<typeof listApplicationDocumentsForSingleApplicationCompat>[0]['client'],
+      applicationId,
+      ascending: true,
+      includeExtendedColumns: true
+    }),
+    threadId ? listMessagesCompat(admin, threadId) : Promise.resolve({ rows: [], error: null }),
   ]);
 
-  const requirements = (requirementsRes.data ?? []) as Array<{
-    requirement_key: string;
-    label: string;
-    is_required: boolean;
-    status: 'missing' | 'uploaded' | 'waived';
-  }>;
-  const documents = (documentsRes.data ?? []) as Array<{ id: string; file_name: string; created_at: string }>;
-  const messages = (messagesRes.data ?? []) as PracticeMessage[];
+  if (documentsResult.error) {
+    return (
+      <section className="section-card">
+        <div className="section-title">
+          <span>⚠️</span>
+          <span>Errore documenti pratica</span>
+        </div>
+        <p className="admin-item-sub" style={{ marginTop: 10 }}>
+          {documentsResult.error.message ?? 'Impossibile caricare i documenti della pratica.'}
+        </p>
+      </section>
+    );
+  }
 
-  const missingRequirements = requirements.filter((row) => row.is_required && row.status === 'missing');
-  const uploadedRequirements = requirements.filter((row) => row.status === 'uploaded');
+  const requirementsTableMissing = Boolean(
+    requirementsRes.error && isMissingTable(requirementsRes.error, 'practice_document_requirements')
+  );
+  const requirementsErrorMessage =
+    requirementsRes.error && !requirementsTableMissing ? requirementsRes.error.message : null;
+
+  const requirements = !requirementsTableMissing
+    ? ((requirementsRes.data ?? []) as Array<{
+        requirement_key: string;
+        label: string;
+        is_required: boolean;
+        status: 'missing' | 'uploaded' | 'waived';
+      }>)
+    : [];
+
+  const documents = (documentsResult.rows ?? []).map((row) => ({
+    id: row.id ?? `${applicationId}:${row.file_name}:${row.created_at ?? ''}`,
+    file_name: row.file_name,
+    requirement_key: row.requirement_key,
+    created_at: row.created_at ?? new Date().toISOString(),
+    storage_path: row.storage_path ?? null
+  }));
+
+  const documentsWithLinks = await Promise.all(
+    documents.map(async (document) => {
+      if (!document.storage_path) {
+        return { ...document, downloadUrl: null as string | null };
+      }
+      const signed = await admin.storage.from('application-documents').createSignedUrl(document.storage_path, 3600);
+      return {
+        ...document,
+        downloadUrl: signed.error ? null : signed.data.signedUrl
+      };
+    })
+  );
+
+  const fallbackChecklist =
+    requirements.length === 0
+      ? computeDocumentChecklist(
+          applicationId,
+          String(application.tender_id ?? application.tender?.title ?? 'base'),
+          documents.map((document) => ({
+            application_id: applicationId,
+            file_name: document.file_name,
+            requirement_key: document.requirement_key
+          }))
+        )
+      : [];
+
+  const checklist = requirements.length
+    ? computeDocumentChecklistFromRequirements(
+        applicationId,
+        requirements.map((requirement) => ({
+          application_id: applicationId,
+          requirement_key: requirement.requirement_key,
+          label: requirement.label,
+          is_required: requirement.is_required
+        })),
+        documents.map((document) => ({
+          application_id: applicationId,
+          file_name: document.file_name,
+          requirement_key: document.requirement_key
+        }))
+      ).map((item) => ({
+        requirement_key: item.key,
+        label: item.label,
+        is_required: true,
+        status: item.uploaded ? ('uploaded' as const) : ('missing' as const)
+      }))
+    : fallbackChecklist.map((item) => ({
+        requirement_key: item.key,
+        label: item.label,
+        is_required: true,
+        status: item.uploaded ? ('uploaded' as const) : ('missing' as const)
+      }));
+
+  const messages = (messagesRes.rows ?? []) as PracticeMessage[];
+
+  const missingRequirements = checklist.filter((row) => row.is_required && row.status === 'missing');
+  const uploadedRequirements = checklist.filter((row) => row.status === 'uploaded');
+  const currentStep =
+    extractProgressFromNotes(application.notes ?? null) ??
+    computeDerivedProgressKey(String(application.status ?? 'draft'), missingRequirements.length);
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -165,7 +317,7 @@ export default async function ConsultantPracticeDetailPage({
           </div>
           <div className="admin-kpi">
             <div className="admin-kpi-label">Assegnata il</div>
-            <div className="admin-kpi-value">{formatDateTime(assignment?.assigned_at ?? null)}</div>
+            <div className="admin-kpi-value">{formatDateTime(effectiveAssignment?.assigned_at ?? null)}</div>
           </div>
         </div>
       </section>
@@ -178,18 +330,32 @@ export default async function ConsultantPracticeDetailPage({
         <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
           <div>
             <div className="admin-item-sub" style={{ fontWeight: 800, color: '#0B1136', marginBottom: 8 }}>
-              Documenti caricati ({documents.length})
+              Documenti caricati ({documentsWithLinks.length})
             </div>
             <div className="admin-table">
-              {documents.map((document) => (
+              {documentsWithLinks.map((document) => (
                 <div key={document.id} className="admin-table-row">
                   <div className="admin-table-main">
                     <div className="admin-table-name">{document.file_name}</div>
                     <div className="admin-table-meta">{formatDateTime(document.created_at)}</div>
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    {document.downloadUrl ? (
+                      <a
+                        href={document.downloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-action secondary"
+                      >
+                        Scarica
+                      </a>
+                    ) : (
+                      <span className="admin-item-sub">Link non disponibile</span>
+                    )}
+                  </div>
                 </div>
               ))}
-              {documents.length === 0 ? <div className="admin-item-sub">Nessun documento caricato.</div> : null}
+              {documentsWithLinks.length === 0 ? <div className="admin-item-sub">Nessun documento caricato.</div> : null}
             </div>
           </div>
 
@@ -211,12 +377,28 @@ export default async function ConsultantPracticeDetailPage({
           </div>
         </div>
 
-        {requirementsRes.error ? (
+        {requirementsTableMissing ? (
+          <div className="admin-item-sub" style={{ marginTop: 10, color: '#92400E', fontWeight: 700 }}>
+            Checklist dinamica non disponibile su questo ambiente: uso checklist operativa di fallback.
+          </div>
+        ) : null}
+        {requirementsErrorMessage ? (
           <div className="admin-item-sub" style={{ marginTop: 10, color: '#B91C1C', fontWeight: 700 }}>
-            Errore checklist requisiti: {requirementsRes.error.message}
+            Errore checklist requisiti: {requirementsErrorMessage}
           </div>
         ) : null}
       </section>
+
+      <ConsultantPracticeProgressPanel applicationId={applicationId} initialStep={currentStep} />
+
+      <ConsultantPracticeDocumentsActions
+        applicationId={applicationId}
+        requirements={checklist.map((row) => ({
+          key: row.requirement_key,
+          label: row.label || row.requirement_key,
+          status: row.status
+        }))}
+      />
 
       {threadError ? (
         <section className="section-card">

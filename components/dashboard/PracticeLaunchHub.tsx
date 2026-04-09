@@ -9,7 +9,7 @@ import { ChatWindow } from '@/components/chat/ChatWindow';
 import { GrantDetailProView } from '@/components/views/GrantDetailProView';
 import { SUPPORT_WHATSAPP_URL } from '@/lib/support';
 
-type PracticeEligibility = 'eligible' | 'not_eligible' | 'needs_review';
+type PracticeEligibility = 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
 
 type PracticeFlowState = {
   applicationId: string;
@@ -203,7 +203,7 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
         setLatestSubmission(loadedLatest);
         setQuizOutcome(loadedLatest?.eligibility ?? null);
 
-        if (loadedFlow && loadedLatest?.eligibility === 'eligible') {
+        if (loadedFlow && loadedLatest?.eligibility && loadedLatest.eligibility !== 'not_eligible') {
           setNextPath(`/dashboard/practices/${loadedFlow.applicationId}?docs=missing`);
         }
       } catch (fetchError) {
@@ -253,9 +253,11 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
       );
       setQuizOutcome(outcome);
 
-      if (outcome === 'eligible') {
+      if (outcome && outcome !== 'not_eligible') {
         setNextPath(payload.nextPath ?? `/dashboard/practices/${flow.applicationId}?docs=missing`);
-        setShowSuccessConfetti(true);
+        if (outcome === 'eligible' || outcome === 'likely_eligible') {
+          setShowSuccessConfetti(true);
+        }
         return;
       }
 
@@ -381,8 +383,9 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
     );
   }
 
-  const showEligibleSuccess = Boolean(quizOutcome === 'eligible' && nextPath);
-  const showNegativeOutcome = quizOutcome === 'not_eligible' || quizOutcome === 'needs_review';
+  const showEligibleSuccess = Boolean((quizOutcome === 'eligible' || quizOutcome === 'likely_eligible') && nextPath);
+  const showReviewOutcome = Boolean(quizOutcome === 'needs_review' && nextPath);
+  const showNegativeOutcome = quizOutcome === 'not_eligible';
 
   return (
     <div className="space-y-4">
@@ -428,10 +431,14 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
         <section className="section-card" style={{ maxWidth: 1000 }}>
           <div className="section-title">
             <span>🎉</span>
-            <span>Quiz requisiti completato: idoneo</span>
+            <span>
+              Quiz requisiti completato: {quizOutcome === 'likely_eligible' ? 'probabilmente idoneo' : 'idoneo'}
+            </span>
           </div>
           <p className="admin-item-sub" style={{ marginTop: 8 }}>
-            Ottimo, possiedi i requisiti preliminari per questo bando. Puoi avviare subito la pratica online.
+            {quizOutcome === 'likely_eligible'
+              ? 'Il profilo risulta compatibile con i requisiti principali: prosegui con l’onboarding per la verifica documentale finale.'
+              : 'Ottimo, possiedi i requisiti preliminari per questo bando. Puoi avviare subito la pratica online.'}
           </p>
           <div className="action-buttons" style={{ marginTop: 12 }}>
             <Link href={nextPath!} className="btn-action">
@@ -441,16 +448,34 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
         </section>
       ) : null}
 
+      {!loading && flow && showReviewOutcome ? (
+        <section className="section-card" style={{ maxWidth: 1000 }}>
+          <div className="section-title">
+            <span>🟡</span>
+            <span>Esito da approfondire</span>
+          </div>
+          <p className="admin-item-sub" style={{ marginTop: 8 }}>
+            Alcuni punti richiedono verifica consulenziale, ma puoi già procedere con l’onboarding documentale.
+          </p>
+          <div className="action-buttons" style={{ marginTop: 12 }}>
+            <Link href={nextPath!} className="btn-action">
+              Continua con onboarding
+            </Link>
+            <a href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noreferrer" className="btn-action secondary">
+              Parla con un consulente BNDO
+            </a>
+          </div>
+        </section>
+      ) : null}
+
       {!loading && flow && showNegativeOutcome ? (
         <section className="section-card" style={{ maxWidth: 1000 }}>
           <div className="section-title">
-            <span>{quizOutcome === 'needs_review' ? '🟡' : '🔴'}</span>
-            <span>{quizOutcome === 'needs_review' ? 'Esito da approfondire' : 'Al momento non idoneo'}</span>
+            <span>🔴</span>
+            <span>Al momento non idoneo</span>
           </div>
           <p className="admin-item-sub" style={{ marginTop: 8 }}>
-            {quizOutcome === 'needs_review'
-              ? 'Alcuni requisiti richiedono una verifica umana prima di procedere con l’onboarding.'
-              : 'Dalle risposte inserite non risultano i requisiti minimi per avviare la pratica online.'}
+            Dalle risposte inserite non risultano i requisiti minimi per avviare la pratica online.
           </p>
           <div className="action-buttons" style={{ marginTop: 12 }}>
             <a href={SUPPORT_WHATSAPP_URL} target="_blank" rel="noreferrer" className="btn-action secondary">

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { LEGAL_LAST_UPDATED } from '@/lib/legal';
+import { emitNotificationEvent } from '@/lib/notifications/engine';
 import { enforceRateLimit, getClientIp, publicError, rejectCrossSiteMutation } from '@/lib/security/http';
 import { dispatchQuizSubmissionNotifications } from '@/lib/services/quizNotifications';
 import { logPlatformEvent } from '@/lib/ops/telemetry';
@@ -191,6 +192,28 @@ export async function POST(request: Request) {
         region: region ?? null,
       },
     });
+
+    if (payload.eligibility === 'eligible') {
+      void emitNotificationEvent({
+        eventType: 'quiz_passed',
+        actorProfileId: null,
+        actorRole: null,
+        companyId: null,
+        applicationId: null,
+        customerName: fullName,
+        practiceTitle:
+          bandoType === 'sud'
+            ? 'Resto al Sud 2.0'
+            : bandoType === 'centro_nord'
+              ? 'Autoimpiego Centro-Nord'
+              : 'Quiz requisiti',
+        metadata: {
+          submissionId: quizSubmission.id,
+          eligibility: payload.eligibility,
+          bandoType: bandoType ?? null
+        }
+      }).catch(() => undefined);
+    }
 
     return NextResponse.json({ success: true, submissionId: quizSubmission.id }, { status: 201 });
   } catch (error) {

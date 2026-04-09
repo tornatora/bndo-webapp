@@ -27,7 +27,12 @@ export async function GET(request: Request) {
     try {
       await syncLedgerFromPracticePayments();
     } catch (error) {
-      if (isMissingTable(error instanceof Error ? error.message : null, 'practice_payment_ledger')) {
+      const message = error instanceof Error ? error.message : null;
+      if (
+        isMissingTable(message, 'practice_payment_ledger') ||
+        isMissingTable(message, 'practice_payments') ||
+        isMissingTable(message, 'consultant_practice_assignments')
+      ) {
         ledgerAvailable = false;
       } else {
         throw error;
@@ -56,7 +61,8 @@ export async function GET(request: Request) {
         .limit(500),
     ]);
 
-    if (paymentsRes.error) throw new Error(paymentsRes.error.message);
+    const paymentsMissing = Boolean(paymentsRes.error && isMissingTable(paymentsRes.error, 'practice_payments'));
+    if (paymentsRes.error && !paymentsMissing) throw new Error(paymentsRes.error.message);
     if (ledgerRes.error && !isMissingTable(ledgerRes.error, 'practice_payment_ledger')) {
       throw new Error(ledgerRes.error.message);
     }
@@ -64,7 +70,7 @@ export async function GET(request: Request) {
       throw new Error(payoutsRes.error.message);
     }
 
-    const payments = paymentsRes.data ?? [];
+    const payments = paymentsMissing ? [] : paymentsRes.data ?? [];
     const ledger = ledgerRes.error ? [] : ledgerRes.data ?? [];
     const payouts = payoutsRes.error ? [] : payoutsRes.data ?? [];
 
@@ -130,8 +136,8 @@ export async function GET(request: Request) {
       ok: true,
       windowDays: days,
       notice:
-        !ledgerAvailable || Boolean(ledgerRes.error) || Boolean(payoutsRes.error)
-          ? 'Controllo finanza attivo in modalità base: registro avanzato e payout consulenti saranno completi dopo l’allineamento database.'
+        !ledgerAvailable || Boolean(ledgerRes.error) || Boolean(payoutsRes.error) || paymentsMissing
+          ? 'Controllo finanza attivo in modalità base: alcune tabelle finance non sono ancora allineate su questo ambiente.'
           : null,
       totals,
       statusBuckets,

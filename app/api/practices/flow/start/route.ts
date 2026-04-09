@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { fetchGrantDetail, fetchGrantExplainability, type GrantDetailRecord, type GrantExplainabilityRecord } from '@/lib/grants/details';
-import { buildDeterministicConditionalQuizQuestions, generatePracticeQuizTemplateWithAI } from '@/lib/practices/llmQuizGenerator';
+import { generateCompiledSingleBandoSpec } from '@/lib/practices/llmQuizGenerator';
+import { executeCompiledEligibilitySpecInUI } from '@/lib/practices/singleBandoVerificationEngine';
 import {
   ensurePracticeFlow,
   loadApplicationRequirementStatus,
@@ -53,13 +54,6 @@ function isDocumentationQuestion(question: PracticeQuizQuestion) {
   return /(document|documentazione|documenti|allegat|visura|bilanc|business plan|piano impresa|preventiv|certificaz|isee|did|atto costitutivo|statuto)/.test(
     haystack
   );
-}
-
-function buildPublicFallbackQuestions(
-  detail: GrantDetailRecord,
-  explainability: GrantExplainabilityRecord
-): PracticeQuizQuestion[] {
-  return buildDeterministicConditionalQuizQuestions(detail, explainability);
 }
 
 function buildPublicRequirements(detail: GrantDetailRecord, sourceChannel: PracticeSourceChannel) {
@@ -150,12 +144,15 @@ async function buildPublicPracticeFlow(args: {
 
   let aiQuestions: PracticeQuizQuestion[] = [];
   try {
-    aiQuestions = await generatePracticeQuizTemplateWithAI(detail, explainability);
+    const compiled = await generateCompiledSingleBandoSpec({ detail, explainability });
+    aiQuestions = executeCompiledEligibilitySpecInUI(compiled);
   } catch {
     aiQuestions = [];
   }
   const sanitizedQuestions = aiQuestions.filter((question) => !isDocumentationQuestion(question));
-  const questions = sanitizedQuestions.length > 0 ? sanitizedQuestions : buildPublicFallbackQuestions(detail, explainability);
+  // Public runtime must follow the same publication-gated engine used in authenticated flows.
+  // If the compiled plan is not publishable, fail-closed (empty quiz -> needs_review in UI).
+  const questions = sanitizedQuestions;
   const grantSlug = slugify(detail.title) || slugify(args.grantId) || 'bando';
   const flowToken = `public-${grantSlug}-${Date.now().toString(36)}`.slice(0, 120);
 

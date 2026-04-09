@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import {
   ensurePracticeFlow,
   loadApplicationRequirementStatus,
@@ -158,7 +159,7 @@ export async function GET(_request: Request, context: { params: { applicationId:
       }
     }
 
-    const [requirementStatus, latestSubmission] = await Promise.all([
+    const [requirementStatus, latestSubmissionResult] = await Promise.all([
       loadApplicationRequirementStatus(admin, params.applicationId),
       admin
         .from('practice_quiz_submissions')
@@ -168,6 +169,10 @@ export async function GET(_request: Request, context: { params: { applicationId:
         .limit(1)
         .maybeSingle()
     ]);
+    if (latestSubmissionResult.error && !isMissingTable(latestSubmissionResult.error, 'practice_quiz_submissions')) {
+      return NextResponse.json({ error: latestSubmissionResult.error.message }, { status: 500 });
+    }
+    const latestSubmission = latestSubmissionResult.error ? null : latestSubmissionResult.data ?? null;
 
     if (!flow) {
       const { data: tender } = await supabase
@@ -187,7 +192,7 @@ export async function GET(_request: Request, context: { params: { applicationId:
       ok: true,
       flow,
       requirementStatus,
-      latestSubmission: latestSubmission ?? null
+      latestSubmission
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

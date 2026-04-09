@@ -1,12 +1,23 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchGrantDetail, fetchGrantExplainability, type GrantDetailRecord, type GrantExplainabilityRecord } from '@/lib/grants/details';
 import { upsertProgressIntoNotes } from '@/lib/admin/practice-progress';
-import { buildDeterministicConditionalQuizQuestions, generatePracticeQuizTemplateWithAI } from '@/lib/practices/llmQuizGenerator';
+import {
+  buildDeterministicConditionalQuizQuestions,
+  generateCompiledSingleBandoSpec
+} from '@/lib/practices/llmQuizGenerator';
+import {
+  assessSingleBandoQuestionSet,
+  computeSingleBandoSourceFingerprint,
+  executeCompiledEligibilitySpecInUI,
+  isCompiledEligibilitySpecPublishable,
+  isCompiledEligibilitySpecReusable,
+  parseCompiledEligibilitySpec
+} from '@/lib/practices/singleBandoVerificationEngine';
 import type { Database } from '@/lib/supabase/database.types';
 
 export type PracticeSourceChannel = 'scanner' | 'chat' | 'direct' | 'admin';
 export type PracticeQuizQuestionType = 'single_select' | 'boolean' | 'text' | 'number';
-export type PracticeQuizEligibility = 'eligible' | 'not_eligible' | 'needs_review';
+export type PracticeQuizEligibility = 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
 
 type AdminClient = SupabaseClient<Database>;
 type JsonValue = Database['public']['Tables']['practice_quiz_templates']['Row']['metadata'];
@@ -229,28 +240,8 @@ function isQuestionVisibleForAnswers(
 }
 
 function hasWeakQuizShape(questions: PracticeQuizQuestion[]) {
-  if (questions.length < 5) return true;
-  const required = questions.filter((question) => question.isRequired);
-  const nonBooleanCount = required.filter((question) => question.questionType !== 'boolean').length;
-  if (nonBooleanCount < 2) return true;
-
-  const decisiveCount = required.filter((question) =>
-    ['critical_boolean', 'choice_in_set', 'investment_range', 'ateco_validation', 'geographic_validation'].includes(
-      question.rule.kind
-    )
-  ).length;
-  if (decisiveCount < 3) return true;
-
-  const distinctCategories = new Set(required.map((question) => categoryOfQuestion(question)));
-  if (distinctCategories.size < 3) return true;
-
-  const genericCount = required.filter((question) => {
-    const text = normalizeQuestionText(`${question.label} ${question.description ?? ''}`);
-    return /(il tuo profilo|puoi rispettare|coerente con il bando|requisiti base|confermi di|requisito tecnico più stringente)/.test(
-      text
-    );
-  }).length;
-  return genericCount >= Math.ceil(required.length * 0.6);
+  const assessment = assessSingleBandoQuestionSet(questions);
+  return !assessment.ok;
 }
 
 function firstSentence(value: string | null | undefined) {
@@ -320,7 +311,7 @@ function isLowSignalQuizQuestion(question: PracticeQuizQuestion) {
   );
   if (!text) return true;
   if (
-    /(il tuo profilo|coerente con il bando|confermi di soddisfare questo requisito|requisito tecnico piu stringente|requisiti base)/.test(
+    /(il tuo profilo|coerente con il bando|confermi di soddisfare questo requisito|requisito tecnico piu stringente|requisiti base|requisiti chiave indicati|confermi di rispettare i requisiti|beneficiari ammessi dal bando|soggetto richiedente|verificare se il)/.test(
       text
     )
   ) {
@@ -342,7 +333,7 @@ function sanitizePracticeQuizQuestions(questions: PracticeQuizQuestion[]) {
     }));
 
   const deduped = uniqBy(filtered, (question) => question.questionKey);
-  return deduped.slice(0, 8);
+  return deduped.slice(0, 12);
 }
 
 function uniqBy<T>(items: T[], getKey: (item: T) => string) {
@@ -543,9 +534,21 @@ async function buildRuntimeFlowFromApplication(client: AdminClient, applicationI
 
   const cachedTenderMetadata = tenderData?.metadata as Record<string, unknown> | null;
   let cachedQuestions: PracticeQuizQuestion[] | null = null;
-  
-  if (cachedTenderMetadata && Array.isArray(cachedTenderMetadata.ai_quiz_questions)) {
-    cachedQuestions = sanitizePracticeQuizQuestions(cachedTenderMetadata.ai_quiz_questions as PracticeQuizQuestion[]);
+  const cachedSpec = parseCompiledEligibilitySpec(
+    cachedTenderMetadata?.single_bando_eligibility_spec_v1 ?? null
+  );
+  const sourceFingerprint = computeSingleBandoSourceFingerprint(
+    grantCandidate!.detail,
+    grantCandidate!.explainability
+  );
+  const hasReusableSpec =
+    Boolean(cachedSpec) &&
+    Boolean(cachedSpec?.sourceFingerprint === sourceFingerprint) &&
+    isCompiledEligibilitySpecReusable(cachedSpec, grantCandidate!.detail, grantCandidate!.explainability) &&
+    isCompiledEligibilitySpecPublishable(cachedSpec);
+
+  if (hasReusableSpec && cachedSpec) {
+    cachedQuestions = sanitizePracticeQuizQuestions(executeCompiledEligibilitySpecInUI(cachedSpec));
   }
   if (cachedQuestions && hasWeakQuizShape(cachedQuestions)) {
     cachedQuestions = null;
@@ -560,7 +563,59 @@ async function buildRuntimeFlowFromApplication(client: AdminClient, applicationI
       requirements
     };
   } else {
-    template = buildFallbackPracticeQuizTemplate(grantCandidate!.detail, grantCandidate!.explainability, 'direct');
+    try {
+      const compiledSpec = await generateCompiledSingleBandoSpec({
+        detail: grantCandidate!.detail,
+        explainability: grantCandidate!.explainability,
+        cachedSpecRaw: cachedSpec
+      });
+      const compiledQuestions = sanitizePracticeQuizQuestions(executeCompiledEligibilitySpecInUI(compiledSpec));
+      if (compiledQuestions.length > 0) {
+        const requirements = derivePracticeRequirementsFromGrant(
+          grantCandidate!.detail,
+          grantCandidate!.explainability,
+          'direct'
+        );
+        template = {
+          metadata: {},
+          questions: compiledQuestions,
+          requirements
+        };
+        const nextMetadata = {
+          ...(cachedTenderMetadata ?? {}),
+          single_bando_eligibility_spec_v1: compiledSpec,
+          single_bando_eligibility_source_fingerprint: sourceFingerprint,
+          single_bando_eligibility_compile_status: compiledSpec.compileStatus,
+          single_bando_eligibility_compile_confidence: compiledSpec.compileConfidence,
+          single_bando_eligibility_publication_status:
+            compiledSpec.publicationGate?.status ?? 'quarantine',
+          single_bando_eligibility_publication_reasons:
+            compiledSpec.publicationGate?.reasons ?? [],
+          single_bando_eligibility_publication_warnings:
+            compiledSpec.publicationGate?.warnings ?? [],
+          ai_quiz_questions: compiledQuestions
+        };
+        await client.from('tenders').update({ metadata: nextMetadata as any }).eq('id', tenderData!.id);
+      } else {
+        template = {
+          metadata: {
+            quizPublicationStatus: 'quarantine',
+            quizPublicationReason: 'single_bando_publication_gate_failed'
+          },
+          questions: [],
+          requirements: derivePracticeRequirementsFromGrant(grantCandidate!.detail, grantCandidate!.explainability, 'direct')
+        };
+      }
+    } catch {
+      template = {
+        metadata: {
+          quizPublicationStatus: 'quarantine',
+          quizPublicationReason: 'single_bando_compile_error'
+        },
+        questions: [],
+        requirements: derivePracticeRequirementsFromGrant(grantCandidate!.detail, grantCandidate!.explainability, 'direct')
+      };
+    }
   }
 
   return {
@@ -1136,42 +1191,67 @@ export async function ensurePracticeFlow(
   }
 
   const forceRefresh = tenderMeta.force_ai_refresh === true;
-  const cachedAiQuestions =
-    !forceRefresh && Array.isArray(tenderMeta.ai_quiz_questions)
-      ? sanitizePracticeQuizQuestions(tenderMeta.ai_quiz_questions as PracticeQuizQuestion[])
+  const cachedSpec = parseCompiledEligibilitySpec(
+    tenderMeta.single_bando_eligibility_spec_v1 ?? null
+  );
+  const hasReusableCompiledSpec =
+    !forceRefresh &&
+    isCompiledEligibilitySpecReusable(cachedSpec, detail, explainability) &&
+    isCompiledEligibilitySpecPublishable(cachedSpec);
+  const cachedCompiledQuestions =
+    hasReusableCompiledSpec && cachedSpec
+      ? sanitizePracticeQuizQuestions(executeCompiledEligibilitySpecInUI(cachedSpec))
       : [];
-  const shouldIgnoreCachedQuestions = cachedAiQuestions.length > 0 && hasWeakQuizShape(cachedAiQuestions);
+  const sourceFingerprint = computeSingleBandoSourceFingerprint(detail, explainability);
+  const shouldIgnoreCompiledQuestions =
+    cachedCompiledQuestions.length > 0 && hasWeakQuizShape(cachedCompiledQuestions);
 
   let questionsForTemplate: PracticeQuizQuestion[] = [];
   
-  if (!forceRefresh && !shouldIgnoreCachedQuestions && cachedAiQuestions.length > 0) {
-    questionsForTemplate = cachedAiQuestions;
+  if (!forceRefresh && !shouldIgnoreCompiledQuestions && cachedCompiledQuestions.length > 0) {
+    questionsForTemplate = cachedCompiledQuestions;
   } else {
     try {
-      // Fetch specifically created AI questions with OpenAI
-      const generatedQuestions = await generatePracticeQuizTemplateWithAI(detail, explainability);
-      const sanitizedGeneratedQuestions = sanitizePracticeQuizQuestions(generatedQuestions ?? []);
-      if (sanitizedGeneratedQuestions.length > 0) {
-        questionsForTemplate = sanitizedGeneratedQuestions;
-        // Cache the newly generated questions back to the DB so future applications for this tender skip OpenAI
-        tenderMeta.ai_quiz_questions = sanitizedGeneratedQuestions;
-        // Clear the refresh flag after success
-        if (forceRefresh) {
-          delete tenderMeta.force_ai_refresh;
-        }
+      const compiledSpec = await generateCompiledSingleBandoSpec({
+        detail,
+        explainability,
+        cachedSpecRaw: cachedSpec,
+        forceRecompile: forceRefresh
+      });
+      const compiledQuestions = sanitizePracticeQuizQuestions(executeCompiledEligibilitySpecInUI(compiledSpec));
+      if (compiledQuestions.length > 0) {
+        questionsForTemplate = compiledQuestions;
+        tenderMeta.single_bando_eligibility_spec_v1 = compiledSpec;
+        tenderMeta.single_bando_eligibility_source_fingerprint = sourceFingerprint;
+        tenderMeta.single_bando_eligibility_compile_status = compiledSpec.compileStatus;
+        tenderMeta.single_bando_eligibility_compile_confidence = compiledSpec.compileConfidence;
+        tenderMeta.ai_quiz_questions = compiledQuestions;
+        if (forceRefresh) delete tenderMeta.force_ai_refresh;
         await admin.from('tenders').update({ metadata: tenderMeta as any }).eq('id', tenderId);
       } else {
-        // Ultimate fallback if OpenAI returns empty
-        questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
+        tenderMeta.single_bando_eligibility_spec_v1 = compiledSpec;
+        tenderMeta.single_bando_eligibility_source_fingerprint = sourceFingerprint;
+        tenderMeta.single_bando_eligibility_compile_status = compiledSpec.compileStatus;
+        tenderMeta.single_bando_eligibility_compile_confidence = compiledSpec.compileConfidence;
+        tenderMeta.single_bando_eligibility_publication_status =
+          compiledSpec.publicationGate?.status ?? 'quarantine';
+        tenderMeta.single_bando_eligibility_publication_reasons =
+          compiledSpec.publicationGate?.reasons ?? ['single_bando_publication_gate_failed'];
+        tenderMeta.single_bando_eligibility_publication_warnings =
+          compiledSpec.publicationGate?.warnings ?? [];
+        tenderMeta.ai_quiz_questions = [];
+        if (forceRefresh) delete tenderMeta.force_ai_refresh;
+        await admin.from('tenders').update({ metadata: tenderMeta as any }).eq('id', tenderId);
+        questionsForTemplate = [];
       }
     } catch {
-      // Ultimate fallback if OpenAI fails or times out
-      questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
+      // Fail-closed for single-bando: weak/failed compile must not publish a normal quiz.
+      questionsForTemplate = [];
     }
   }
 
   if (questionsForTemplate.length === 0) {
-    questionsForTemplate = buildFallbackPracticeQuizTemplate(detail, explainability, args.sourceChannel).questions;
+    questionsForTemplate = [];
   }
 
   const requirements = derivePracticeRequirementsFromGrant(detail, explainability, args.sourceChannel);
@@ -1215,6 +1295,7 @@ export function evaluatePracticeQuiz(
   const notes: string[] = [];
   let criticalFailure = false;
   let needsReview = false;
+  let likelyEligibleSignals = false;
 
   for (const question of template.questions) {
     const isVisible = isQuestionVisibleForAnswers(question, normalizedAnswers, questionByKey);
@@ -1259,7 +1340,7 @@ export function evaluatePracticeQuiz(
         if (ruleStrength === 'hard') {
           criticalFailure = true;
         } else {
-          needsReview = true;
+          likelyEligibleSignals = true;
         }
         notes.push(`Requisito ${ruleStrength === 'hard' ? 'non soddisfatto' : 'da verificare'}: ${question.label}`);
       }
@@ -1275,7 +1356,7 @@ export function evaluatePracticeQuiz(
         if (ruleStrength === 'hard') {
           criticalFailure = true;
         } else {
-          needsReview = true;
+          likelyEligibleSignals = true;
         }
         notes.push(`Requisito ${ruleStrength === 'hard' ? 'non soddisfatto' : 'da approfondire'}: ${question.label}`);
       }
@@ -1294,7 +1375,7 @@ export function evaluatePracticeQuiz(
         if (ruleStrength === 'hard') {
           criticalFailure = true;
         } else {
-          needsReview = true;
+          likelyEligibleSignals = true;
         }
         notes.push(`Importo inferiore al minimo richiesto (${min}) su: ${question.label}.`);
       }
@@ -1302,7 +1383,7 @@ export function evaluatePracticeQuiz(
         if (ruleStrength === 'hard') {
           criticalFailure = true;
         } else {
-          needsReview = true;
+          likelyEligibleSignals = true;
         }
         notes.push(`Importo superiore al massimale consentito (${max}) su: ${question.label}.`);
       }
@@ -1314,6 +1395,9 @@ export function evaluatePracticeQuiz(
   }
   if (needsReview) {
     return { eligibility: 'needs_review', notes };
+  }
+  if (likelyEligibleSignals) {
+    return { eligibility: 'likely_eligible', notes };
   }
   return { eligibility: 'eligible', notes };
 }

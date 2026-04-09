@@ -56,7 +56,7 @@ export const STRATEGIC_SCANNER_DOCS = [
     id: 'strategic-resto-al-sud-20',
     title: 'Resto al Sud 2.0',
     description:
-      "Nuova misura (DL Coesione 2024) per l'avvio di attività imprenditoriali e libero-professionali. Requisiti rigorosi: età UNDER 35, disoccupati da almeno 6 mesi, inoccupati o working poor. NON confondere con la vecchia misura 'Resto al Sud' (che arrivava a 55 anni). Resto al Sud 2.0 è limitata al Mezzogiorno (Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia) e aree Sisma Centro Italia. Prevede voucher fino a 50k per l'avvio e contributi a fondo perduto fino al 75% per investimenti fino a 200k.",
+      "Nuova misura (DL Coesione 2024) per l'avvio di attività imprenditoriali e libero-professionali. Requisiti rigorosi: età UNDER 35, disoccupati da almeno 6 mesi, inoccupati o working poor. Gli over 35 possono accedere esclusivamente via partnership societaria in cui gli under 35 (disoccupati) detengono almeno il 51% delle quote. NON confondere con la vecchia misura 'Resto al Sud' (che arrivava a 55 anni). Resto al Sud 2.0 è limitata al Mezzogiorno (Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia) e aree Sisma Centro Italia. Prevede voucher fino a 50k per l'avvio e contributi a fondo perduto fino al 75% per investimenti fino a 200k.",
     authorityName: 'Invitalia',
     openDate: '2024-09-01T00:00:00', // Indicativo avvio operativo
     closeDate: '2027-12-31T00:00:00',

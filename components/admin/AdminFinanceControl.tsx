@@ -69,6 +69,19 @@ type ConsultantRow = {
   email: string;
 };
 
+type ConsultantBillingProfileRow = {
+  consultantId: string;
+  fullName: string;
+  email: string;
+  billingProfile: {
+    payoutMethod: 'bank_transfer' | 'paypal' | 'other';
+    accountHolder: string;
+    iban: string | null;
+    paypalEmail: string | null;
+  } | null;
+  updatedAt: string | null;
+};
+
 type RowsResponse<T> = {
   rows: T[];
   notice?: string | null;
@@ -114,6 +127,7 @@ export function AdminFinanceControl() {
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [payouts, setPayouts] = useState<PayoutRow[]>([]);
   const [consultants, setConsultants] = useState<ConsultantRow[]>([]);
+  const [consultantBillingProfiles, setConsultantBillingProfiles] = useState<ConsultantBillingProfileRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [creatingPayout, setCreatingPayout] = useState(false);
@@ -129,34 +143,42 @@ export function AdminFinanceControl() {
     setLoading(true);
     setError(null);
     try {
-      const [overviewRes, ledgerRes, payoutsRes, consultantsRes] = await Promise.all([
+      const [overviewRes, ledgerRes, payoutsRes, consultantsRes, billingProfilesRes] = await Promise.all([
         fetch('/api/admin/finance/overview?days=30', { cache: 'no-store' }),
         fetch('/api/admin/finance/ledger?limit=250', { cache: 'no-store' }),
         fetch('/api/admin/finance/payouts', { cache: 'no-store' }),
         fetch('/api/admin/assignments', { cache: 'no-store' }),
+        fetch('/api/admin/consultant-billing-profiles', { cache: 'no-store' }),
       ]);
 
-      const [overviewJsonRaw, ledgerJsonRaw, payoutsJsonRaw, consultantsJsonRaw] = await Promise.all([
+      const [overviewJsonRaw, ledgerJsonRaw, payoutsJsonRaw, consultantsJsonRaw, billingProfilesJsonRaw] = await Promise.all([
         overviewRes.json(),
         ledgerRes.json(),
         payoutsRes.json(),
         consultantsRes.json(),
+        billingProfilesRes.json(),
       ]);
 
       const overviewJson = overviewJsonRaw as FinanceOverview & { error?: string };
       const ledgerJson = ledgerJsonRaw as RowsResponse<LedgerRow>;
       const payoutsJson = payoutsJsonRaw as RowsResponse<PayoutRow>;
       const consultantsJson = consultantsJsonRaw as AssignmentsApiResponse;
+      const billingProfilesJson = billingProfilesJsonRaw as {
+        rows?: ConsultantBillingProfileRow[];
+        error?: string;
+      };
 
       if (!overviewRes.ok) throw new Error(overviewJson.error ?? 'Errore overview finanza.');
       if (!ledgerRes.ok) throw new Error(ledgerJson.error ?? 'Errore ledger finanza.');
       if (!payoutsRes.ok) throw new Error(payoutsJson.error ?? 'Errore payout finanza.');
       if (!consultantsRes.ok) throw new Error(consultantsJson.error ?? 'Errore caricamento consulenti.');
+      if (!billingProfilesRes.ok) throw new Error(billingProfilesJson.error ?? 'Errore profili pagamento consulenti.');
 
       setOverview(overviewJson as FinanceOverview);
       setLedger((ledgerJson.rows ?? []) as LedgerRow[]);
       setPayouts((payoutsJson.rows ?? []) as PayoutRow[]);
       setConsultants((consultantsJson.consultants ?? []) as ConsultantRow[]);
+      setConsultantBillingProfiles((billingProfilesJson.rows ?? []) as ConsultantBillingProfileRow[]);
       const notices = [overviewJson.notice, ledgerJson.notice, payoutsJson.notice, consultantsJson.notice]
         .filter((item): item is string => Boolean(item && item.trim()));
       setNotice(notices.length ? notices.join(' ') : null);
@@ -177,6 +199,13 @@ export function AdminFinanceControl() {
   }, [loadData]);
 
   const pendingPayouts = useMemo(() => payouts.filter((row) => row.status === 'pending'), [payouts]);
+  const billingByConsultant = useMemo(() => {
+    const map = new Map<string, ConsultantBillingProfileRow>();
+    for (const row of consultantBillingProfiles) {
+      map.set(row.consultantId, row);
+    }
+    return map;
+  }, [consultantBillingProfiles]);
 
   async function createPayout() {
     if (!newPayout.consultantProfileId || !newPayout.periodStart || !newPayout.periodEnd) {
@@ -297,6 +326,9 @@ export function AdminFinanceControl() {
           <span>🏦</span>
           <span>Queue Payout Consulenti</span>
         </div>
+        <div className="admin-item-sub" style={{ marginTop: 4 }}>
+          Da qui admin gestisce il trasferimento quota consulente: crea payout, approva e marca pagato.
+        </div>
 
         <div className="admin-billing-head" style={{ marginTop: 12 }}>
           <div className="modal-field" style={{ marginBottom: 0 }}>
@@ -308,11 +340,24 @@ export function AdminFinanceControl() {
             >
               <option value="">Seleziona consulente</option>
               {consultants.map((consultant) => (
-                <option key={consultant.id} value={consultant.id}>
+              <option key={consultant.id} value={consultant.id}>
                   {consultant.fullName} · {consultant.email}
                 </option>
               ))}
             </select>
+            {newPayout.consultantProfileId && billingByConsultant.get(newPayout.consultantProfileId)?.billingProfile ? (
+              <div className="admin-item-sub" style={{ marginTop: 8 }}>
+                Metodo pagamento: {billingByConsultant.get(newPayout.consultantProfileId)?.billingProfile?.payoutMethod === 'bank_transfer'
+                  ? 'Bonifico'
+                  : billingByConsultant.get(newPayout.consultantProfileId)?.billingProfile?.payoutMethod === 'paypal'
+                    ? 'PayPal'
+                    : 'Altro'}
+              </div>
+            ) : (
+              <div className="admin-item-sub" style={{ marginTop: 8, color: '#92400E' }}>
+                Nessuna preferenza pagamento inserita dal consulente.
+              </div>
+            )}
           </div>
 
           <div className="modal-field" style={{ marginBottom: 0 }}>
@@ -357,6 +402,7 @@ export function AdminFinanceControl() {
         <div className="admin-table" style={{ marginTop: 12 }}>
           {payouts.map((row) => {
             const consultant = consultants.find((entry) => entry.id === row.consultant_profile_id) ?? null;
+            const consultantBilling = billingByConsultant.get(row.consultant_profile_id)?.billingProfile ?? null;
             const isUpdating = updatingPayoutId === row.id;
             return (
               <div key={row.id} className="admin-table-row">
@@ -370,6 +416,17 @@ export function AdminFinanceControl() {
                   <div className="admin-table-meta">
                     Creato: {formatDateTime(row.created_at)} · Approvato: {formatDateTime(row.approved_at)} · Pagato: {formatDateTime(row.paid_at)}
                   </div>
+                  {consultantBilling ? (
+                    <div className="admin-table-meta">
+                      Pagamento consulente: {consultantBilling.payoutMethod === 'bank_transfer' ? 'Bonifico' : consultantBilling.payoutMethod === 'paypal' ? 'PayPal' : 'Altro'}
+                      {consultantBilling.iban ? ` · IBAN ${consultantBilling.iban}` : ''}
+                      {consultantBilling.paypalEmail ? ` · ${consultantBilling.paypalEmail}` : ''}
+                    </div>
+                  ) : (
+                    <div className="admin-table-meta" style={{ color: '#92400E' }}>
+                      Il consulente non ha ancora compilato fatturazione e pagamenti.
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   {row.status === 'pending' ? (

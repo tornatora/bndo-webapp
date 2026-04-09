@@ -1,153 +1,102 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/browser';
 import { removeChannelSafely, subscribeToChannelSafely } from '@/lib/supabase/realtime-safe';
-import { isAutoReplyMessage } from '@/lib/chat/constants';
 
-type Message = {
+type InboxItem = {
   id: string;
-  thread_id: string;
-  sender_profile_id: string;
+  title: string;
   body: string;
-  created_at: string;
+  actionPath: string | null;
+  createdAt: string;
+  readAt: string | null;
 };
 
-type ChatSyncResponse = {
-  messages?: Message[];
-  lastReadAt?: string;
+type InboxResponse = {
+  unreadCount?: number;
+  items?: InboxItem[];
+  error?: string;
 };
 
-type ThreadContextPayload = {
-  threadId: string | null;
-  lastReadAt: string | null;
-};
-
-// Simple in-memory cache to avoid refetching on every navigation.
-let cachedThreadContext: ThreadContextPayload | null = null;
-let cachedAt = 0;
-
-export function NotificationsBell({ viewerProfileId }: { viewerProfileId: string }) {
+export function NotificationsBell({
+  viewerProfileId,
+  inboxHref = '/dashboard/notifications',
+  defaultActionPath = '/dashboard/messages'
+}: {
+  viewerProfileId: string;
+  inboxHref?: string;
+  defaultActionPath?: string;
+}) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [lastReadAt, setLastReadAt] = useState<string>(new Date(0).toISOString());
-  const [contextLoaded, setContextLoaded] = useState(false);
-  const markingRead = useRef(false);
+  const [items, setItems] = useState<InboxItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  async function loadThreadContext() {
-    // Cache for a short time; enough to cover multiple tab navigations.
-    const now = Date.now();
-    if (cachedThreadContext && now - cachedAt < 30_000) {
-      setThreadId(cachedThreadContext.threadId);
-      setLastReadAt(cachedThreadContext.lastReadAt ?? new Date(0).toISOString());
-      setContextLoaded(true);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/chat/thread-context', { cache: 'no-store' });
-      const json = (await res.json().catch(() => ({}))) as ThreadContextPayload & { error?: string };
-      if (!res.ok) {
-        // Keep silent; bell still renders but with no thread.
-        setContextLoaded(true);
-        return;
-      }
-      cachedThreadContext = { threadId: json.threadId ?? null, lastReadAt: json.lastReadAt ?? null };
-      cachedAt = now;
-      setThreadId(json.threadId ?? null);
-      setLastReadAt(json.lastReadAt ?? new Date(0).toISOString());
-      setContextLoaded(true);
-    } catch {
-      setContextLoaded(true);
-    }
-  }
-
-  const unreadMessages = useMemo(() => {
-    if (!threadId) return [];
-    const lastRead = new Date(lastReadAt).getTime();
-    return messages.filter(
-      (message) =>
-        message.sender_profile_id !== viewerProfileId &&
-        new Date(message.created_at).getTime() > lastRead &&
-        !isAutoReplyMessage(message.body)
-    );
-  }, [messages, viewerProfileId, lastReadAt, threadId]);
-
-  const unreadCount = unreadMessages.length;
-
-  function mergeMessages(previous: Message[], incoming: Message[]) {
-    const byId = new Map<string, Message>();
-    for (const msg of previous) byId.set(msg.id, msg);
-    for (const msg of incoming) byId.set(msg.id, msg);
-    return [...byId.values()].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  }
+  const unreadItems = useMemo(() => items.filter((item) => !item.readAt), [items]);
 
   async function refresh() {
-    if (!threadId) return;
-    const response = await fetch(`/api/chat/messages?threadId=${threadId}`);
+    const response = await fetch('/api/notifications/inbox?limit=12', { cache: 'no-store' });
+    const json = (await response.json().catch(() => ({}))) as InboxResponse;
     if (!response.ok) return;
-    const payload = (await response.json()) as ChatSyncResponse;
-    setMessages((prev) => mergeMessages(prev, payload.messages ?? []));
-    if (payload.lastReadAt) setLastReadAt(payload.lastReadAt);
+    setItems(json.items ?? []);
+    setUnreadCount(Number(json.unreadCount ?? 0));
   }
 
-  async function markRead() {
-    if (!threadId) return;
-    if (markingRead.current) return;
-    markingRead.current = true;
-    try {
-      const response = await fetch('/api/chat/mark-read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ threadId })
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as { lastReadAt?: string };
-      setLastReadAt(payload.lastReadAt ?? new Date().toISOString());
-    } finally {
-      markingRead.current = false;
+  async function markRead(ids: string[]) {
+    if (ids.length === 0) return;
+    await fetch('/api/notifications/read', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, read: true })
+    });
+    setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, readAt: new Date().toISOString() } : it)));
+    setUnreadCount((prev) => Math.max(0, prev - ids.length));
+  }
+
+  async function openNotification(item: InboxItem) {
+    if (!item.readAt) {
+      await markRead([item.id]);
     }
+    setIsOpen(false);
+    router.push(item.actionPath || defaultActionPath);
   }
 
   useEffect(() => {
-    void loadThreadContext();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void refresh();
   }, []);
 
   useEffect(() => {
-    if (!threadId) return;
     const supabase = createClient();
     const channel = subscribeToChannelSafely(
       () =>
         supabase
-          .channel(`notify-thread-${threadId}`)
+          .channel(`notify-inbox-${viewerProfileId}`)
           .on(
             'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'consultant_messages', filter: `thread_id=eq.${threadId}` },
-            (payload) => {
-              const incoming = payload.new as Message;
-              setMessages((prev) => mergeMessages(prev, [incoming]));
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notification_inbox',
+              filter: `recipient_profile_id=eq.${viewerProfileId}`
+            },
+            () => {
+              if (refreshTimer.current) clearTimeout(refreshTimer.current);
+              refreshTimer.current = setTimeout(() => void refresh(), 250);
             }
           )
           .subscribe(),
-      'dashboard notifications'
+      'dashboard notifications inbox'
     );
 
     return () => {
-      removeChannelSafely(supabase, channel, 'dashboard notifications');
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      removeChannelSafely(supabase, channel, 'dashboard notifications inbox');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId]);
-
-  useEffect(() => {
-    if (!contextLoaded) return;
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextLoaded, threadId]);
+  }, [viewerProfileId]);
 
   useEffect(() => {
     const onDoc = (event: MouseEvent) => {
@@ -166,19 +115,7 @@ export function NotificationsBell({ viewerProfileId }: { viewerProfileId: string
   useEffect(() => {
     if (!isOpen) return;
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
-  async function onOpenChat() {
-    setIsOpen(false);
-    router.push('/dashboard/messages');
-  }
-
-  async function onNotificationTap() {
-    // Mark as read but don't block navigation.
-    void markRead();
-    await onOpenChat();
-  }
 
   return (
     <div style={{ position: 'relative' }}>
@@ -201,37 +138,34 @@ export function NotificationsBell({ viewerProfileId }: { viewerProfileId: string
       <div className={`notifications-panel ${isOpen ? 'active' : ''}`} id="bndoNotificationsPanel">
         <div className="notifications-header">
           <div className="notifications-title">🔔 Notifiche</div>
-          <Link className="notifications-all-link" href="/dashboard/notifications" onClick={() => setIsOpen(false)}>
+          <Link className="notifications-all-link" href={inboxHref} onClick={() => setIsOpen(false)}>
             Vedi tutte
           </Link>
         </div>
         <div className="notifications-list">
-          {unreadCount === 0 ? (
+          {unreadItems.length === 0 ? (
             <div className="notification-item">
               <div className="notification-title">✅ Nessuna nuova notifica</div>
-              <div className="notification-message">Non ci sono nuovi messaggi da leggere.</div>
+              <div className="notification-message">Tutto aggiornato.</div>
               <div className="notification-time">Adesso</div>
-              <button type="button" className="notifications-cta" onClick={() => void onOpenChat()}>
-                Apri chat
-              </button>
+              <Link className="notifications-cta" href={inboxHref} onClick={() => setIsOpen(false)}>
+                Apri timeline
+              </Link>
             </div>
           ) : (
-            unreadMessages
-              .slice(-8)
-              .reverse()
-              .map((notification) => (
-                <button
-                  key={notification.id}
-                  type="button"
-                  className="notification-item unread"
-                  style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
-                  onClick={() => void onNotificationTap()}
-                >
-                  <div className="notification-title">💬 Nuovo messaggio consulente</div>
-                  <div className="notification-message">{notification.body}</div>
-                  <div className="notification-time">{new Date(notification.created_at).toLocaleString('it-IT')}</div>
-                </button>
-              ))
+            unreadItems.slice(0, 8).map((notification) => (
+              <button
+                key={notification.id}
+                type="button"
+                className="notification-item unread"
+                style={{ textAlign: 'left', width: '100%', border: 0, background: 'transparent' }}
+                onClick={() => void openNotification(notification)}
+              >
+                <div className="notification-title">{notification.title}</div>
+                <div className="notification-message">{notification.body}</div>
+                <div className="notification-time">{new Date(notification.createdAt).toLocaleString('it-IT')}</div>
+              </button>
+            ))
           )}
         </div>
       </div>

@@ -79,7 +79,7 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
 
   // === PILASTRO 2: Stato impresa ===
   const hasBusinessStatus =
-    profile.businessExists !== null ||
+    profile.businessExists != null ||
     Boolean(profile.activityType?.trim());
   if (!hasBusinessStatus) missing.push('businessContext');
 
@@ -95,10 +95,10 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   const existingBiz = isExistingBusiness(profile);
   
   const hasBudgetOrPreference =
-    (profile.revenueOrBudgetEUR !== null && profile.revenueOrBudgetEUR > 0) ||
+    (profile.revenueOrBudgetEUR != null && profile.revenueOrBudgetEUR > 0) ||
     profile.budgetAnswered ||
     Boolean(profile.contributionPreference?.trim()) ||
-    profile.employees !== null ||
+    profile.employees != null ||
     Boolean(profile.legalForm?.trim());
 
   if (!profile.legalForm) {
@@ -108,7 +108,7 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   // Per nuove attività: richiediamo ESPLICITAMENTE i dati del fondatore
   const hasFounderData =
     !existingBiz && (
-      profile.age !== null ||
+      profile.age != null ||
       Boolean(profile.ageBand) ||
       Boolean(profile.employmentStatus?.trim())
     );
@@ -173,13 +173,13 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
     hasSpecificSector,
     existingBiz ? hasBudgetOrPreference : hasFounderData,
     !existingBiz ? hasBudgetOrPreference : false,
-    (isAgriculture ? profile.agricultureStatus !== null : true),
-    (isProfessional ? profile.professionalRegister !== null : true),
-    (isBuyingTech ? profile.tech40 !== null : true),
-    (existingBiz ? profile.foundationYear !== null : true),
-    (!existingBiz ? profile.teamMajority !== null : true),
-    (isThirdSectorHint ? profile.isThirdSector !== null : true),
-    (isRealEstateGoal ? profile.propertyStatus !== null : true)
+    (isAgriculture ? profile.agricultureStatus != null : true),
+    (isProfessional ? profile.professionalRegister != null : true),
+    (isBuyingTech ? profile.tech40 != null : true),
+    (existingBiz ? profile.foundationYear != null : true),
+    (!existingBiz ? profile.teamMajority != null : true),
+    (isThirdSectorHint ? profile.isThirdSector != null : true),
+    (isRealEstateGoal ? profile.propertyStatus != null : true)
   ];
   const completedCount = pillars.filter(Boolean).length;
   const score = Math.round((completedCount / pillars.length) * 100);
@@ -187,26 +187,27 @@ export function evaluateProfileCompleteness(profile: UserProfile): ProfileComple
   // === DETERMINAZIONE LEVEL ===
   let level: ProfileReadinessLevel;
 
-  const hasSoftCriterias = hasRegion && hasSpecificGoal && hasBusinessStatus;
-  const hasHardCriterias = hasSoftCriterias && hasSpecificSector && (profile.employees !== null || profile.revenueOrBudgetEUR !== null || profile.budgetAnswered);
-
+  const hasSoftCriterias = hasRegion && hasSpecificGoal && hasBusinessStatus && hasSpecificSector;
+  
   if (!hasSoftCriterias) {
     level = 'not_ready';
-  } else if (!hasHardCriterias && existingBiz) {
-    level = 'soft_scan_ready';
-  } else if (!hasHardCriterias && !existingBiz && (!hasFounderData || profile.teamMajority === null)) {
-    level = 'soft_scan_ready'; // Startup MUST have founder data and team majority
-  } else if (missing.length === 0 || (missing.length === 1 && missing[0] === 'budgetOrPreference')) {
-    level = 'strong_ready';
+  } else if (missing.length > 0) {
+    // Controlliamo se mancano solo dettagli minori e la spina dorsale c'è tutta
+    const onlyOptionalMissing = missing.every(m => m === 'budgetOrPreference' || m === 'legalForm' || m === 'isThirdSector');
+    if (onlyOptionalMissing) {
+      level = 'strong_ready';
+    } else {
+      level = 'soft_scan_ready';
+    }
   } else {
-    level = 'hard_scan_ready';
+    level = 'strong_ready';
   }
 
 
   // === NEXT PRIORITY FIELD ===
   const priorityOrder = [
       'location', 'locationConfirmation', 'businessContext', 'fundingGoal', 'sector', 
-      'agricultureStatus', 'professionalRegister', 'legalForm', 'isThirdSector', 'propertyStatus', 'foundationYear', 'annualTurnover', 'isInnovative', 'founderData', 'teamMajority', 'tech40',
+      'founderData', 'agricultureStatus', 'professionalRegister', 'legalForm', 'isThirdSector', 'propertyStatus', 'foundationYear', 'annualTurnover', 'isInnovative', 'teamMajority', 'tech40',
       'budgetOrPreference', 'additionalContext'
   ];
   const nextPriorityField = [...missing].sort((a, b) => {

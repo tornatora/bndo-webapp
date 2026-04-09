@@ -4,6 +4,7 @@ import { requireOpsProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { isAutoReplyMessage } from '@/lib/chat/constants';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -88,7 +89,13 @@ export async function GET(request: Request) {
 
   if (participantError) return NextResponse.json({ error: participantError.message }, { status: 500 });
   if (threadsError) return NextResponse.json({ error: threadsError.message }, { status: 500 });
-  if (adminErr) return NextResponse.json({ error: adminErr.message }, { status: 500 });
+  const adminNotificationNotice =
+    adminErr && isMissingTable(adminErr, 'admin_notifications')
+      ? 'Notifiche di sistema in attivazione: vengono mostrati i messaggi cliente.'
+      : null;
+  if (adminErr && !adminNotificationNotice) {
+    return NextResponse.json({ error: adminErr.message }, { status: 500 });
+  }
 
   const lastReadByThread = new Map<string, string>();
   for (const p of (participants ?? []) as unknown as ParticipantRow[]) lastReadByThread.set(p.thread_id, p.last_read_at);
@@ -99,7 +106,7 @@ export async function GET(request: Request) {
   const items: Array<{ id: string; type: string; threadId?: string; companyId?: string; entityId?: string; title: string; body: string; createdAt: string }> = [];
   
   // Add direct admin notifications
-  for (const an of adminNotifications ?? []) {
+  for (const an of adminErr ? [] : adminNotifications ?? []) {
     items.push({
       id: an.id,
       type: an.type,
@@ -138,5 +145,8 @@ export async function GET(request: Request) {
   // Sort by date and limit
   const sorted = items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, limit);
 
-  return NextResponse.json({ ok: true, count: sorted.length, items: sorted }, { status: 200 });
+  return NextResponse.json(
+    { ok: true, count: sorted.length, items: sorted, notice: adminNotificationNotice },
+    { status: 200 }
+  );
 }

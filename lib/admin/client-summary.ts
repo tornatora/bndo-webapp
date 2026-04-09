@@ -1,4 +1,5 @@
 import type { createClient as createSupabaseServerClient } from '@/lib/supabase/server';
+import { listApplicationDocumentsCompat } from '@/lib/db/applicationDocumentsCompat';
 
 type SupabaseServerClient = ReturnType<typeof createSupabaseServerClient>;
 
@@ -97,14 +98,18 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
 
   const applicationIds = applicationsWithTitle.map((item) => item.id);
 
-  const { data: documents } = applicationIds.length
-    ? await supabase
-        .from('application_documents')
-        .select('id, application_id, file_name, requirement_key, storage_path, file_size, mime_type, created_at')
-        .in('application_id', applicationIds)
-        .order('created_at', { ascending: false })
-        .limit(120)
-    : { data: [] as DocumentRow[] };
+  const docsResult = applicationIds.length
+    ? await listApplicationDocumentsCompat({
+        client: supabase as unknown as Parameters<typeof listApplicationDocumentsCompat>[0]['client'],
+        applicationIds,
+        limit: 120,
+        ascending: false,
+        includeExtendedColumns: true
+      })
+    : { rows: [] as DocumentRow[], error: null };
+  if (docsResult.error) {
+    throw new Error(docsResult.error.message ?? 'Errore caricamento documenti cliente.');
+  }
 
   const { data: practiceRequirements } = applicationIds.length
     ? await supabase
@@ -122,14 +127,27 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
         }>
       };
 
-  const docsWithLinks = await Promise.all(
-    (documents ?? []).map(async (doc) => {
+  const docsWithLinksRaw = await Promise.all(
+    (docsResult.rows ?? []).map(async (doc) => {
+      if (!doc.id || !doc.storage_path || !doc.created_at || typeof doc.file_size !== 'number' || !doc.mime_type) {
+        return null;
+      }
       const signed = await supabase.storage.from('application-documents').createSignedUrl(doc.storage_path, 3600);
       return {
-        ...doc,
+        id: doc.id,
+        application_id: doc.application_id,
+        file_name: doc.file_name,
+        requirement_key: doc.requirement_key,
+        storage_path: doc.storage_path,
+        file_size: doc.file_size,
+        mime_type: doc.mime_type,
+        created_at: doc.created_at,
         downloadUrl: signed.error ? null : signed.data.signedUrl
       };
     })
+  );
+  const docsWithLinks = docsWithLinksRaw.filter(
+    (doc): doc is Exclude<(typeof docsWithLinksRaw)[number], null> => doc !== null
   );
 
   return {

@@ -25,8 +25,13 @@ type ConsultantPracticePayload = {
     reviewed: number;
     submitted: number;
     docsMissing: number;
+    grossPaidCents: number;
+    consultantEarningsCents: number;
+    platformFeeCents: number;
+    paidPractices: number;
   };
   items: ConsultantPractice[];
+  notice?: string | null;
 };
 
 function formatDateTime(value: string | null | undefined) {
@@ -34,6 +39,10 @@ function formatDateTime(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'N/D';
   return date.toLocaleString('it-IT');
+}
+
+function formatCurrency(cents: number) {
+  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format((cents || 0) / 100);
 }
 
 export function ConsultantPracticesClient() {
@@ -112,11 +121,11 @@ export function ConsultantPracticesClient() {
     <div style={{ display: 'grid', gap: 16 }}>
       <section className="section-card">
         <div className="section-title">
-          <span>🗂️</span>
-          <span>Le mie pratiche assegnate</span>
+          <span>📊</span>
+          <span>Panoramica consulente</span>
         </div>
         <div className="admin-item-sub" style={{ marginTop: 4 }}>
-          Vista operativa consulente: priorità, documenti mancanti e pratiche da gestire.
+          Vista operativa pulita: pratiche assegnate, clienti da seguire e avanzamento documentale.
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: 10, marginTop: 14 }}>
@@ -159,6 +168,11 @@ export function ConsultantPracticesClient() {
             {error}
           </div>
         ) : null}
+        {payload?.notice ? (
+          <div className="admin-item-sub" style={{ marginTop: 12, color: '#92400E', fontWeight: 700 }}>
+            {payload.notice}
+          </div>
+        ) : null}
 
         {payload ? (
           <div className="admin-practice-crm-top" style={{ marginTop: 14 }}>
@@ -184,6 +198,31 @@ export function ConsultantPracticesClient() {
             </div>
           </div>
         ) : null}
+
+        {payload ? (
+          <div
+            style={{
+              marginTop: 14,
+              border: '1px solid rgba(5,150,105,0.28)',
+              borderRadius: 16,
+              padding: 16,
+              background: 'linear-gradient(135deg, rgba(236,253,245,1) 0%, rgba(209,250,229,1) 100%)'
+            }}
+          >
+            <div className="admin-kpi-label" style={{ fontSize: 12, letterSpacing: 0.4 }}>
+              Performance economica
+            </div>
+            <div style={{ fontSize: 34, fontWeight: 800, color: '#065F46', lineHeight: 1.1, marginTop: 6 }}>
+              Hai guadagnato {formatCurrency(payload.kpis.consultantEarningsCents)} su BNDO
+            </div>
+            <div className="admin-item-sub" style={{ marginTop: 8 }}>
+              Pratiche pagate: {payload.kpis.paidPractices} · Dati calcolati dai pagamenti confermati delle pratiche assegnate.
+            </div>
+            <div className="admin-item-sub" style={{ marginTop: 6 }}>
+              Il trasferimento effettivo avviene nel flusso “Fatturazione e pagamenti” con approvazione payout da admin.
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="section-card">
@@ -200,6 +239,11 @@ export function ConsultantPracticesClient() {
                   Pratiche assegnate: {client.practices} · Documenti mancanti: {client.docsMissing}
                 </div>
                 <div className="admin-table-meta">Ultimo aggiornamento: {formatDateTime(client.latestUpdate)}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <Link className="btn-action secondary" href={`/consultant/clients/${client.companyId}`}>
+                  Apri cliente
+                </Link>
               </div>
             </div>
           ))}

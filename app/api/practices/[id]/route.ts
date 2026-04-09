@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { listApplicationDocumentsForSingleApplicationCompat } from '@/lib/db/applicationDocumentsCompat';
 import {
   computeDerivedProgressKey,
   computeProgressBar,
@@ -54,22 +55,38 @@ export async function GET(
     .eq('id', application.tender_id)
     .maybeSingle();
 
-  const { data: docsRaw } = await supabase
-    .from('application_documents')
-    .select('id, file_name, requirement_key, created_at, storage_path')
-    .eq('application_id', application.id)
-    .order('created_at', { ascending: false });
-  let docs = docsRaw ?? [];
+  const docsResult = await listApplicationDocumentsForSingleApplicationCompat({
+    client: supabase as unknown as Parameters<typeof listApplicationDocumentsForSingleApplicationCompat>[0]['client'],
+    applicationId: application.id,
+    ascending: false,
+    includeExtendedColumns: true
+  });
+  if (docsResult.error) {
+    return NextResponse.json({ error: docsResult.error.message ?? 'Errore caricamento documenti pratica.' }, { status: 500 });
+  }
+  const dedupeDocs = <T extends { file_name?: string | null; requirement_key?: string | null }>(rows: T[]) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = `${String(row.requirement_key ?? '').toLowerCase()}|${String(row.file_name ?? '').toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  let docs = dedupeDocs(docsResult.rows ?? []);
   if (hasRealServiceRoleKey()) {
     try {
       const admin = getSupabaseAdmin();
-      const { data: adminDocs } = await admin
-        .from('application_documents')
-        .select('id, file_name, requirement_key, created_at, storage_path')
-        .eq('application_id', application.id)
-        .order('created_at', { ascending: false });
-      if ((adminDocs ?? []).length >= docs.length) {
-        docs = adminDocs ?? [];
+      const adminDocsResult = await listApplicationDocumentsForSingleApplicationCompat({
+        client: admin as unknown as Parameters<typeof listApplicationDocumentsForSingleApplicationCompat>[0]['client'],
+        applicationId: application.id,
+        ascending: false,
+        includeExtendedColumns: true
+      });
+      if (adminDocsResult.error) throw adminDocsResult.error;
+      const adminDeduped = dedupeDocs(adminDocsResult.rows ?? []);
+      if (adminDeduped.length >= docs.length) {
+        docs = adminDeduped;
       }
     } catch {
       // Keep user-scoped docs if admin fallback fails.

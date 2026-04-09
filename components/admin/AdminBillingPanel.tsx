@@ -70,6 +70,7 @@ export function AdminBillingPanel({
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [state, setState] = useState<BillingState>(() => defaultBilling(practices));
   const [selectedAppId, setSelectedAppId] = useState<string>('all');
   const [amountPaid, setAmountPaid] = useState<string>('');
@@ -88,6 +89,7 @@ export function AdminBillingPanel({
     async function run() {
       setLoading(true);
       setError(null);
+      setNotice(null);
       try {
         if (isMock) {
           const raw = localStorage.getItem(`bndo:billing:${companyId}`);
@@ -103,9 +105,10 @@ export function AdminBillingPanel({
         }
 
         const res = await fetch(`/api/admin/billing?companyId=${encodeURIComponent(companyId)}`, { cache: 'no-store' });
-        const json = (await res.json()) as { error?: string; data?: BillingState };
+        const json = (await res.json()) as { error?: string; data?: BillingState; notice?: string | null };
         if (!res.ok) throw new Error(json?.error ?? 'Errore caricamento fatturazione.');
         if (!cancelled) setState(json.data ?? defaultBilling(practices));
+        if (!cancelled) setNotice(json.notice ?? null);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Errore caricamento.');
       } finally {
@@ -124,11 +127,18 @@ export function AdminBillingPanel({
       localStorage.setItem(`bndo:billing:${companyId}`, JSON.stringify(next));
       return;
     }
-    await fetch('/api/admin/billing', {
+    const response = await fetch('/api/admin/billing', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ companyId, billing: { payments: next.payments, invoices: next.invoices } })
     });
+    const payload = (await response.json().catch(() => null)) as { error?: string; notice?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'Salvataggio billing non disponibile su questo ambiente.');
+    }
+    if (payload?.notice) {
+      throw new Error(payload.notice);
+    }
   }
 
   async function applyPayment() {
@@ -264,6 +274,11 @@ export function AdminBillingPanel({
       {error ? (
         <div className="admin-item-sub" style={{ color: '#B91C1C', fontWeight: 500 }}>
           {error}
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="admin-item-sub" style={{ color: '#92400E', fontWeight: 600 }}>
+          {notice}
         </div>
       ) : null}
 

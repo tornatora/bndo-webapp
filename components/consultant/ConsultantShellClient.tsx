@@ -20,7 +20,7 @@ type ConsultantItem = {
   key: string;
   label: string;
   href: string;
-  icon: 'pratiche' | 'admin';
+  icon: 'pratiche' | 'billing' | 'notifications' | 'admin';
 };
 
 function Icon({ name }: { name: ConsultantItem['icon'] }) {
@@ -31,6 +31,23 @@ function Icon({ name }: { name: ConsultantItem['icon'] }) {
       <svg {...common}>
         <path {...stroke} d="M12 3l7 4v5c0 5-3 8-7 9-4-1-7-4-7-9V7l7-4Z" />
         <path {...stroke} d="M9.5 12.5 11.2 14l3.3-3.4" />
+      </svg>
+    );
+  }
+  if (name === 'billing') {
+    return (
+      <svg {...common}>
+        <rect {...stroke} x="3" y="5" width="18" height="14" rx="2.5" />
+        <path {...stroke} d="M3 10h18" />
+        <path {...stroke} d="M7 15h4" />
+      </svg>
+    );
+  }
+  if (name === 'notifications') {
+    return (
+      <svg {...common}>
+        <path {...stroke} d="M12 3a5 5 0 0 1 5 5v2.8c0 .9.3 1.8.8 2.5l1.2 1.7H5l1.2-1.7c.5-.7.8-1.6.8-2.5V8a5 5 0 0 1 5-5Z" />
+        <path {...stroke} d="M9.5 18a2.5 2.5 0 0 0 5 0" />
       </svg>
     );
   }
@@ -54,10 +71,18 @@ export function ConsultantShellClient({ children, username, viewerProfileId, sho
 
   const items: ConsultantItem[] = [
     { key: 'consultant', label: 'Pratiche assegnate', href: '/consultant', icon: 'pratiche' },
+    { key: 'consultant_notifications', label: 'Notifiche', href: '/consultant/notifications', icon: 'notifications' },
+    { key: 'consultant_billing', label: 'Fatturazione e pagamenti', href: '/consultant/billing', icon: 'billing' },
     ...(showAdminLink ? [{ key: 'admin', label: 'Vista admin', href: '/admin', icon: 'admin' as const }] : []),
   ];
 
-  const activeKey = pathname?.startsWith('/admin') ? 'admin' : 'consultant';
+  const activeKey = pathname?.startsWith('/admin')
+    ? 'admin'
+    : pathname?.startsWith('/consultant/notifications')
+      ? 'consultant_notifications'
+    : pathname?.startsWith('/consultant/billing')
+      ? 'consultant_billing'
+      : 'consultant';
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent | any) {
@@ -158,7 +183,11 @@ export function ConsultantShellClient({ children, username, viewerProfileId, sho
             <Image src="/Logo-BNDO-header.png" alt="BNDO" width={170} height={44} priority />
           </a>
           <div className="nav-actions">
-            <NotificationsBell viewerProfileId={viewerProfileId} />
+            <NotificationsBell
+              viewerProfileId={viewerProfileId}
+              inboxHref="/consultant/notifications"
+              defaultActionPath="/consultant/practices"
+            />
             <div className="nav-user-container" ref={topbarMenuRef}>
               <button
                 type="button"
@@ -205,4 +234,3 @@ export function ConsultantShellClient({ children, username, viewerProfileId, sho
     </div>
   );
 }
-

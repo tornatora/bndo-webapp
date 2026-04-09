@@ -47,10 +47,18 @@ type SendQuizSubmissionAlertEmailInput = {
   phone: string | null;
   quizType: string | null;
   practiceTitle: string | null;
-  eligibility: 'eligible' | 'not_eligible' | 'needs_review';
+  eligibility: 'eligible' | 'likely_eligible' | 'not_eligible' | 'needs_review';
   submittedAtIso: string;
   adminLink: string;
   answers?: Record<string, string | number | boolean | null | undefined>;
+};
+
+type SendGenericNotificationEmailInput = {
+  toEmail: string;
+  subject: string;
+  title: string;
+  body: string;
+  actionUrl?: string | null;
 };
 
 function formatQuizAnswerLines(
@@ -370,9 +378,11 @@ export async function sendQuizSubmissionAlertEmail(
   const eligibilityLabel =
     input.eligibility === 'eligible'
       ? 'Idoneo'
+      : input.eligibility === 'likely_eligible'
+        ? 'Probabilmente idoneo'
       : input.eligibility === 'needs_review'
-      ? 'Da approfondire'
-      : 'Non idoneo';
+        ? 'Da approfondire'
+        : 'Non idoneo';
   const answerRows = formatQuizAnswerLines(input.answers);
   const subject = `Nuova risposta quiz: ${input.fullName} (${eligibilityLabel})`;
 
@@ -440,6 +450,95 @@ export async function sendQuizSubmissionAlertEmail(
       body: JSON.stringify({
         from: resendFromEmail,
         to: recipients,
+        subject,
+        text,
+        html
+      })
+    });
+
+    const rawResponse = await response.text();
+    let parsedResponse: ResendResponse = {};
+    try {
+      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
+      if (parsedUnknown && typeof parsedUnknown === 'object') {
+        parsedResponse = parsedUnknown as ResendResponse;
+      }
+    } catch {
+      parsedResponse = {};
+    }
+
+    if (!response.ok) {
+      return {
+        sent: false,
+        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
+      };
+    }
+
+    return {
+      sent: true,
+      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      error: error instanceof Error ? error.message : 'Unknown email transport error.'
+    };
+  }
+}
+
+export async function sendGenericNotificationEmail(
+  input: SendGenericNotificationEmailInput
+): Promise<SendEmailResult> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
+
+  if (!resendApiKey || !resendFromEmail) {
+    return {
+      sent: false,
+      skipped: true,
+      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
+    };
+  }
+
+  const toEmail = input.toEmail.trim().toLowerCase();
+  if (!toEmail) {
+    return {
+      sent: false,
+      skipped: true,
+      error: 'Recipient email is missing.'
+    };
+  }
+
+  const subject = input.subject.trim() || 'Aggiornamento BNDO';
+  const text = [input.title.trim(), '', input.body.trim(), input.actionUrl ? `Apri: ${input.actionUrl}` : null]
+    .filter(Boolean)
+    .join('\n');
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#10243a;max-width:640px;margin:0 auto;padding:24px;">
+      <h1 style="font-size:18px;margin:0 0 10px;">${escapeHtml(input.title.trim())}</h1>
+      <p style="margin:0 0 14px;">${escapeHtml(input.body.trim())}</p>
+      ${
+        input.actionUrl
+          ? `<a href="${escapeHtml(
+              input.actionUrl
+            )}" style="display:inline-block;background:#0a2540;color:#ffffff;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:600;">Apri in BNDO</a>`
+          : ''
+      }
+      <p style="margin:16px 0 0;font-size:12px;color:#5f7388;">Team BNDO</p>
+    </div>
+  `;
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: resendFromEmail,
+        to: [toEmail],
         subject,
         text,
         html

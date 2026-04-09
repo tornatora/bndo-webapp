@@ -37,6 +37,18 @@ const SCANNER_API_ENABLED =
   Boolean(SCANNER_API_EMAIL) &&
   Boolean(SCANNER_API_PASSWORD);
 const SCANNER_API_TIMEOUT_MS = Number.parseInt(process.env.SCANNER_API_TIMEOUT_MS || '14000', 10);
+const CHAT_BACKEND_PROXY_MODE_RAW = (process.env.CHAT_BACKEND_PROXY_MODE ?? 'on').trim().toLowerCase();
+const CHAT_BACKEND_PROXY_MODE =
+  CHAT_BACKEND_PROXY_MODE_RAW === 'on' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === 'true' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === '1' ||
+  CHAT_BACKEND_PROXY_MODE_RAW === 'yes';
+const CHAT_PROXY_BASE_URL =
+  (process.env.CHAT_PROXY_BASE_URL || 'https://69ce95a19126a43a447cb472--cheerful-cobbler-f23efc.netlify.app').replace(
+    /\/+$/,
+    ''
+  );
+const CHAT_PROXY_TIMEOUT_MS = Number.parseInt(process.env.CHAT_PROXY_TIMEOUT_MS || '30000', 10);
 
 const REGION_DEFS: Array<{ canonical: string; aliases: string[] }> = [
   { canonical: 'Abruzzo', aliases: ['abruzzo'] },
@@ -73,6 +85,49 @@ const payloadSchema = z.object({
 
 type ScanChannel = 'scanner' | 'chat';
 type ScanStrictness = 'standard' | 'high';
+
+function shouldProxyChatScan(rawBody: unknown): boolean {
+  if (!CHAT_BACKEND_PROXY_MODE) return false;
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) return false;
+  const payload = rawBody as Record<string, unknown>;
+  return payload.channel === 'chat';
+}
+
+async function proxyChatScan(rawBody: unknown, req: Request) {
+  const controller = new AbortController();
+  const timeoutMs = Number.isFinite(CHAT_PROXY_TIMEOUT_MS) && CHAT_PROXY_TIMEOUT_MS > 0 ? CHAT_PROXY_TIMEOUT_MS : 30_000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    const cookieHeader = req.headers.get('cookie');
+    if (cookieHeader) headers.set('cookie', cookieHeader);
+    const userAgent = req.headers.get('user-agent');
+    if (userAgent) headers.set('user-agent', userAgent);
+    const accept = req.headers.get('accept');
+    if (accept) headers.set('accept', accept);
+
+    const upstream = await fetch(`${CHAT_PROXY_BASE_URL}/api/scan-bandi`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(rawBody),
+      signal: controller.signal,
+    });
+    const responseHeaders = new Headers({
+      'content-type': upstream.headers.get('content-type') || 'application/json; charset=utf-8'
+    });
+    const setCookie = upstream.headers.get('set-cookie');
+    if (setCookie) responseHeaders.append('set-cookie', setCookie);
+    const text = await upstream.text();
+    return new NextResponse(text, { status: upstream.status, headers: responseHeaders });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Mmm, c'è un piccolo intoppo nella connessione. Riprova tra un istante." },
+      { status: 503 }
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function cleanString(value: unknown, max = 200): string | null {
   if (typeof value !== 'string') return null;
@@ -4403,6 +4458,11 @@ export async function POST(req: Request) {
   }
 
   try {
+    const rawBody = await req.json();
+    if (shouldProxyChatScan(rawBody)) {
+      return await proxyChatScan(rawBody, req);
+    }
+
     const datasetHealth = await loadDatasetHealthStatus().catch(() => ({
       datasetVersion: null,
       datasetFreshnessHours: null,
@@ -4410,8 +4470,6 @@ export async function POST(req: Request) {
       lastRunAt: null,
       alerts: [] as string[],
     }));
-
-    const rawBody = await req.json();
     const parsedPayload = payloadSchema.safeParse(rawBody);
     const parsed = parsedPayload.success
       ? parsedPayload.data

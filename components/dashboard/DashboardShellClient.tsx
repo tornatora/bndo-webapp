@@ -250,7 +250,11 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
             <Image src="/Logo-BNDO-header.png" alt="BNDO" width={170} height={44} priority />
           </a>
           <div className="nav-actions">
-            <NotificationsBell viewerProfileId={viewerProfileId} />
+            <NotificationsBell
+              viewerProfileId={viewerProfileId}
+              inboxHref="/dashboard/notifications"
+              defaultActionPath="/dashboard/pratiche"
+            />
             <div className="nav-user-container" ref={topbarMenuRef}>
               <button
                 type="button"

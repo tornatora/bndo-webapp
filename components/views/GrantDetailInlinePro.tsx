@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProgressBarPro as ProgressBar } from '@/components/views/ProgressBarPro';
 import GrantAiPopup from '@/components/views/GrantAiPopup';
+import { GrantDetailExpandableSections } from '@/components/views/GrantDetailExpandableSections';
 
 interface GrantDetail {
   id: string;
@@ -39,6 +40,38 @@ interface Explainability {
   message?: string;
 }
 
+interface GrantDetailSectionBlock {
+  kind: 'official_facts' | 'bndo_explanation' | 'examples' | 'warnings';
+  title: string;
+  items: string[];
+}
+
+interface GrantDetailSectionSource {
+  label: string;
+  location: string;
+  excerpt?: string;
+  url?: string;
+}
+
+interface GrantDetailSectionPayload {
+  id: string;
+  title: string;
+  summary: string;
+  status: 'grounded' | 'partial';
+  blocks: GrantDetailSectionBlock[];
+  sources: GrantDetailSectionSource[];
+}
+
+interface GrantDetailContentPayload {
+  schemaVersion: 'grant_detail_content_v1';
+  generationVersion: string;
+  generatedAt: string;
+  sourceFingerprint: string;
+  completenessScore: number;
+  warnings: string[];
+  sections: GrantDetailSectionPayload[];
+}
+
 const CONSULTING_EMAIL = process.env.NEXT_PUBLIC_CONSULTING_EMAIL || 'admin@grants.local';
 const CONSULTING_URL = process.env.NEXT_PUBLIC_CONSULTING_URL || '';
 
@@ -62,6 +95,70 @@ const toNumeric = (value: unknown): number | null => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+};
+
+const ITALIAN_REGIONS = [
+  'Abruzzo',
+  'Basilicata',
+  'Calabria',
+  'Campania',
+  'Emilia-Romagna',
+  'Friuli-Venezia Giulia',
+  'Lazio',
+  'Liguria',
+  'Lombardia',
+  'Marche',
+  'Molise',
+  'Piemonte',
+  'Puglia',
+  'Sardegna',
+  'Sicilia',
+  'Toscana',
+  'Trentino-Alto Adige',
+  "Valle d'Aosta",
+  'Veneto',
+];
+
+const normalizeRegionToken = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const extractRegionsFromText = (value: string): string[] => {
+  const norm = normalizeRegionToken(value);
+  if (!norm) return [];
+  const found: string[] = [];
+  for (const region of ITALIAN_REGIONS) {
+    const token = normalizeRegionToken(region);
+    if (token && norm.includes(token)) {
+      found.push(region);
+    }
+  }
+  return Array.from(new Set(found));
+};
+
+const hasExplicitMultiRegionSignal = (value: string) => {
+  const norm = normalizeRegionToken(value);
+  if (!norm) return false;
+  return /(interregion|piu regioni|più regioni|multi-?region|macro-?area|tutte le regioni|tutto il territorio|nazionale|italia)/.test(norm);
+};
+
+const sanitizeTerritoryLine = (line: string, primaryRegion: string | null, allowMulti: boolean): string => {
+  if (!primaryRegion || allowMulti) return line;
+  const lineNorm = normalizeText(line);
+  if (!/(territorio|area|regione|sede|localizz|provincia|comune)/.test(lineNorm)) return line;
+  const lineRegions = extractRegionsFromText(line);
+  if (lineRegions.length <= 1) return line;
+  if (!lineRegions.includes(primaryRegion)) return line;
+  const colonIndex = line.indexOf(':');
+  if (colonIndex >= 0) {
+    return `${line.slice(0, colonIndex + 1)} ${primaryRegion}`;
+  }
+  return primaryRegion;
 };
 
 const formatMoneyRange = (min: number | null, max: number | null): string | null => {
@@ -640,15 +737,18 @@ export function GrantDetailInlinePro({
   grantId,
   sourceChannel = 'direct',
   onVerify,
-  onBack
+  onBack,
+  showGrantAiPopup = true,
 }: {
   grantId: string;
   sourceChannel?: 'scanner' | 'chat' | 'direct' | 'admin';
   onVerify?: (grantId: string) => void;
   onBack?: () => void;
+  showGrantAiPopup?: boolean;
 }) {
   const [detail, setDetail] = useState<GrantDetail | null>(null);
   const [explain, setExplain] = useState<Explainability | null>(null);
+  const [detailContent, setDetailContent] = useState<GrantDetailContentPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -657,6 +757,7 @@ export function GrantDetailInlinePro({
       setError('ID bando non valido.');
       setDetail(null);
       setExplain(null);
+      setDetailContent(null);
       return;
     }
 
@@ -664,6 +765,7 @@ export function GrantDetailInlinePro({
     setError(null);
     setDetail(null);
     setExplain(null);
+    setDetailContent(null);
 
     const fetchWithTimeout = async (url: string, timeoutMs = 4_000) => {
       const controller = new AbortController();
@@ -682,23 +784,51 @@ export function GrantDetailInlinePro({
       officialAttachments: Array.isArray(rawGrant.officialAttachments) ? rawGrant.officialAttachments : []
     });
 
-    Promise.all([fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}`), fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}/explainability`)])
-      .then(async ([grantRes, explainRes]) => {
-        const grantJson = (await grantRes.json().catch(() => null)) as GrantDetail | { error?: string } | null;
-        const explainJson = (await explainRes.json().catch(() => null)) as Explainability | { error?: string } | null;
+    fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}/page-content`)
+      .then(async (pageRes) => {
+        const pageJson = (await pageRes.json().catch(() => null)) as
+          | {
+              detail?: GrantDetail;
+              explainability?: Explainability;
+              detailContent?: GrantDetailContentPayload;
+              error?: string;
+            }
+          | null;
 
-        if (!grantRes.ok) {
-          throw new Error((grantJson && 'error' in grantJson && grantJson.error) || 'Errore caricamento dettaglio bando');
-        }
-        if (!explainRes.ok) {
-          throw new Error((explainJson && 'error' in explainJson && explainJson.error) || 'Errore explainability bando');
+        if (!pageRes.ok || !pageJson?.detail || !pageJson?.explainability) {
+          throw new Error((pageJson && pageJson.error) || 'Errore caricamento pagina bando');
         }
 
         if (cancelled) return;
-        setDetail(normalizeGrant(grantJson as GrantDetail));
-        setExplain(explainJson as Explainability);
+        setDetail(normalizeGrant(pageJson.detail));
+        setExplain(pageJson.explainability);
+        setDetailContent(pageJson.detailContent ?? null);
       })
-      .catch((primaryError) => {
+      .catch(async (primaryError) => {
+        try {
+          const [grantRes, explainRes] = await Promise.all([
+            fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}`),
+            fetchWithTimeout(`/api/grants/${encodeURIComponent(id)}/explainability`),
+          ]);
+          const grantJson = (await grantRes.json().catch(() => null)) as GrantDetail | { error?: string } | null;
+          const explainJson = (await explainRes.json().catch(() => null)) as Explainability | { error?: string } | null;
+
+          if (!grantRes.ok) {
+            throw new Error((grantJson && 'error' in grantJson && grantJson.error) || 'Errore caricamento dettaglio bando');
+          }
+          if (!explainRes.ok) {
+            throw new Error((explainJson && 'error' in explainJson && explainJson.error) || 'Errore explainability bando');
+          }
+
+          if (cancelled) return;
+          setDetail(normalizeGrant(grantJson as GrantDetail));
+          setExplain(explainJson as Explainability);
+          setDetailContent(null);
+          return;
+        } catch {
+          // Fallback non disponibile: mostriamo errore principale.
+        }
+
         if (cancelled) return;
         const message =
           primaryError instanceof Error
@@ -766,178 +896,9 @@ export function GrantDetailInlinePro({
   const openingLabel = formatDate(detail.openingDate, 'Già aperto');
   const deadlineLabel = formatDate(detail.deadlineDate, 'A sportello');
   const economicSummary = economicSummaryFromDetail(detail);
-  const conciseDescription = buildConciseDescription(detail.description);
   const verifyRequirementsHref = `/dashboard/new-practice/quiz?grantId=${encodeURIComponent(detail.id)}&source=${encodeURIComponent(
     sourceChannel
   )}`;
-  const whyFitItems = (explain.whyFit || []).filter(Boolean);
-  const satisfiedItems = (explain.satisfiedRequirements || []).filter(Boolean);
-  const missingItems = (explain.missingRequirements || []).filter(Boolean);
-  const structuredCorpusRaw: string[] = [];
-  flattenObjectText(detail.requisitiStrutturati, structuredCorpusRaw);
-  flattenObjectText(detail.requisitiHard, structuredCorpusRaw);
-  flattenObjectText(detail.requisitiSoft, structuredCorpusRaw);
-  const structuredCorpus = toUniqueList(structuredCorpusRaw.filter(isUsefulDetailLine), 40);
-
-  const positiveItems = toUniqueList(
-    [
-      ...(satisfiedItems.length > 0 ? satisfiedItems : whyFitItems).map(humanizePositiveItem),
-      ...structuredCorpus
-        .filter(
-          (line) =>
-            /(ammess|beneficiar|destinatar|compatibil|coerent|prioritar|premial)/.test(normalizeText(line)) &&
-            !hasNegativeHint(line),
-        )
-        .map(ensureSentenceStart),
-    ],
-    4,
-  );
-  const criticalItems = toUniqueList(
-    [
-      ...missingItems.map(humanizeCriticalItem),
-      ...structuredCorpus
-        .filter((line) => /(requisit|obblig|deve|necessari|vincol|condizion)/.test(normalizeText(line)))
-        .map(ensureSentenceStart),
-    ],
-    5,
-  );
-  const financedStructured = extractStructuredList(
-    detail.requisitiStrutturati,
-    [
-      ['expenses', 'admitted'],
-      ['expenses', 'eligible'],
-      ['economic', 'admittedCosts'],
-      ['economic', 'eligibleCosts'],
-      ['summary', 'whatFinances'],
-    ],
-    6,
-  );
-  const financedDescription = extractKeywordSentences(
-    detail.description,
-    /(finanzia|ammissibil|copre|contribut|voucher|investiment|spes[ae]|acquisto|impiant|macchinar|digital|innovaz|ricerca|sviluppo|efficientament|internaz|export)/,
-    4,
-  ).filter((line) => !hasNegativeHint(line));
-  const financedFromCorpus = structuredCorpus.filter(
-    (line) =>
-      /(finanzia|ammissibil|copre|contribut|voucher|investiment|spes[ae]|acquisto|impiant|macchinar)/.test(
-        normalizeText(line),
-      ) && !hasNegativeHint(line),
-  );
-  const financedItems = toUniqueList(
-    [...financedStructured, ...financedDescription, ...financedFromCorpus]
-      .map(sanitizeGuideLine)
-      .filter((item) => item.length <= 180),
-    6,
-  );
-
-  const excludedStructured = extractStructuredList(
-    detail.requisitiStrutturati,
-    [
-      ['expenses', 'excluded'],
-      ['expenses', 'notAdmitted'],
-      ['summary', 'whatExcludes'],
-      ['constraints', 'excludedConditions'],
-    ],
-    6,
-  );
-  const excludedDescription = extractKeywordSentences(
-    detail.description,
-    /(non ammess|non finanzi|esclus|escluse|esclusi|inammiss|vietat|non consentit|solo per)/,
-    4,
-  );
-  const excludedFromCorpus = structuredCorpus.filter((line) => hasNegativeHint(line));
-  const excludedItems = toUniqueList(
-    [...excludedStructured, ...excludedDescription, ...excludedFromCorpus]
-      .map(sanitizeGuideLine)
-      .filter((item) => item.length <= 180),
-    6,
-  );
-
-  const probableDocumentsFromDescription = extractDocumentHints(detail.description);
-  const probableDocumentsFromCorpus = structuredCorpus.filter((line) =>
-    /(document|allegat|dichiarazion|visura|bilanci|preventiv|durc|pec|firma digitale|atto costitutivo|statuto|identita|codice fiscale)/.test(
-      normalizeText(line),
-    ),
-  );
-  const probableDocuments = toUniqueList(
-    [
-      ...(detail.requiredDocuments ?? []),
-      ...extractStructuredList(
-        detail.requisitiStrutturati,
-        [
-          ['documents', 'required'],
-          ['documents', 'base'],
-          ['summary', 'likelyDocuments'],
-        ],
-        8,
-      ),
-      ...probableDocumentsFromDescription,
-      ...probableDocumentsFromCorpus.map(sanitizeGuideLine),
-    ],
-    8,
-  );
-  const targetAudienceItems = toUniqueList(
-    [
-      detail.beneficiaries.length
-        ? `Beneficiari principali: ${detail.beneficiaries.slice(0, 4).join(', ')}`
-        : 'Beneficiari principali: imprese e professionisti indicati dal bando',
-      sectorsLabel ? `Settori coinvolti: ${sectorsLabel}` : null,
-      detail.authority ? `Ente gestore: ${detail.authority}` : null,
-    ],
-    4,
-  ).map(sanitizeGuideLine);
-
-  const keyRequirementItems = toUniqueList(
-    [
-      ...criticalItems,
-      ...extractStructuredList(
-        detail.requisitiStrutturati,
-        [
-          ['requirements', 'hard'],
-          ['requirements', 'mandatory'],
-          ['summary', 'keyRequirements'],
-        ],
-        6,
-      ),
-    ]
-      .map(sanitizeGuideLine)
-      .filter((item) => item.length <= 180),
-    6,
-  );
-  const operationalSteps = toUniqueList(
-    [
-      ...(explain.applySteps ?? []),
-      `Verifica i requisiti specifici del tuo profilo prima della candidatura.`,
-      `Prepara i documenti richiesti e i preventivi di spesa coerenti con il bando.`,
-      `Conferma con BNDO i tempi di sportello e la strategia di invio pratica.`,
-    ].map(sanitizeGuideLine),
-    5,
-  );
-  const officialUpdateNote = detail.deadlineDate
-    ? `Ultimo controllo scadenza: ${deadlineLabel}.`
-    : 'Scadenza non indicata: consigliata verifica diretta su fonte ufficiale.';
-  const economicDetailItems = toUniqueList(
-    [
-      detail.aidForm ? `Forma agevolazione: ${detail.aidForm}` : null,
-      detail.aidIntensity ? `Intensità indicata: ${detail.aidIntensity}` : null,
-      economicSummary.grantAmount ? `Importo contributo indicativo: ${economicSummary.grantAmount}` : null,
-      economicSummary.projectAmount ? `Spesa progetto ammissibile: ${economicSummary.projectAmount}` : null,
-    ].map((item) => (item ? sanitizeGuideLine(item) : item)),
-    5,
-  );
-  const timingDetailItems = toUniqueList(
-    [
-      `Stato sportello: ${grantStatus}`,
-      `Apertura: ${openingLabel}`,
-      `Scadenza: ${deadlineLabel}`,
-      detail.authority ? `Ente di riferimento: ${detail.authority}` : null,
-      officialUpdateNote,
-    ].map((item) => (item ? sanitizeGuideLine(item) : item)),
-    5,
-  );
-  const practicalIntro =
-    conciseDescription ||
-    `Questa misura sostiene ${beneficiariesLabel.toLowerCase()} con interventi in ambito ${sectorsLabel.toLowerCase()}. Prima di candidarti conviene verificare requisiti e spese ammissibili sul tuo caso reale.`;
 
   const handleVerify = () => {
     if (onVerify) {
@@ -1022,123 +983,9 @@ export function GrantDetailInlinePro({
         ) : null}
       </section>
 
-      <section className="premium-card fade-up p-6 grant-detail-section">
-        <h2 className="grant-section-title">Guida pratica al bando</h2>
-        <p className="grant-empty-note">{practicalIntro}</p>
-        <div className="grant-summary-grid grant-summary-grid--compact grant-guide-grid">
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">In sintesi per te</div>
-            <ul className="grant-summary-list">
-              {economicDetailItems.length > 0 ? (
-                economicDetailItems.map((item) => <li key={`eco-top-${item}`}>{sanitizeGuideLine(item)}</li>)
-              ) : (
-                <li>Contributo e copertura vengono definiti in base alle spese ammissibili previste dal bando.</li>
-              )}
-            </ul>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">A chi è rivolto</div>
-            <ul className="grant-summary-list">
-              {targetAudienceItems.length > 0 ? (
-                targetAudienceItems.map((item) => <li key={`target-${item}`}>{item}</li>)
-              ) : (
-                <li>Il bando è destinato ai soggetti indicati nella scheda ufficiale.</li>
-              )}
-            </ul>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">Cosa puoi finanziare</div>
-            <ul className="grant-summary-list">
-              {financedItems.length > 0 ? (
-                financedItems.map((item) => <li key={`fin-${item}`}>{item}</li>)
-              ) : (
-                <li>Investimenti, servizi e spese coerenti con le finalità della misura.</li>
-              )}
-            </ul>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">Requisiti e attenzioni</div>
-            <ul className="grant-summary-list">
-              {(keyRequirementItems.length > 0 ? keyRequirementItems : excludedItems).length > 0 ? (
-                (keyRequirementItems.length > 0 ? keyRequirementItems : excludedItems).map((item) => (
-                  <li key={`req-${item}`}>{item}</li>
-                ))
-              ) : (
-                <li>Verifica requisiti soggettivi, settore e limiti di spesa prima di inviare la domanda.</li>
-              )}
-            </ul>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">Documenti da preparare</div>
-            <ul className="grant-summary-list">
-              {probableDocuments.length > 0 ? (
-                probableDocuments.map((item) => <li key={`doc-${item}`}>{sanitizeGuideLine(item)}</li>)
-              ) : (
-                <li>Documento d&apos;identità, codice fiscale, visura e documentazione tecnica della spesa.</li>
-              )}
-            </ul>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">Prossimo step con BNDO</div>
-            <ul className="grant-summary-list">
-              {(operationalSteps.length > 0 ? operationalSteps : ['Completa la verifica requisiti e carica i documenti base della pratica.']).map((item) => (
-                <li key={`step-${item}`}>{sanitizeGuideLine(item)}</li>
-              ))}
-            </ul>
-            <p className="grant-guide-note">{officialUpdateNote}</p>
-          </article>
-          <article className="grant-summary-item grant-guide-item">
-            <div className="grant-summary-k">Tempistiche e canale</div>
-            <ul className="grant-summary-list">
-              {timingDetailItems.length > 0 ? (
-                timingDetailItems.map((item) => <li key={`time-${item}`}>{sanitizeGuideLine(item)}</li>)
-              ) : (
-                <li>Tempistiche non completamente pubblicate: monitoraggio consigliato del bando ufficiale.</li>
-              )}
-            </ul>
-          </article>
-        </div>
-      </section>
+      <GrantDetailExpandableSections content={detailContent} officialUrl={detail.officialUrl} />
 
-      <section className="premium-card fade-up p-6 grant-detail-section">
-        <h2 className="grant-section-title">Compatibilità con il tuo profilo</h2>
-        {'message' in explain && explain.message ? <p className="grant-empty-note">{explain.message}</p> : null}
-        <div className="grant-compat-summary">
-          <div className="grant-compat-stat grant-compat-stat--ok">
-            <span>Requisiti compatibili</span>
-            <strong>{positiveItems.length}</strong>
-          </div>
-          <div className="grant-compat-stat grant-compat-stat--warn">
-            <span>Requisiti da approfondire</span>
-            <strong>{criticalItems.length}</strong>
-          </div>
-        </div>
-        <div className="grant-compat-grid">
-          <article className="grant-compat-card grant-compat-card--ok">
-            <h3>Cosa è già compatibile</h3>
-            <ul className="grant-compat-list">
-              {positiveItems.length > 0 ? (
-                positiveItems.map((item) => <li key={`ok-${item}`}>{item}</li>)
-              ) : (
-                <li>Profilo compatibile in modo generale con il bando.</li>
-              )}
-            </ul>
-          </article>
-
-          <article className="grant-compat-card grant-compat-card--warn">
-            <h3>Cosa devi ancora verificare</h3>
-            <ul className="grant-compat-list">
-              {criticalItems.length > 0 ? (
-                criticalItems.map((item) => <li key={`missing-${item}`}>{item}</li>)
-              ) : (
-                <li>Non risultano criticità principali con i dati disponibili.</li>
-              )}
-            </ul>
-          </article>
-        </div>
-      </section>
-
-      <GrantAiPopup grantId={detail.id} grantTitle={detail.title} />
+      {showGrantAiPopup ? <GrantAiPopup grantId={detail.id} grantTitle={detail.title} /> : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 
 const QuerySchema = z.object({
   companyId: z.string().uuid()
@@ -59,9 +60,10 @@ export async function GET(request: Request) {
     .eq('company_id', parsed.data.companyId)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const crmMissing = Boolean(error && isMissingTable(error, 'company_crm'));
+  if (error && !crmMissing) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const adminFields = (data?.admin_fields ?? {}) as Record<string, unknown>;
+  const adminFields = (crmMissing ? {} : data?.admin_fields ?? {}) as Record<string, unknown>;
   const billing = extractBilling(adminFields);
   const { data: paymentRows, error: paymentError } = await supabaseAdmin
     .from('practice_payments')
@@ -70,9 +72,10 @@ export async function GET(request: Request) {
     .order('created_at', { ascending: false })
     .limit(200);
 
-  if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 500 });
+  const paymentsMissing = Boolean(paymentError && isMissingTable(paymentError, 'practice_payments'));
+  if (paymentError && !paymentsMissing) return NextResponse.json({ error: paymentError.message }, { status: 500 });
 
-  const paymentRecords = (paymentRows ?? []).map((row) => ({
+  const paymentRecords = (paymentsMissing ? [] : paymentRows ?? []).map((row) => ({
     id: row.id,
     applicationId: row.application_id,
     grantTitle: row.grant_title,
@@ -87,6 +90,10 @@ export async function GET(request: Request) {
       ...(billing ?? { payments: {}, invoices: [] }),
       paymentRecords,
     },
+    notice:
+      crmMissing || paymentsMissing
+        ? 'Billing attivo in modalità compatibile: alcune tabelle avanzate non sono ancora allineate su questo ambiente.'
+        : null
   });
 }
 
@@ -103,7 +110,17 @@ export async function POST(request: Request) {
     .eq('company_id', body.data.companyId)
     .maybeSingle();
 
-  if (readErr) return NextResponse.json({ error: readErr.message }, { status: 500 });
+  if (readErr && !isMissingTable(readErr, 'company_crm')) {
+    return NextResponse.json({ error: readErr.message }, { status: 500 });
+  }
+  if (readErr && isMissingTable(readErr, 'company_crm')) {
+    return NextResponse.json(
+      {
+        error: 'CRM non ancora allineato su questo ambiente: salvataggio billing temporaneamente non disponibile.'
+      },
+      { status: 503 }
+    );
+  }
 
   const current = ((existing?.admin_fields ?? {}) as Record<string, unknown>) ?? {};
   const merged = { ...current, billing: body.data.billing };

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireOpsProfile } from '@/lib/auth';
+import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 const QuerySchema = z.object({
@@ -39,11 +40,11 @@ export async function GET(request: Request) {
 
   if (error) {
     // Friendly message when table isn't deployed yet.
-    if ((error as { code?: string })?.code === '42P01') {
-      return NextResponse.json(
-        { error: "Tabella CRM mancante su Supabase. Applica l'update schema (company_crm) e riprova." },
-        { status: 500 }
-      );
+    if ((error as { code?: string })?.code === '42P01' || isMissingTable(error, 'company_crm')) {
+      return NextResponse.json({
+        data: null,
+        notice: "CRM avanzato non ancora attivo su questo ambiente. La scheda cliente resta disponibile in modalità base."
+      });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -93,10 +94,13 @@ export async function POST(request: Request) {
 
   const { error } = await supabaseAdmin.from('company_crm').upsert(row, { onConflict: 'company_id' });
   if (error) {
-    if ((error as { code?: string })?.code === '42P01') {
+    if ((error as { code?: string })?.code === '42P01' || isMissingTable(error, 'company_crm')) {
       return NextResponse.json(
-        { error: "Tabella CRM mancante su Supabase. Applica l'update schema (company_crm) e riprova." },
-        { status: 500 }
+        {
+          error:
+            "CRM avanzato non ancora attivo su questo ambiente. Completa la migrazione database per salvare priorità/tag/note."
+        },
+        { status: 503 }
       );
     }
     return NextResponse.json({ error: error.message }, { status: 500 });

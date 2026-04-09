@@ -5,7 +5,7 @@ export default function DashboardCatalogoBandiPage() {
     <section className="welcome-section">
       <BandiCatalogView
         title="Catalogo Bandi"
-        subtitle="Bandi italiani attivi (no-UE), ordinati e pronti alla verifica requisiti."
+        subtitle="Bandi italiani attivi (no-UE), ordinati e pronti ai dettagli operativi."
       />
     </section>
   );

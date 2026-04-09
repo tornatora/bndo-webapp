@@ -13,7 +13,7 @@ function splitSentences(text: string) {
     .filter(Boolean);
 }
 
-function ensureMaxSentences(text: string, max = 7) {
+function ensureMaxSentences(text: string, max = 10) {
   const s = splitSentences(text);
   if (s.length <= max) return text.trim();
   return `${s.slice(0, max).join(' ').trim()}`;
@@ -55,20 +55,39 @@ function smoothOpenings(text: string) {
   return text
     .replace(/^ciao!+\s*perfetto\.?\s*/i, 'Certo. ')
     .replace(/^perfetto\.?\s*perfetto\.?\s*/i, 'Perfetto. ')
+    .replace(/^grande domanda!?\s*/i, '')
+    .replace(/^certamente!?\s*/i, '')
+    .replace(/^assolutamente!?\s*/i, '')
     .replace(/\bti dico subito\b/gi, 'ti aiuto subito')
     .replace(/\bok\b/gi, 'va bene');
 }
 
-export function applyTonePolicy(text: string, style: 'quasi_amichevole' | 'professionale' = 'quasi_amichevole') {
+/**
+ * Apply tone policy for the final response.
+ * - 'quasi_amichevole': Profiling/clarification. Short, warm, 1 question. Max 4 sentences.
+ * - 'professionale': QA/measure. Full consultant depth. Max 10 sentences.
+ * - 'qa_completo': Deep QA. Max 14 sentences, no truncation.
+ */
+export function applyTonePolicy(
+  text: string,
+  style: 'quasi_amichevole' | 'professionale' | 'qa_completo' = 'quasi_amichevole'
+) {
   const base = sanitizeBase(text);
   const smoothed = smoothOpenings(base);
-  const maxSentences = style === 'professionale' ? 4 : 2;
+
+  if (style === 'qa_completo') {
+    const clipped = ensureMaxSentences(smoothed, 14);
+    const dedupedQuestions = keepSingleQuestion(splitSentences(clipped)).join(' ').trim();
+    return clampLength(ensureSingleQuestionMark(dedupedQuestions), 2000);
+  }
+
+  const maxSentences = style === 'professionale' ? 10 : 4;
+  const maxChars = style === 'professionale' ? 1200 : 500;
   const clipped = ensureMaxSentences(smoothed, maxSentences);
   const dedupedQuestions = keepSingleQuestion(splitSentences(clipped)).join(' ').trim();
-  const compact = clampLength(ensureSingleQuestionMark(dedupedQuestions), style === 'professionale' ? 600 : 450);
+  const compact = clampLength(ensureSingleQuestionMark(dedupedQuestions), maxChars);
   if (style === 'professionale') return compact;
 
-  // "Quasi amichevole": warm but concise.
   if (!/[.!?]$/.test(compact)) return `${compact}.`;
   return compact;
 }

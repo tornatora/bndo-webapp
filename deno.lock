@@ -33,6 +33,7 @@
         "npm:react@^18.2.0",
         "npm:stripe@^17.5.0",
         "npm:tailwindcss@^3.4.17",
+        "npm:tsx@^4.21.0",
         "npm:typescript@^5.7.2",
         "npm:zod@^3.24.1"
       ]

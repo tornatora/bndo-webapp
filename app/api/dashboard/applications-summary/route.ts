@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
+import { listApplicationDocumentsCompat } from '@/lib/db/applicationDocumentsCompat';
 import {
   computeDerivedProgressKey,
   computeProgressBar,
@@ -70,32 +71,49 @@ export async function GET() {
   const tenderMap = new Map((tenders ?? []).map((t) => [t.id, t]));
 
   const applicationIds = typedApplications.map((a) => a.id);
-  const { data: docsRaw } = applicationIds.length
-    ? await supabase
-        .from('application_documents')
-        .select('application_id, file_name, requirement_key')
-        .in('application_id', applicationIds)
-        .order('created_at', { ascending: false })
-        .limit(500)
-    : { data: [] as DocRow[] };
-  let docs = ((docsRaw ?? []) as unknown as DocRow[]) ?? [];
+  const docsResult = applicationIds.length
+    ? await listApplicationDocumentsCompat({
+        client: supabase as unknown as Parameters<typeof listApplicationDocumentsCompat>[0]['client'],
+        applicationIds,
+        limit: 500,
+        ascending: false,
+        includeExtendedColumns: false
+      })
+    : { rows: [] as DocRow[], error: null };
+  if (docsResult.error) {
+    return NextResponse.json({ error: docsResult.error.message ?? 'Errore caricamento documenti.' }, { status: 500 });
+  }
+  let docs = (docsResult.rows as unknown as DocRow[]) ?? [];
 
   if (applicationIds.length && hasRealServiceRoleKey()) {
     try {
       const admin = getSupabaseAdmin();
-      const { data: adminDocs } = await admin
-        .from('application_documents')
-        .select('application_id, file_name, requirement_key')
-        .in('application_id', applicationIds)
-        .order('created_at', { ascending: false })
-        .limit(500);
-      if ((adminDocs ?? []).length >= docs.length) {
-        docs = ((adminDocs ?? []) as unknown as DocRow[]) ?? [];
+      const adminDocsResult = await listApplicationDocumentsCompat({
+        client: admin as unknown as Parameters<typeof listApplicationDocumentsCompat>[0]['client'],
+        applicationIds,
+        limit: 500,
+        ascending: false,
+        includeExtendedColumns: false
+      });
+      if (!adminDocsResult.error && adminDocsResult.rows.length >= docs.length) {
+        docs = (adminDocsResult.rows as unknown as DocRow[]) ?? [];
       }
     } catch {
       // Best-effort fallback for company-wide docs visibility.
     }
   }
+
+  const dedupeDocs = (rows: DocRow[]) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = `${row.application_id}|${String(row.requirement_key ?? '')}|${String(row.file_name ?? '')}`.toLowerCase();
+      if (!key.trim()) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  docs = dedupeDocs(docs);
 
   const { data: dynamicRequirements } = applicationIds.length
     ? await supabase

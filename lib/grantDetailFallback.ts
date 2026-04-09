@@ -11,6 +11,9 @@ type IncentiviDoc = {
   authorityName?: string;
   openDate?: string;
   closeDate?: string;
+  regions?: string[] | string;
+  provinces?: string[] | string;
+  municipalities?: string[] | string;
   sectors?: string[] | string;
   beneficiaries?: string[] | string;
   supportForm?: string[] | string;
@@ -279,6 +282,20 @@ function strategicDocToIncentiviDoc(rawDoc: unknown): IncentiviDoc {
     authorityName: typeof doc.authorityName === 'string' ? doc.authorityName : undefined,
     openDate: typeof doc.openDate === 'string' ? doc.openDate : undefined,
     closeDate: typeof doc.closeDate === 'string' ? doc.closeDate : undefined,
+    regions:
+      Array.isArray(doc.regions) ? doc.regions.map((entry) => String(entry)) : typeof doc.regions === 'string' ? doc.regions : undefined,
+    provinces:
+      Array.isArray(doc.provinces)
+        ? doc.provinces.map((entry) => String(entry))
+        : typeof doc.provinces === 'string'
+          ? doc.provinces
+          : undefined,
+    municipalities:
+      Array.isArray(doc.municipalities)
+        ? doc.municipalities.map((entry) => String(entry))
+        : typeof doc.municipalities === 'string'
+          ? doc.municipalities
+          : undefined,
     sectors:
       Array.isArray(doc.sectors) ? doc.sectors.map((entry) => String(entry)) : typeof doc.sectors === 'string' ? doc.sectors : undefined,
     beneficiaries:
@@ -469,6 +486,9 @@ function buildEconomicPayload(doc: IncentiviDoc) {
 export async function buildFallbackGrantDetail(grantId: string): Promise<FallbackGrantDetail> {
   const doc = await fetchIncentiviDocByGrantId(grantId);
   const beneficiaries = asStringArray(doc.beneficiaries);
+  const regions = asStringArray(doc.regions);
+  const provinces = asStringArray(doc.provinces);
+  const municipalities = asStringArray(doc.municipalities);
   const sectors = asStringArray(doc.sectors);
   const supportForm = asStringArray(doc.supportForm);
   const economic = buildEconomicPayload(doc);
@@ -493,9 +513,18 @@ export async function buildFallbackGrantDetail(grantId: string): Promise<Fallbac
     cpvCode: (doc as any).cpvCode ?? null,
     requisitiHard: {
       settori_scope: sectors.length ? 'settori_specifici' : 'tutti_tranne_esclusi',
+      territorio_scope:
+        regions.length || provinces.length || municipalities.length
+          ? `Localizzazione ammessa in: ${[...municipalities, ...provinces, ...regions].join(', ')}`
+          : undefined
     },
     requisitiSoft: {},
     requisitiStrutturati: {
+      territory: {
+        regions,
+        provinces,
+        municipalities
+      },
       economic: {
         displayAmountLabel: economic.displayAmountLabel || null,
         displayProjectAmountLabel: economic.displayProjectAmountLabel || null,
@@ -530,8 +559,8 @@ export async function buildFallbackGrantExplainability(grantId: string): Promise
     whyFit,
     satisfiedRequirements: whyFit,
     missingRequirements: [
-      'Verificare se il soggetto richiedente rientra tra i beneficiari ammessi dal bando.',
-      'Verificare compatibilità del settore/ATECO e dei limiti economici della misura.',
+      'Confrontare il profilo dell’impresa o del richiedente con i beneficiari descritti nel testo ufficiale del bando.',
+      'Controllare settore/ATECO e dimensione/investimento rispetto ai massimali e alle categorie indicate in scheda.',
     ],
     applySteps: [
       'Leggi la scheda ufficiale del bando e verifica la finestra di apertura.',
