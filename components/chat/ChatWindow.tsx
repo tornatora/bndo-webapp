@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { ArrowDown, ChevronDown } from 'lucide-react';
 import { InputArea } from '@/components/chat/InputArea';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { BandiResults, type BandoResult } from '@/components/chat/BandiResults';
@@ -384,6 +385,7 @@ export function ChatWindow({
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail'>(resolvedInitialView);
   const [viewLoaded, setViewLoaded] = useState<Record<'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail', boolean>>({
     home: resolvedInitialView === 'home',
@@ -811,12 +813,41 @@ export function ChatWindow({
     }
   }, []);
 
-  function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
-    // Works whether the scroll container is this div or the document.
+  useEffect(() => {
     if (!bottomRef.current) return;
-    requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
-    });
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // Se l'ancora di fondo NON è visibile, mostriamo il pulsante
+        // Usiamo un threshold per maggiore reattività
+        setShowScrollButton(!entry.isIntersecting);
+      },
+      {
+        root: null, // viewport
+        rootMargin: '0px 0px -100px 0px', // Attiva 100px prima di sparire
+        threshold: 0
+      }
+    );
+
+    observer.observe(bottomRef.current);
+    return () => observer.disconnect();
+  }, [messages.length]); // Re-observe when messages change to ensure anchor is tracked
+
+  function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
+    // Cerchiamo l'ultimo messaggio effettivo nella conversazione
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      const node = messageNodeRefs.current[lastMsg.id];
+      if (node) {
+        node.scrollIntoView({ behavior, block: 'center' });
+        return;
+      }
+    }
+
+    // Fallback se non ci sono ancora messaggi o i ref non sono pronti
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior, block: 'end' });
+    }
   }
 
   useEffect(() => {
@@ -1445,6 +1476,7 @@ export function ChatWindow({
                   grantId={targetGrantId} 
                   onVerify={goQuiz}
                   onBack={goScanner}
+                  showGrantAiPopup={false}
                 />
               ) : null}
             </div>
@@ -1490,7 +1522,10 @@ export function ChatWindow({
               ) : null}
 
               {messages.length > 0 ? (
-                <div ref={scrollRef} className="chatgpt-messages">
+                <div 
+                  ref={scrollRef} 
+                  className="chatgpt-messages"
+                >
                   {messages.map((m) => {
                     if (m.kind === 'text')
                       return (
@@ -1543,6 +1578,17 @@ export function ChatWindow({
                   <div ref={bottomRef} className="chat-bottom-anchor" />
                 </div>
               ) : null}
+
+              {showScrollButton && (
+                <button
+                  type="button"
+                  onClick={() => scrollToBottom()}
+                  className="chat-scroll-latest-btn"
+                  aria-label="Vai in fondo alla chat"
+                >
+                  <ChevronDown className="w-5 h-5" />
+                </button>
+              )}
             </div>
 
             <FullScreenScannerOverlay

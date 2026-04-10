@@ -428,6 +428,32 @@ export async function POST(request: Request) {
     upsertSession(seededSession);
 
     const historyForOrchestrator = safeSliceTurns(turns, 24).map((turn) => ({ role: turn.role, text: turn.text }));
+
+    let focusedGrantContent: string | undefined;
+    if (shouldForceGrantFocus && focusGrantId) {
+      try {
+        const { fetchGrantDetail, fetchGrantExplainability } = await import('@/lib/grants/details');
+        const { getOrBuildGrantDetailContent } = await import('@/lib/grants/detailPageContent');
+        const [detail, explainability] = await Promise.all([
+          fetchGrantDetail(focusGrantId),
+          fetchGrantExplainability(focusGrantId)
+        ]);
+        const detailContent = await getOrBuildGrantDetailContent(detail, explainability);
+        
+        // Build a concise context for the LLM
+        focusedGrantContent = [
+          `TITOLO: ${detail.title}`,
+          `ENTE: ${detail.authority ?? 'n/a'}`,
+          `SETTORI: ${detail.sectors?.join(', ') ?? 'n/a'}`,
+          `BENEFICIARI: ${detail.beneficiaries?.join(', ') ?? 'n/a'}`,
+          `DESCRIZIONE: ${detail.description ?? 'n/a'}`,
+          `REQUISITI STRUTTURATI: ${JSON.stringify(detail.requisitiStrutturati ?? {})}`,
+          `PUNTI CHIAVE BNDO: ${detailContent.sections.map(s => `${s.title}: ${s.summary}`).join('\n')}`
+        ].join('\n\n');
+      } catch (e) {
+        console.error("Error fetching focused grant context for AI:", e);
+      }
+    }
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
@@ -509,7 +535,11 @@ export async function POST(request: Request) {
           let metadataEmitted = false;
           let fallbackEmitted = false;
           for await (const chunk of runStreamingChat(trimmedMessage, seededUserProfile, historyForOrchestrator, {
-            strictFocusedGrant: shouldForceGrantFocus,
+            strictFocusedGrant: shouldForceGrantFocus ? {
+              id: focusGrantId || 'n/a',
+              title: focusGrantTitle || 'n/a',
+              content: focusedGrantContent
+            } : undefined,
           })) {
             if (chunk.type === 'metadata') {
               metadataEmitted = true;

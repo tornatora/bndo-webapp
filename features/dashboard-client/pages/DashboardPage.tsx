@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess, hasOpsAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { DashboardStatsClient } from '@/components/dashboard/DashboardStatsClient';
@@ -30,8 +30,11 @@ export default async function DashboardPage() {
 
   const { profile } = await requireUserProfile();
 
-  if (hasOpsAccess(profile.role)) {
+  if (hasAdminAccess(profile.role)) {
     redirect('/admin');
+  }
+  if (hasConsultantAccess(profile.role)) {
+    redirect('/consultant');
   }
 
   if (!profile.company_id) {

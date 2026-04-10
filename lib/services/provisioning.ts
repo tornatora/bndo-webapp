@@ -69,16 +69,18 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
       }
     }
 
-    const password = payload.desiredPassword || randomPassword(10);
     const username = payload.desiredUsername || existingProfile.username || (slugify(payload.companyName).slice(0, 18) || 'cliente');
+    const password = payload.desiredPassword || null;
 
-    await supabaseAdmin.auth.admin.updateUserById(existingProfile.id, { 
-      password,
-      user_metadata: {
-        ...existingProfile,
-        username
-      }
-    });
+    if (password) {
+      await supabaseAdmin.auth.admin.updateUserById(existingProfile.id, { 
+        password: password,
+        user_metadata: {
+          ...existingProfile,
+          username
+        }
+      });
+    }
 
     if (username !== existingProfile.username) {
       await supabaseAdmin.from('profiles').update({ username }).eq('id', existingProfile.id);
@@ -109,41 +111,48 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
       }
     );
 
-    const emailResult = await sendOnboardingCredentialsEmail({
-      toEmail: payload.customerEmail,
-      contactName: payload.contactName,
-      companyName: payload.companyName,
-      tempPassword: password,
-      loginUrl: `${APP_URL}/login`
-    });
+    let emailSent = false;
+    let emailError: string | null = null;
 
-    await supabaseAdmin.from('onboarding_credentials').upsert(
-      {
-        checkout_session_id: payload.checkoutSessionId,
-        company_id: companyId,
-        user_id: existingProfile.id,
-        username,
-        temp_password: password,
-        emailed_at: emailResult.sent ? new Date().toISOString() : null,
-        email_provider_message_id: emailResult.sent ? emailResult.providerMessageId ?? null : null,
-        email_delivery_error: emailResult.sent ? null : emailResult.error ?? 'Unknown delivery error.'
-      },
-      { onConflict: 'checkout_session_id' }
-    );
+    if (password) {
+      const emailResult = await sendOnboardingCredentialsEmail({
+        toEmail: payload.customerEmail,
+        contactName: payload.contactName,
+        companyName: payload.companyName,
+        tempPassword: password,
+        loginUrl: `${APP_URL}/login`
+      });
+      emailSent = emailResult.sent;
+      emailError = emailResult.sent ? null : emailResult.error ?? 'Unknown delivery error.';
+
+      await supabaseAdmin.from('onboarding_credentials').upsert(
+        {
+          checkout_session_id: payload.checkoutSessionId,
+          company_id: companyId,
+          user_id: existingProfile.id,
+          username,
+          temp_password: password,
+          emailed_at: emailResult.sent ? new Date().toISOString() : null,
+          email_provider_message_id: emailResult.sent ? emailResult.providerMessageId ?? null : null,
+          email_delivery_error: emailResult.sent ? null : emailResult.error ?? 'Unknown delivery error.'
+        },
+        { onConflict: 'checkout_session_id' }
+      );
+    }
 
     return {
       alreadyProvisioned: false,
-      username: existingProfile.username ?? null,
-      password,
+      username: existingProfile.username ?? username,
+      password: password ?? '*******', // Password non mostrata se non resettata
       userId: existingProfile.id,
       companyId,
       orderId: order.id,
-      emailSent: emailResult.sent,
-      emailError: emailResult.sent ? null : emailResult.error ?? null
+      emailSent,
+      emailError
     };
   }
 
-  const { data: company, error: companyError } = await supabaseAdmin
+  let { data: company, error: companyError } = await supabaseAdmin
     .from('companies')
     .insert({
       name: payload.companyName
@@ -152,13 +161,27 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     .single();
 
   if (companyError || !company) {
-    throw new Error(`Failed to create company: ${companyError?.message ?? 'unknown error'}`);
+    if (companyError?.message?.includes('duplicate key')) {
+      // Idempotenza: se la compagnia è stata creata da una richiesta parallela, la recuperiamo
+      const { data: retryCompany } = await supabaseAdmin
+        .from('companies')
+        .select('id')
+        .eq('name', payload.companyName)
+        .maybeSingle();
+      if (retryCompany?.id) {
+        company = retryCompany as { id: string };
+      } else {
+        throw new Error(`Failed to recover company: ${companyError?.message ?? 'unknown'}`);
+      }
+    } else {
+      throw new Error(`Failed to create company: ${companyError?.message ?? 'unknown error'}`);
+    }
   }
 
   const username = payload.desiredUsername || `${slugify(payload.companyName).slice(0, 18) || 'cliente'}-${Math.floor(Math.random() * 900000) + 100000}`;
   const password = payload.desiredPassword || randomPassword(10);
 
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+  let { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: payload.customerEmail,
     password,
     email_confirm: true,
@@ -169,8 +192,26 @@ export async function provisionAccountFromCheckout(payload: CheckoutProvisionPay
     }
   });
 
+  if (authError) {
+    // Gestione resiliente: se l'utente esiste già in Auth ma non avevamo trovato il profilo
+    if (authError.message.toLowerCase().includes('already registered')) {
+      const { data: users, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+      const existingUser = users?.users.find(u => u.email?.toLowerCase() === payload.customerEmail.toLowerCase());
+      
+      if (existingUser) {
+        authData = { user: existingUser };
+        authError = null;
+      } else {
+        throw new Error(`User already registered but not found in list: ${(authError as any).message}`);
+      }
+    } else {
+      const msg = (authError as any)?.message || 'unknown error';
+      throw new Error(`Failed to create auth user: ${msg}`);
+    }
+  }
+
   if (authError || !authData.user) {
-    throw new Error(`Failed to create auth user: ${authError?.message ?? 'unknown error'}`);
+    throw new Error('Failed to create or recover auth user.');
   }
 
   const { error: profileError } = await supabaseAdmin.from('profiles').insert({

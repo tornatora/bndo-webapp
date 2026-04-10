@@ -378,6 +378,7 @@ export function PracticeLaunchHub({ initialGrantId, initialSource, initialEntryP
           grantId={grantId}
           sourceChannel={sourceChannel}
           onVerify={openGrantQuizFromDetail}
+          showGrantAiPopup={false}
         />
       </div>
     );

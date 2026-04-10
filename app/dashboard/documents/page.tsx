@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess, hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import { computeDocumentChecklistFromRequirements } from '@/lib/admin/document-requirements';
@@ -21,8 +21,11 @@ type DocumentRow = {
 export default async function DashboardDocumentsPage() {
   const { profile } = await requireUserProfile();
 
-  if (hasOpsAccess(profile.role)) {
+  if (hasAdminAccess(profile.role)) {
     redirect('/admin');
+  }
+  if (hasConsultantAccess(profile.role)) {
+    redirect('/consultant');
   }
 
   if (!profile.company_id) {

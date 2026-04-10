@@ -1,4 +1,4 @@
-import { ChatDecisionModel, UserProfile } from '../lib/conversation/types';
+import { UserProfile } from '../lib/conversation/types';
 import { extractSectorFromMessage, parseLegalForm } from '../lib/engines/profileExtractor';
 
 console.log("SECTOR per 'bnb':", extractSectorFromMessage("vorrei aprire un bnb in sicilia"));

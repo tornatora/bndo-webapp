@@ -11,6 +11,7 @@ import { listApplicationDocumentsForSingleApplicationCompat } from '@/lib/db/app
 import { ensurePracticeThreadForApplication, ensurePracticeThreadParticipants } from '@/lib/ops/assignments';
 import { isMissingTable } from '@/lib/ops/dbErrorGuards';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { PreventiviSection } from '@/components/dashboard/PreventiviSection';
 
 const ParamsSchema = z.object({
   applicationId: z.string().uuid(),
@@ -217,6 +218,27 @@ export default async function ConsultantPracticeDetailPage({
     storage_path: row.storage_path ?? null
   }));
 
+  // Separate preventivi docs from regular docs
+  const preventiviRawDocs = documents.filter((d) => d.file_name.startsWith('Preventivo_spesa__'));
+  const regularRawDocs = documents.filter((d) => !d.file_name.startsWith('Preventivo_spesa__'));
+
+  // Fetch preventivi_testo
+  let preventivi_testo: string | null = null;
+  try {
+    const { data: crmRow } = await admin
+      .from('company_crm')
+      .select('admin_fields')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    const fields = (crmRow?.admin_fields ?? {}) as Record<string, unknown>;
+    preventivi_testo =
+      typeof fields.preventivi_testo === 'string' && fields.preventivi_testo.trim()
+        ? fields.preventivi_testo.trim()
+        : null;
+  } catch {
+    // CRM non disponibile
+  }
+
   const documentsWithLinks = await Promise.all(
     documents.map(async (document) => {
       if (!document.storage_path) {
@@ -235,7 +257,7 @@ export default async function ConsultantPracticeDetailPage({
       ? computeDocumentChecklist(
           applicationId,
           String(application.tender_id ?? application.tender?.title ?? 'base'),
-          documents.map((document) => ({
+          regularRawDocs.map((document) => ({
             application_id: applicationId,
             file_name: document.file_name,
             requirement_key: document.requirement_key
@@ -252,7 +274,7 @@ export default async function ConsultantPracticeDetailPage({
           label: requirement.label,
           is_required: requirement.is_required
         })),
-        documents.map((document) => ({
+        regularRawDocs.map((document) => ({
           application_id: applicationId,
           file_name: document.file_name,
           requirement_key: document.requirement_key
@@ -399,6 +421,26 @@ export default async function ConsultantPracticeDetailPage({
           status: row.status
         }))}
       />
+
+      {/* Sezione Preventivi */}
+      <section className="section-card">
+        <div className="section-title">
+          <span>🧾</span>
+          <span>Preventivi</span>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <PreventiviSection
+            preventivi_testo={preventivi_testo}
+            files={preventiviRawDocs.map((doc) => ({
+              id: doc.id,
+              fileName: doc.file_name,
+              createdAt: doc.created_at,
+              fileSize: 0,
+              downloadUrl: null
+            }))}
+          />
+        </div>
+      </section>
 
       {threadError ? (
         <section className="section-card">

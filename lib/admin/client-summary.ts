@@ -48,6 +48,8 @@ export type ClientSummary = {
     is_required: boolean;
     status: 'missing' | 'uploaded' | 'waived';
   }>;
+  /** Testo dei preventivi inseriti durante l'onboarding (da company_crm.admin_fields.preventivi_testo) */
+  preventivi_testo: string | null;
 };
 
 type DocumentRow = {
@@ -127,6 +129,22 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
         }>
       };
 
+  // Fetch preventivi_testo from company_crm
+  let preventivi_testo: string | null = null;
+  try {
+    const { data: crmRow } = await supabase
+      .from('company_crm')
+      .select('admin_fields')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    const fields = (crmRow?.admin_fields ?? {}) as Record<string, unknown>;
+    preventivi_testo = typeof fields.preventivi_testo === 'string' && fields.preventivi_testo.trim()
+      ? fields.preventivi_testo.trim()
+      : null;
+  } catch {
+    // Non blocchiamo il caricamento se CRM non è disponibile
+  }
+
   const docsWithLinksRaw = await Promise.all(
     (docsResult.rows ?? []).map(async (doc) => {
       if (!doc.id || !doc.storage_path || !doc.created_at || typeof doc.file_size !== 'number' || !doc.mime_type) {
@@ -155,6 +173,7 @@ export async function getClientSummary(supabase: SupabaseServerClient, companyId
     clientProfile,
     applications: applicationsWithTitle,
     documents: docsWithLinks,
-    practiceRequirements: practiceRequirements ?? []
+    practiceRequirements: practiceRequirements ?? [],
+    preventivi_testo
   };
 }

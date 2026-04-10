@@ -158,7 +158,10 @@ export async function middleware(request: NextRequest) {
   if (isAdminPath && user) {
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
     if (!profile?.role || !hasAdminAccess(profile.role)) {
-      return NextResponse.redirect(buildAbsoluteUrl(appBase, '/consultant'));
+      if (profile?.role && hasConsultantAccess(profile.role)) {
+        return NextResponse.redirect(buildAbsoluteUrl(appBase, '/consultant'));
+      }
+      return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard/pratiche'));
     }
   }
 

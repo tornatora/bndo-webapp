@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess, hasOpsAccess } from '@/lib/roles';
 import { buildChatThreadContext } from '@/lib/dashboard/chat-thread-context';
 import { createClient } from '@/lib/supabase/server';
 import { MessagesPageClient } from '@/components/dashboard/MessagesPageClient';
@@ -8,8 +8,11 @@ import { MessagesPageClient } from '@/components/dashboard/MessagesPageClient';
 export default async function DashboardMessagesPage() {
   const { profile } = await requireUserProfile();
 
-  if (hasOpsAccess(profile.role)) {
+  if (hasAdminAccess(profile.role)) {
     redirect('/admin');
+  }
+  if (hasConsultantAccess(profile.role)) {
+    redirect('/consultant');
   }
 
   if (!profile.company_id) {

@@ -457,8 +457,13 @@ export function OnboardingWizardClient({
           setAuthState('guest');
           return;
         }
-        const payload = (await response.json().catch(() => null)) as { authenticated?: boolean } | null;
-        setAuthState(payload?.authenticated ? 'authenticated' : 'guest');
+        const payload = (await response.json().catch(() => null)) as { authenticated?: boolean; email?: string | null } | null;
+        if (payload?.authenticated) {
+          setAuthState('authenticated');
+          if (payload.email) setEmail(payload.email);
+        } else {
+          setAuthState('guest');
+        }
       } catch {
         if (mounted) setAuthState('guest');
       }
@@ -922,47 +927,51 @@ export function OnboardingWizardClient({
   }
 
   function validateCurrentStep(target: OnboardingWizardStep): string | null {
+    // Se l'utente è già loggato, non dobbiamo mai validare email/password di registrazione
+    const isUserAuthenticated = authState === 'authenticated';
+
     if (isDashboardMode) {
+      // Step di Dashboard Mode: 1:Welcome, 2:Documenti, 3:Preventivi, 4:Conferme
       if (target === 1) return null;
 
       if (target === 2) {
-        if (!pec.trim()) return 'Inserisci la PEC.';
-        if (!digitalSignature) return 'Conferma se sei in possesso della firma digitale.';
+        // Step Documenti (in modalità dashboard è il 2)
+        const missingRequired = documentUploadRequirements
+          .filter((requirement) => requirement.isRequired)
+          .filter((requirement) => !requirementFiles[requirement.requirementKey] && requirement.status !== 'uploaded');
+        if (missingRequired.length > 0) {
+          return `Carica i documenti obbligatori mancanti: ${missingRequired.map((requirement) => requirement.label).join(', ')}.`;
+        }
         return null;
       }
 
       if (target === 3) {
+        // Step Preventivi (in modalità dashboard è il 3)
+        // Preventivi non obbligatori: si può procedere con solo documenti di identità
         return null;
       }
 
-      if (needsGuestCredentials) {
-        if (guestCredentialMode === 'existing') {
-          if (existingIdentifier.trim().length < 3) {
-            return 'Inserisci username o email del tuo account esistente.';
-          }
-          if (!existingPassword.trim()) {
-            return 'Inserisci la password del tuo account esistente.';
-          }
-        } else {
-          const normalizedEmail = email.trim().toLowerCase();
-          if (!normalizedEmail || !normalizedEmail.includes('@')) {
-            return 'Inserisci una email valida per il tuo accesso.';
-          }
-          if (password.length < 8) {
-            return 'La password deve essere di almeno 8 caratteri.';
-          }
-          if (passwordConfirm !== password) {
-            return 'Le password non coincidono.';
+      // Validazione credenziali (solo se ospite) e consensi (sempre allo step finale)
+      if (target === 4) {
+        if (!isUserAuthenticated && needsGuestCredentials) {
+          if (guestCredentialMode === 'existing') {
+            if (existingIdentifier.trim().length < 3) return 'Inserisci username o email.';
+            if (!existingPassword.trim()) return 'Inserisci la password.';
+          } else {
+            const normalizedEmail = email.trim().toLowerCase();
+            if (!normalizedEmail || !normalizedEmail.includes('@')) return 'Inserisci una email valida.';
+            if (password.length < 8) return 'La password deve essere di almeno 8 caratteri.';
+            if (passwordConfirm !== password) return 'Le password non coincidono.';
           }
         }
+        if (!acceptPrivacy) return 'Devi accettare la Privacy Policy.';
+        if (!acceptTerms) return 'Devi accettare i Termini e Condizioni.';
+        if (!consentStorage) return 'Devi autorizzare la conservazione dei dati.';
       }
-
-      if (!acceptPrivacy) return 'Devi accettare la Privacy Policy.';
-      if (!acceptTerms) return 'Devi accettare i Termini e Condizioni.';
-      if (!consentStorage) return 'Devi autorizzare la conservazione dei dati.';
       return null;
     }
 
+    // --- LOGICA LEGACY (7 step) ---
     if (target === 1) {
       if (paymentStatus !== 'paid' && !paymentDeferred) {
         return 'Completa il pagamento oppure scegli "Pago dopo la verifica dei requisiti".';
@@ -973,6 +982,7 @@ export function OnboardingWizardClient({
     if (target === 2) return null;
 
     if (target === 3) {
+      if (isUserAuthenticated) return null; // Salta se già loggato
       if (!email.trim()) return 'Inserisci la tua email.';
       if (password.length < 8) return 'La password deve essere di almeno 8 caratteri.';
       return null;
@@ -994,12 +1004,11 @@ export function OnboardingWizardClient({
     }
 
     if (target === 6) {
-      if (!quotes.length && !quotesText.trim()) {
-        return 'Carica almeno un preventivo oppure inserisci bene/servizio + prezzo + IVA.';
-      }
+      // Preventivi non obbligatori
       return null;
     }
 
+    // Step 7: Conferme
     if (!acceptPrivacy) return 'Devi accettare la Privacy Policy.';
     if (!acceptTerms) return 'Devi accettare i Termini e Condizioni.';
     if (!consentStorage) return 'Devi autorizzare la conservazione dei dati.';
@@ -1034,13 +1043,25 @@ export function OnboardingWizardClient({
       return;
     }
 
-    await goToStep((currentStep + 1) as OnboardingWizardStep, 'next', true);
+    const nextStep = (currentStep + 1) as OnboardingWizardStep;
+    if (nextStep === 3 && authState === 'authenticated' && !isDashboardMode) {
+      await goToStep(4, 'next', true);
+      return;
+    }
+
+    await goToStep(nextStep, 'next', true);
   }
 
   async function onBack() {
     if (currentStep === 1) return;
     setStepError(null);
-    await goToStep((currentStep - 1) as OnboardingWizardStep, 'back', false);
+    const prevStep = (currentStep - 1) as OnboardingWizardStep;
+    if (prevStep === 3 && authState === 'authenticated' && !isDashboardMode) {
+      await goToStep(2, 'back', false);
+      return;
+    }
+
+    await goToStep(prevStep, 'back', false);
   }
 
   async function onSelectStep(targetStep: OnboardingWizardStep) {

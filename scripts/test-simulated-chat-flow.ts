@@ -1,4 +1,4 @@
-import { ChatDecisionModel, UserProfile, Session } from '../lib/conversation/types';
+import { UserProfile, Session } from '../lib/conversation/types';
 import { runStreamingChat } from '../lib/ai/conversationOrchestrator';
 import { evaluateProfileCompleteness } from '../lib/conversation/profileCompleteness';
 
@@ -9,7 +9,7 @@ async function runTest() {
   
   for (const msg of messages) {
       console.log(`\n\n--- TURN: ${msg} ---`);
-      const generator = runStreamingChat(msg, profile, history, { strictFocusedGrant: false });
+      const generator = runStreamingChat(msg, profile, history);
       let outputMeta;
       let text = '';
       for await (const chunk of generator) {

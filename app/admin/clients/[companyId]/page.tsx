@@ -19,6 +19,7 @@ import { AdminClientCoreInfoForm } from '@/components/admin/AdminClientCoreInfoF
 import { AdminBillingPanel } from '@/components/admin/AdminBillingPanel';
 import { AdminMobileTabs } from '@/components/admin/AdminMobileTabs';
 import { AdminPracticeSwitch } from '@/components/admin/AdminPracticeSwitch';
+import { PreventiviSection } from '@/components/dashboard/PreventiviSection';
 
 const ParamsSchema = z.object({
   companyId: z.string().uuid()
@@ -185,7 +186,9 @@ export default async function AdminClientDetailPage({
             selectedPractice ? (
               (() => {
                 const appDocs = detail.documents.filter((d) => d.application_id === selectedPractice.id);
-                const checklist = computeDocumentChecklist(selectedPractice.id, selectedPractice.tender_id, appDocs);
+                const preventiviDocs = appDocs.filter((d) => d.file_name.startsWith('Preventivo_spesa__'));
+                const regularDocs = appDocs.filter((d) => !d.file_name.startsWith('Preventivo_spesa__'));
+                const checklist = computeDocumentChecklist(selectedPractice.id, selectedPractice.tender_id, regularDocs);
                 const missingCount = checklist.filter((item) => !item.uploaded).length;
                 const initialStep = computeDerivedProgressKey(selectedPractice.status, missingCount);
                 const title = displayPracticeTitle(selectedPractice);
@@ -245,6 +248,18 @@ export default async function AdminClientDetailPage({
                             companyName={client.companyName}
                             practiceTitle={title}
                             isMock
+                          />
+
+                          {/* Preventivi */}
+                          <PreventiviSection
+                            preventivi_testo={null}
+                            files={preventiviDocs.map((doc) => ({
+                              id: doc.id,
+                              fileName: doc.file_name,
+                              createdAt: doc.created_at,
+                              fileSize: 0,
+                              downloadUrl: null
+                            }))}
                           />
                         </div>
                       </>
@@ -549,16 +564,18 @@ export default async function AdminClientDetailPage({
           selectedPractice ? (
             (() => {
               const appDocs = summary.documents.filter((d) => d.application_id === selectedPractice.id);
+              const preventiviDocsReal = appDocs.filter((d) => d.file_name.startsWith('Preventivo_spesa__'));
+              const regularDocsReal = appDocs.filter((d) => !d.file_name.startsWith('Preventivo_spesa__'));
               const dynamicRequirements = summary.practiceRequirements.filter(
                 (requirement) => requirement.application_id === selectedPractice.id
               );
               const checklist =
                 dynamicRequirements.length > 0
-                  ? computeDocumentChecklistFromRequirements(selectedPractice.id, dynamicRequirements, appDocs)
+                  ? computeDocumentChecklistFromRequirements(selectedPractice.id, dynamicRequirements, regularDocsReal)
                   : computeDocumentChecklist(
                       selectedPractice.id,
                       selectedPractice.tender_title ?? selectedPractice.tender_id,
-                      appDocs
+                      regularDocsReal
                     );
               const missingCount = checklist.filter((item) => !item.uploaded).length;
               const initialStep = extractProgressFromNotes(selectedPractice.notes) ?? computeDerivedProgressKey(selectedPractice.status, missingCount);
@@ -615,6 +632,18 @@ export default async function AdminClientDetailPage({
                           companyName={summary.company?.name ?? 'Cliente'}
                           practiceTitle={title}
                           isMock={false}
+                        />
+
+                        {/* Preventivi */}
+                        <PreventiviSection
+                          preventivi_testo={summary.preventivi_testo}
+                          files={preventiviDocsReal.map((doc) => ({
+                            id: doc.id,
+                            fileName: doc.file_name,
+                            createdAt: doc.created_at,
+                            fileSize: doc.file_size ?? 0,
+                            downloadUrl: doc.downloadUrl
+                          }))}
                         />
                       </div>
                     </>

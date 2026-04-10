@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUserProfile } from '@/lib/auth';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess, hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
 import {
@@ -17,6 +17,7 @@ import {
   progressBadge
 } from '@/lib/admin/practice-progress';
 import { ClientUploadDocButton } from '@/components/dashboard/ClientUploadDocButton';
+import { PreventiviSection } from '@/components/dashboard/PreventiviSection';
 
 const ParamsSchema = z.object({
   applicationId: z.string().uuid()
@@ -51,7 +52,8 @@ export default async function ClientPracticePage({
   const qNorm = q.trim().toLowerCase();
 
   const { profile } = await requireUserProfile();
-  if (hasOpsAccess(profile.role)) redirect('/admin');
+  if (hasAdminAccess(profile.role)) redirect('/admin');
+  if (hasConsultantAccess(profile.role)) redirect('/consultant');
   if (!profile.company_id) notFound();
 
   const supabase = createClient();
@@ -107,6 +109,30 @@ export default async function ClientPracticePage({
       // Keep user-scoped docs if admin fallback fails.
     }
   }
+  // Separate preventivi docs from regular docs
+  const preventiviDocs = typedDocs.filter((d) => d.file_name.startsWith('Preventivo_spesa__'));
+  const regularDocs = typedDocs.filter((d) => !d.file_name.startsWith('Preventivo_spesa__'));
+
+  // Fetch preventivi_testo from company_crm
+  let preventivi_testo: string | null = null;
+  try {
+    if (hasRealServiceRoleKey()) {
+      const admin = getSupabaseAdmin();
+      const { data: crmRow } = await admin
+        .from('company_crm')
+        .select('admin_fields')
+        .eq('company_id', profile.company_id)
+        .maybeSingle();
+      const fields = (crmRow?.admin_fields ?? {}) as Record<string, unknown>;
+      preventivi_testo =
+        typeof fields.preventivi_testo === 'string' && fields.preventivi_testo.trim()
+          ? fields.preventivi_testo.trim()
+          : null;
+    }
+  } catch {
+    // Non blocchiamo la pagina se CRM non è disponibile
+  }
+
   const { data: dynamicRequirements } = await supabase
     .from('practice_document_requirements')
     .select('application_id, requirement_key, label, description, is_required')
@@ -152,7 +178,8 @@ export default async function ClientPracticePage({
 
   const missing = checklist.filter((c) => !c.uploaded);
   const missingCount = missing.length;
-  const uploadedCount = typedDocs.length;
+  // Exclude preventivi docs from the uploaded count shown in the KPIs
+  const uploadedCount = regularDocs.length;
 
   const step =
     extractProgressFromNotes(application.notes ?? null) ??
@@ -161,11 +188,11 @@ export default async function ClientPracticePage({
   const stepLabel = PROGRESS_STEPS.find((s) => s.key === step)?.label ?? step;
   const badge = progressBadge(step);
 
-  // Prepare signed URLs only when needed.
+  // Prepare signed URLs only when needed (regular docs only).
   const docsWithUrls =
     docsView === 'uploaded'
       ? await Promise.all(
-          (qNorm ? typedDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : typedDocs).map(async (doc) => {
+          (qNorm ? regularDocs.filter((d) => d.file_name.toLowerCase().includes(qNorm)) : regularDocs).map(async (doc) => {
             const signed = await supabase.storage.from('application-documents').createSignedUrl(doc.storage_path, 3600);
             return {
               ...doc,
@@ -301,6 +328,18 @@ export default async function ClientPracticePage({
             )}
           </section>
         ) : null}
+
+        {/* Sezione Preventivi */}
+        <PreventiviSection
+          preventivi_testo={preventivi_testo}
+          files={preventiviDocs.map((doc) => ({
+            id: doc.id,
+            fileName: doc.file_name,
+            createdAt: doc.created_at,
+            fileSize: 0,
+            downloadUrl: null
+          }))}
+        />
       </article>
     </div>
   );

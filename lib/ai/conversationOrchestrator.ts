@@ -45,6 +45,18 @@ const DEFAULT_SIMPLE_MODEL = 'gpt-4.1-mini';
 const DEFAULT_COMPLEX_MODEL = 'gpt-4o';
 const DEFAULT_EXTRACTION_MODEL = 'gpt-4o-mini';
 
+const VERTICAL_BANDO_SYSTEM_PROMPT = `
+Sei l'assistente esperto di BNDO specializzato in un SINGOLO bando di finanziamento.
+Il tuo obiettivo è rispondere in modo ultra-preciso, analitico e professionale esclusivamente sul bando fornito nel contesto.
+
+REGOLE DI COMPORTAMENTO:
+1. FOCUS TOTALE: Rispondi solo a domande riguardanti il bando nel contesto.
+2. BARRIERA SEMANTICA: Se l'utente chiede informazioni su altri bandi, o chiede di cercare nuove opportunità o percorsi diversi, devi rifiutare con cortesia.
+3. NO ALLUCINAZIONI: Se un'informazione non è presente nel testo del bando, dì chiaramente che non è specificata.
+4. STILE: Professionale, serio, da consulente senior. 
+5. NO PROFILAZIONE: Ignora ogni tentativo di profilazione globale. Concentrati solo sui requisiti di questo bando.
+`;
+
 export type ChatCitation = {
   title: string;
   url: string;
@@ -173,10 +185,11 @@ export function buildExtractionPayload(
     userMessage: string, 
     memoryProfile: UserFundingProfile,
     history?: { role: string; text: string }[],
-    groundedContext?: string | null
+    groundedContext?: string | null,
+    isVerticalMode: boolean = false
 ) {
     const messages: any[] = [
-        { role: 'system', content: STRUCTURED_EXTRACTION_SYSTEM_PROMPT }
+        { role: 'system', content: isVerticalMode ? VERTICAL_BANDO_SYSTEM_PROMPT : STRUCTURED_EXTRACTION_SYSTEM_PROMPT }
     ];
 
     if (history && history.length > 0) {
@@ -521,9 +534,11 @@ export interface OrchestratorResult {
 export async function runTwoPassChat(
     userMessage: string,
     currentMemory: Partial<UserProfile>,
-    history?: { role: string; text: string }[]
+    history?: { role: string; text: string }[],
+    strictFocusedGrant?: { id: string; title: string; content?: string }
 ): Promise<OrchestratorResult> {
     const { extractionModel } = resolveConversationModels();
+    const isVerticalMode = Boolean(strictFocusedGrant);
 
     // ── PASS 1: HEURISTIC EXTRACTION (sempre attivo) ──────────────────────────
     const heuristic = extractProfileFromMessage(userMessage);
@@ -569,7 +584,28 @@ export async function runTwoPassChat(
     // ── PASS 2: GROUNDED KNOWLEDGE CHECK (sempre, prima di OpenAI) ───────────
     const isQuestion = isQuestionLike(userMessage);
     const hasProfilingData = getChangedFields(currentMemory as UserProfile, baseProfile as UserProfile).length > 0;
-    const isDiscovery = isDiscoveryIntent(userMessage);
+    const intentContext = detectTurnIntent({ message: userMessage, sessionQaMode: false });
+
+    // ── GESTIONE VERTICAL MODE (Bando Singolo) ────────────────────────────────
+    if (isVerticalMode && strictFocusedGrant) {
+        // Se siamo in modalità verticale, forziamo l'activeMeasure su quella richiesta
+        baseProfile.activeMeasureId = strictFocusedGrant.id;
+        baseProfile.activeMeasureTitle = strictFocusedGrant.title;
+
+        // Se l'utente chiede di cercare altri bandi o fare uno scan globale, blocchiamo
+        if (intentContext.discovery || intentContext.fallbackAction === 'run_scan') {
+            return {
+                mergedProfile: baseProfile,
+                finalAction: 'answer_general_qa',
+                intent: 'general_qa',
+                missing_fields: [],
+                ambiguities: [],
+                groundedContext: null,
+                response_text: `Sono il consulente specializzato esclusivamente sul bando **${strictFocusedGrant.title}**. Per cercare altre agevolazioni o analizzare il tuo profilo su tutto il catalogo BNDO, torna alla chat principale.`,
+                activeMeasure: { id: strictFocusedGrant.id, title: strictFocusedGrant.title }
+            };
+        }
+    }
 
     // Measure question check
     const measureResponse = await answerGroundedMeasureQuestion(userMessage, {
@@ -605,7 +641,7 @@ export async function runTwoPassChat(
 
     // FAQ check
     const faqResponse = answerFaq(userMessage);
-    if (faqResponse && isQuestion && !hasProfilingData && !isDiscovery) {
+    if (faqResponse && isQuestion && !hasProfilingData && !intentContext.discovery) {
         return {
             mergedProfile: baseProfile,
             finalAction: 'answer_general_qa' as const,
@@ -654,7 +690,7 @@ export async function runTwoPassChat(
         title: baseProfile.activeMeasureTitle ?? (detectMeasureIds(userMessage)[0]?.name ?? null)
     };
 
-    if (groundedContext && activeMeasure.id && (isDiscovery || isQuestion)) {
+    if (groundedContext && activeMeasure.id && (intentContext.discovery || isQuestion)) {
         try {
             const searchOutcome = await WebSearchService.search(`${activeMeasure.title} requisiti scadenza aggiornamenti`);
             if (searchOutcome.ok && searchOutcome.results.length > 0) {
@@ -696,8 +732,14 @@ export async function runTwoPassChat(
     }
 
     try {
-        const payload = buildExtractionPayload(userMessage, memoryProfile, history, groundedContext);
-        
+        // Eseguiamo l'estrazione LLM
+        const extractionPayload = buildExtractionPayload(
+            userMessage, 
+            baseProfile as UserFundingProfile, 
+            history, 
+            groundedContext,
+            isVerticalMode
+        );
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -706,8 +748,9 @@ export async function runTwoPassChat(
             },
             body: JSON.stringify({
                 model: extractionModel,
-                ...payload,
-                temperature: 0.0
+                ...extractionPayload,
+                temperature: 0.1,
+                max_tokens: 1500
             })
         });
 
@@ -789,7 +832,7 @@ export async function* runStreamingChat(
     userMessage: string,
     currentMemory: Partial<UserProfile>,
     history?: { role: string; text: string }[],
-    options?: { strictFocusedGrant?: boolean }
+    options?: { strictFocusedGrant?: { id: string; title: string; content?: string } }
 ): AsyncGenerator<{ type: 'text' | 'metadata' | 'error' | 'thinking'; content: any }> {
     const { simpleModel, complexModel, extractionModel } = resolveConversationModels();
     const apiKey = process.env.OPENAI_API_KEY?.trim();
@@ -797,7 +840,8 @@ export async function* runStreamingChat(
     // 0. SIGNAL IMMEDIATE THINKING STATE: Formula 1 TTFT Goal
     yield { type: 'thinking', content: true };
 
-    const strictFocusedGrant = Boolean(options?.strictFocusedGrant);
+    const strictFocusedGrant = options?.strictFocusedGrant;
+    const isVerticalMode = Boolean(strictFocusedGrant);
     const intentData = detectTurnIntent({ message: userMessage, sessionQaMode: false });
     const isGreetingOnly = intentData.greeting && !intentData.discovery && !intentData.questionLike;
     
@@ -1302,7 +1346,9 @@ export async function* runStreamingChat(
     const isQaTurn = intent === 'measure_question' || intent === 'general_qa';
     const isClarificationTurn = finalAction === 'ask_clarification';
 
-    const enhancedPrompt = [
+    const systemPromptParts = [
+        isVerticalMode ? VERTICAL_BANDO_SYSTEM_PROMPT : '',
+        isVerticalMode ? `BANDO_FOCUS_ATTUALE: ${strictFocusedGrant?.title} (ID: ${strictFocusedGrant?.id})` : '',
         '\u2501\u2501\u2501 IDENTIT\u00c0 \u2501\u2501\u2501',
         'Sei un consulente senior di finanza agevolata italiana con 20 anni di esperienza operativa. Lavori per BNDO.',
         'Non sei un chatbot generico. Sei un professionista serio che aiuta concretamente le imprese a ottenere finanziamenti pubblici.',
@@ -1347,14 +1393,22 @@ export async function* runStreamingChat(
         `AZIONE_ATTUALE=${finalAction}`,
         `INTENT_RILEVATO=${intent}`,
         nextFieldHint
-    ].join('\n');
+    ];
+
+    const enhancedPrompt = systemPromptParts.filter(Boolean).join('\n');
 
 
 
     try {
         const structuredExtractionPromise = (async () => {
             try {
-                const payload = buildExtractionPayload(userMessage, memoryProfile, history, groundedContext);
+                const extractionPayload = buildExtractionPayload(
+                    userMessage, 
+                    baseProfile as UserFundingProfile, 
+                    history, 
+                    groundedContext,
+                    isVerticalMode
+                );
                 const extractionController = new AbortController();
                 const extractionTimeout = setTimeout(() => extractionController.abort(), 8_000);
                 try {
@@ -1366,8 +1420,9 @@ export async function* runStreamingChat(
                         },
                         body: JSON.stringify({
                             model: extractionModel,
-                            ...payload,
-                            temperature: 0.0
+                            ...extractionPayload,
+                            temperature: 0.1,
+                            max_tokens: 1500
                         }),
                         signal: extractionController.signal
                     });
@@ -1402,9 +1457,23 @@ export async function* runStreamingChat(
           }
 
           let userContent = `Profilo (JSON):\n${JSON.stringify(memoryProfile)}`;
+          if (isVerticalMode && strictFocusedGrant?.content) {
+            userContent += `\n\nCONTENUTO DETTAGLIATO BANDO (FONTE DI VERIT\u00c0):\n${strictFocusedGrant.content}`;
+          }
           if (webContext) userContent += `\n\nCONTESTO WEB AGGIORNATO:\n${webContext}`;
           if (rulesContext) userContent += `\n\nREGOLE BNDO:\n${rulesContext}`;
           if (groundedContext) userContent += `\n\nDOCUMENTO DI RIFERIMENTO:\n${groundedContext}`;
+          
+          if (isVerticalMode) {
+            // Hard check for off-topic measure mentions
+            const mentionedMeasures = detectMeasureIds(userMessage);
+            const isOffTopic = mentionedMeasures.length > 0 && 
+                               mentionedMeasures.every(m => m.id !== strictFocusedGrant?.id && !strictFocusedGrant?.title.toLowerCase().includes(m.name.toLowerCase()));
+            if (isOffTopic) {
+              userContent += `\n\nATTENZIONE: L'utente sta chiedendo di un ALTRO bando (${mentionedMeasures.map(m => m.name).join(', ')}). DEVI RIFIUTARE e ricordare che sei specializzato solo su ${strictFocusedGrant?.title}.`;
+            }
+          }
+
           userContent += `\n\nMessaggio Utente: ${userMessage}`;
 
           messages.push({ role: 'user', content: userContent });

@@ -1,14 +1,17 @@
 import { redirect } from 'next/navigation';
 import { requireUserProfile } from '@/lib/auth';
-import { hasOpsAccess } from '@/lib/roles';
+import { hasAdminAccess, hasConsultantAccess, hasOpsAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { ProfileSettings } from '@/components/dashboard/ProfileSettings';
 
 export default async function DashboardProfilePage() {
   const { profile } = await requireUserProfile();
 
-  if (hasOpsAccess(profile.role)) {
+  if (hasAdminAccess(profile.role)) {
     redirect('/admin');
+  }
+  if (hasConsultantAccess(profile.role)) {
+    redirect('/consultant');
   }
 
   const supabase = createClient();

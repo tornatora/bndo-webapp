@@ -247,7 +247,6 @@ export function AfterPaymentOnboardingForm({
     if (effectiveSessionId && session && session.payment_status && session.payment_status !== 'paid') return false;
     if (!pec.trim()) return false;
     if (!idDocument || !taxCodeDocument || !didDocument) return false;
-    if (!quotes.length && !quotesText.trim()) return false;
     if (!acceptPrivacy || !acceptTerms || !consentStorage) return false;
     return true;
   }, [
@@ -261,8 +260,6 @@ export function AfterPaymentOnboardingForm({
     loadingSession,
     password.length,
     pec,
-    quotes.length,
-    quotesText,
     session,
     submitting,
     taxCodeDocument
@@ -282,7 +279,7 @@ export function AfterPaymentOnboardingForm({
       return true;
     }
     if (step === 5) {
-      if (!quotes.length && !quotesText.trim()) return false;
+      // Preventivi non obbligatori
       return true;
     }
     return canSubmit;
@@ -330,9 +327,7 @@ export function AfterPaymentOnboardingForm({
     }
 
     if (targetStep === 5) {
-      if (!quotes.length && !quotesText.trim()) {
-        return 'Carica almeno un preventivo oppure inserisci bene/servizio + prezzo + IVA.';
-      }
+      // Preventivi facoltativi
       return null;
     }
 

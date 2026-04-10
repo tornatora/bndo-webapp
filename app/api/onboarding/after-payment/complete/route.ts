@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { createClient } from '@/lib/supabase/server';
 import { getStripeClient } from '@/lib/stripe';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { provisionAccountFromCheckout } from '@/lib/services/provisioning';
@@ -226,12 +227,17 @@ export async function POST(request: Request) {
     const sourceChannel: PracticeSourceChannel = (parsed.data.sourceChannel as PracticeSourceChannel) ?? 'direct';
     const guestCredentialMode = parsed.data.guestCredentialMode ?? 'new';
 
+    const supabase = createClient();
+    const { data: { user: sessionUser } } = await supabase.auth.getUser();
+    const authenticatedEmail = sessionUser?.email ?? null;
+    let finalEmail = providedEmail || authenticatedEmail;
+
     const skipPaymentParam = requestUrl.searchParams.get('skip_payment') === '1';
     const skipPaymentCheckForDashboard = inferredDashboardMode || onboardingMode === 'dashboard_client' || skipPaymentParam;
     if (!providedSessionId && !manualOnboardingEnabled && !paymentDeferred && !skipPaymentCheckForDashboard) {
       return NextResponse.json({ error: 'Pagamento non verificato. Completa prima il pagamento Stripe.' }, { status: 403 });
     }
-    if (!providedSessionId && !providedEmail) {
+    if (!providedSessionId && !finalEmail) {
       return NextResponse.json({ error: 'Inserisci la tua email.' }, { status: 422 });
     }
 
@@ -241,7 +247,8 @@ export async function POST(request: Request) {
     const quotes = formData.getAll('quotes');
 
     const isDashboardFlow = onboardingMode === 'dashboard_client';
-    if (!isDashboardFlow && (!(idDocument instanceof File) || !(taxCodeDocument instanceof File))) {
+    // Se loggati o in modalita dashboard, i documenti base possono essere omessi se gia presenti nel profilo
+    if (!isDashboardFlow && !sessionUser && (!(idDocument instanceof File) || !(taxCodeDocument instanceof File))) {
       return NextResponse.json({ error: 'Carica documento identita e codice fiscale.' }, { status: 422 });
     }
 
@@ -589,15 +596,18 @@ export async function POST(request: Request) {
       invoices: currentInvoices
     };
 
-    const { error: crmErr } = await supabaseAdmin.from('company_crm').upsert(
-      {
-        company_id: companyId,
-        admin_fields: nextFields as unknown as Json,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: 'company_id' }
-    );
-    const crmStored = !crmErr;
+    try {
+      await supabaseAdmin.from('company_crm').upsert(
+        {
+          company_id: companyId,
+          admin_fields: nextFields as unknown as Json,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'company_id' }
+      );
+    } catch (e) {
+      console.error('[ONBOARDING_STABILITY] CRM upsert failed, continuing anyway:', e);
+    }
 
     // Handle removals (Skip deletion by requirement_key if the column is missing from DB to prevent 500 errors)
     /*
@@ -607,10 +617,10 @@ export async function POST(request: Request) {
     }
     */
 
-    // If the dedicated table isn't available, at least ensure we stored a fallback record in CRM.
-    if (!legalStored && !crmStored) {
+    // If the dedicated table isn't available, we already attempted CRM fallback.
+    if (!legalStored) {
       // Non bloccare il completamento onboarding per errori di persistenza consensi in ambienti parzialmente migrati.
-      console.error('[ONBOARDING_COMPLETE] legal consent persistence degraded: both legal_consents and company_crm write failed');
+      console.error('[ONBOARDING_COMPLETE] legal consent persistence degraded: legal_consents write failed');
     }
 
     // Upload base documents and create DB records.
@@ -775,13 +785,14 @@ export async function POST(request: Request) {
     }
 
     if (uploadedRequirementKeys.size > 0) {
-      const { error: statusError } = await supabaseAdmin
-        .from('practice_document_requirements')
-        .update({ status: 'uploaded' })
-        .eq('application_id', applicationId)
-        .in('requirement_key', Array.from(uploadedRequirementKeys.values()));
-      if (statusError && !isMissingPracticeRequirementsTableError(statusError)) {
-        return NextResponse.json({ error: `Aggiornamento requisiti fallito: ${statusError.message}` }, { status: 500 });
+      try {
+        await supabaseAdmin
+          .from('practice_document_requirements')
+          .update({ status: 'uploaded' })
+          .eq('application_id', applicationId)
+          .in('requirement_key', Array.from(uploadedRequirementKeys.values()));
+      } catch (e) {
+        console.error('[ONBOARDING_STABILITY] Reqs status update failed, continuing anyway:', e);
       }
     }
 
@@ -827,22 +838,26 @@ export async function POST(request: Request) {
       // Ensure at least one ops user is in the thread and sends an auto-reply.
       await ensureOpsAutoReply(threadId);
 
-      void emitNotificationEvent({
-        eventType: 'payment_received',
-        actorProfileId: userId,
-        actorRole: 'client_admin',
-        companyId,
-        applicationId,
-        threadId,
-        amountCents: Number.isFinite(amountPaid) && amountPaid > 0 ? Math.round(amountPaid * 100) : null,
-        currency: typeof currency === 'string' ? currency : 'EUR',
-        customerName: displayName,
-        practiceTitle: practiceLabel,
-        metadata: {
-          paymentDeferred: parsed.data.paymentDeferred ?? null,
-          source: 'onboarding_after_payment_complete'
-        }
-      }).catch(() => undefined);
+      try {
+        await emitNotificationEvent({
+          eventType: 'payment_received',
+          actorProfileId: userId,
+          actorRole: 'client_admin',
+          companyId,
+          applicationId,
+          threadId,
+          amountCents: Number.isFinite(amountPaid) && amountPaid > 0 ? Math.round(amountPaid * 100) : null,
+          currency: typeof currency === 'string' ? currency : 'EUR',
+          customerName: displayName,
+          practiceTitle: practiceLabel,
+          metadata: {
+            paymentDeferred: parsed.data.paymentDeferred ?? null,
+            source: 'onboarding_after_payment_complete'
+          }
+        });
+      } catch (e) {
+        console.error('[ONBOARDING_STABILITY] Notification event failed, continuing anyway:', e);
+      }
     }
 
     // Ensure practice progress marker (payment/mandate activated).
@@ -867,13 +882,17 @@ export async function POST(request: Request) {
     }
 
     // Store a lead entry (useful for ops tracking).
-    await supabaseAdmin.from('leads').insert({
-      full_name: displayName,
-      email: normalizedEmail,
-      company_name: displayName,
-      phone: quiz?.phone ?? null,
-      challenge: `Pagamento anticipo + onboarding base docs | Pratica: ${practiceTitle(practiceType)} | Quiz: ${quiz?.id ?? 'N/D'}`
-    });
+    try {
+      await supabaseAdmin.from('leads').insert({
+        full_name: displayName,
+        email: normalizedEmail,
+        company_name: displayName,
+        phone: quiz?.phone ?? null,
+        challenge: `Pagamento anticipo + onboarding base docs | Pratica: ${practiceTitle(practiceType)} | Quiz: ${quiz?.id ?? 'N/D'}`
+      });
+    } catch (e) {
+      console.error('[ONBOARDING_STABILITY] Lead tracking failed, continuing anyway:', e);
+    }
 
     return NextResponse.json(
       {
@@ -888,6 +907,13 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (error) {
-    return NextResponse.json({ error: publicError(error, 'Errore onboarding. Riprova tra qualche secondo.') }, { status: 500 });
+    console.error('[ONBOARDING_CRITICAL_ERROR]', error);
+    const message = error instanceof Error ? error.message : 'Errore sconosciuto';
+    return NextResponse.json(
+      { 
+        error: `Errore durante il completamento dell'onboarding: ${message}. Per favore contatta il supporto se il problema persiste.`
+      }, 
+      { status: 500 }
+    );
   }
 }
