@@ -12,8 +12,15 @@ function resolveRequestHost(request: NextRequest) {
   return stripPort(request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? '');
 }
 
+function resolveAuthCookieDomain(host: string) {
+  if (!host) return undefined;
+  if (host === 'bndo.it' || host.endsWith('.bndo.it')) return '.bndo.it';
+  return undefined;
+}
+
 export async function middleware(request: NextRequest) {
   const host = resolveRequestHost(request);
+  const authCookieDomain = resolveAuthCookieDomain(host);
   const hostname = request.nextUrl.hostname.toLowerCase();
   const path = request.nextUrl.pathname;
   const requestOrigin = request.nextUrl.origin;
@@ -39,6 +46,7 @@ export async function middleware(request: NextRequest) {
   const hasDistinctDomainMapping = new Set([marketingHost, appHost, adminHost]).size >= 3;
 
   const isDashboardPath = path.startsWith('/dashboard');
+  const isEstrattorePath = path.startsWith('/estrattore');
   const isAdminPath = path.startsWith('/admin');
   const isConsultantPath = path.startsWith('/consultant');
   const isAuthPath = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
@@ -117,9 +125,17 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value);
+          });
           response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          cookiesToSet.forEach(({ name, value, options }) => {
+            const scopedOptions =
+              authCookieDomain && (!options || !('domain' in options))
+                ? { ...(options ?? {}), domain: authCookieDomain }
+                : options;
+            response.cookies.set(name, value, scopedOptions);
+          });
         }
       }
     }
@@ -137,6 +153,9 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isDashboardPath && !user) {
+    return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
+  }
+  if (isEstrattorePath && !user) {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
   if (isConsultantPath && !user) {
@@ -187,6 +206,7 @@ export const config = {
     '/dashboard/:path*',
     '/consultant/:path*',
     '/admin/:path*',
+    '/estrattore/:path*',
     '/login',
     '/register',
     '/forgot-password',
