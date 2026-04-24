@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "live-baseline-2026-04-24",
+  "captured_at_utc": "2026-04-24T23:43:34.304Z",
+  "github": {
+    "repository": "tornatora/bndo-webapp",
+    "commit": "6b20e01a0f1b1b23764fc194ee2bca79fb9d3352",
+    "branch": "codex/live-baseline-2026-04-24",
+    "tag": "live-bndo-it-2026-04-24-69ea8c6c"
+  },
+  "netlify": {
+    "site_id": "0c6924aa-7626-492e-94fa-a4c368cfb85b",
+    "site_name": "cheerful-cobbler-f23efc",
+    "live_url": "https://bndo.it",
+    "live_deploy_id": "69ea8c6c9edf825e1ce9db6b",
+    "live_deploy_title": "live: remove dashboard proxy and no-store headers for performance restore",
+    "live_published_at": "2026-04-24T15:48:13.254Z",
+    "preview_alias_requested": "live-current-preview",
+    "preview_url": "https://live-current-preview--cheerful-cobbler-f23efc.netlify.app",
+    "preview_deploy_id": "69ec001c8f1a2247958777c0",
+    "preview_clone_mode": "files_only_fallback",
+    "function_fallback_used": true
+  },
+  "baseline_hashes": {
+    "file_count": 104,
+    "file_map_sha256": "95428e3dacbaceb0acc034e38c859c61be9c0a4528e58e476cf44e9e9ea0b997",
+    "function_count": 4,
+    "function_digest_map_sha256": "56f19f7014e64e9bf6483d44caef11117c1ecb438e1f0798a75bbe87531827dd",
+    "function_id_map_sha256": "72ecadee3c1ce2da1f7c7d4fce130f75bb8af07d407d28df138a895a30a121c3",
+    "function_oid_map_sha256": "c7291f313061b1e4a30df8a92ba8c8ae337bda40f0949d804551109c59cda906"
+  },
+  "parity_proof": {
+    "ok": true,
+    "live_lock_ok": true,
+    "routes": [
+      {
+        "path": "/login",
+        "status_match": true,
+        "chunk_match": true
+      },
+      {
+        "path": "/dashboard/pratiche",
+        "status_match": true,
+        "next_redirect_match": true,
+        "chunk_match": true
+      }
+    ],
+    "asset": {
+      "path": "/_next/static/chunks/app/dashboard/pratiche/page-fb9d9d575b27734d.js",
+      "status_match": true,
+      "hash_match": true,
+      "size_match": true
+    }
+  },
+  "notes": [
+    "Lo snapshot e' allineato al live corrente al momento della cattura.",
+    "Il clone preview su Netlify API richiede fallback files-only quando il provider richiede upload funzioni."
+  ]
+}
