@@ -91,9 +91,9 @@ export function UserPracticesView({ onVerify, onOpenDetail, onOpenApplication }:
                   </div>
                 </div>
 
-                <div className="practice-footer" style={{ borderTop: '0.5px solid rgba(11,17,54,0.04)', paddingTop: 12, marginTop: 12 }}>
+                  <div className="practice-footer" style={{ borderTop: '0.5px solid rgba(11,17,54,0.04)', paddingTop: 12, marginTop: 12 }}>
                   <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Mancanti: <strong>{it.missingCount}</strong> · Caricati: <strong>{it.uploadedCount}</strong>
+                    Documenti da caricare: <strong>{it.missingCount}</strong> · Caricati: <strong>{it.uploadedCount}</strong>
                   </div>
                 </div>
               </button>

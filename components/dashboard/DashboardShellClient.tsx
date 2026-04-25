@@ -59,6 +59,14 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
       </svg>
     );
   }
+  if (name === 'notifiche') {
+    return (
+      <svg {...common}>
+        <path {...stroke} d="M15 17H9a4 4 0 0 1-4-4v-1.6a7 7 0 0 1 14 0V13a4 4 0 0 1-4 4Z" />
+        <path {...stroke} d="M10 17a2 2 0 0 0 4 0" />
+      </svg>
+    );
+  }
   if (name === 'new_practice') {
     return (
       <svg {...common}>
