@@ -859,6 +859,30 @@ body {
   background: rgba(255, 255, 255, 0.70);
 }
 
+.mobile-profile-fab {
+  display: none;
+  position: fixed;
+  right: 14px;
+  top: calc(14px + env(safe-area-inset-top));
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 17, 54, 0.10);
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(11, 17, 54, 0.92);
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  box-shadow: 0 12px 34px rgba(11, 17, 54, 0.14);
+  z-index: 60;
+  place-items: center;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mobile-profile-fab:active {
+  transform: translateY(0.5px);
+}
+
 .mobile-sidebar-backdrop {
   display: none;
   position: fixed;
@@ -918,6 +942,10 @@ body {
     display: grid;
   }
 
+  .mobile-profile-fab {
+    display: grid;
+  }
+
   .mobile-sidebar-backdrop {
     display: block;
   }
@@ -927,6 +955,15 @@ body {
     left: 24px;
     top: calc(24px + env(safe-area-inset-top));
     box-shadow: 0 10px 26px rgba(11, 17, 54, 0.12);
+  }
+
+  /* Hide "Profilo" from mobile navigation (it lives in the top-right floating button). */
+  .sidebar-nav .sidebar-item[data-key='profilo'] {
+    display: none;
+  }
+
+  .mobile-tabs .mobile-tab[data-key='profilo'] {
+    display: none;
   }
 
   /* Composer should not leave space for the desktop sidebar */
