@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   buildLogoutPath,
   getDashboardShellItems,
+  isCopilotShellItem,
   resolveAssistantHomeUrl,
   resolveDashboardNavKey,
   type DashboardShellItem,
@@ -49,6 +50,14 @@ function DashboardIcon({ name }: { name: DashboardShellItem['icon'] }) {
       </svg>
     );
   }
+  if (name === 'notifiche') {
+    return (
+      <svg {...common}>
+        <path {...stroke} d="M15 17H9a4 4 0 0 1-4-4v-1.6a7 7 0 0 1 14 0V13a4 4 0 0 1-4 4Z" />
+        <path {...stroke} d="M10 17a2 2 0 0 0 4 0" />
+      </svg>
+    );
+  }
   if (name === 'catalogo_bandi') {
     return (
       <svg {...common}>
@@ -71,7 +80,10 @@ export function DashboardTabs() {
   const pathname = usePathname();
   const activeKey = resolveDashboardNavKey(pathname);
   const [open, setOpen] = useState(true);
-  const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
+  const items = useMemo<DashboardShellItem[]>(
+    () => getDashboardShellItems().filter((item) => !isCopilotShellItem(item)),
+    []
+  );
 
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('bndo-dashboard-sidebar-open') : null;

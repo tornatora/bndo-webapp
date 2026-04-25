@@ -95,7 +95,7 @@ export function DashboardApplicationsClient({
               <div className="progress-fill" style={{ width: `${it.progressPct}%` }} />
             </div>
             <div className="document-date" style={{ marginTop: 10, marginBottom: 0 }}>
-              Mancanti: <strong>{it.missingCount}</strong> · Caricati: <strong>{it.uploadedCount}</strong>
+              Documenti da caricare: <strong>{it.missingCount}</strong> · Caricati: <strong>{it.uploadedCount}</strong>
             </div>
           </div>
         </Link>

@@ -6,6 +6,7 @@ export type DashboardNavKey =
   | 'catalogo_bandi'
   | 'documenti'
   | 'messaggi'
+  | 'notifiche'
   | 'profilo'
   | 'new_practice';
 
@@ -90,15 +91,24 @@ export function buildLogoutPath(redirectTarget: string) {
   return `${routes.api.logout}?redirect=${encodeURIComponent(redirectTarget)}`;
 }
 
+export function isCopilotShellItem(item: Pick<DashboardShellItem, 'key' | 'label' | 'href'>): boolean {
+  const haystack = `${item.key} ${item.label} ${item.href}`.toLowerCase();
+  return haystack.includes('copilot') || haystack.includes('co-pilot') || haystack.includes('bndo-copilot');
+}
+
 export function getDashboardShellItems(): DashboardShellItem[] {
-  return [
+  const items: DashboardShellItem[] = [
     { key: 'home', label: 'Home', href: resolveAssistantHomeUrl(), icon: 'home', external: true },
     { key: 'pratiche', label: 'Le tue pratiche', href: routes.dashboard.list, icon: 'pratiche' },
     { key: 'catalogo_bandi', label: 'Catalogo Bandi', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
+    { key: 'notifiche', label: 'Notifiche', href: routes.dashboard.notifications, icon: 'notifiche' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
     { key: 'new_practice', label: 'Nuova pratica', href: routes.dashboard.newPractice, icon: 'new_practice' },
   ];
+
+  // Safety net: never expose Co-pilot entrypoints in the dashboard shell.
+  return items.filter((item) => !isCopilotShellItem(item));
 }
 
 export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
@@ -112,12 +122,8 @@ export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
   if (pathname === routes.dashboard.home) return 'home';
   if (pathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo_bandi';
   if (pathname.startsWith(routes.dashboard.documents)) return 'documenti';
-  if (
-    pathname.startsWith(routes.dashboard.messages) ||
-    pathname.startsWith(routes.dashboard.notifications)
-  ) {
-    return 'messaggi';
-  }
+  if (pathname.startsWith(routes.dashboard.messages)) return 'messaggi';
+  if (pathname.startsWith(routes.dashboard.notifications)) return 'notifiche';
   if (
     pathname.startsWith(routes.dashboard.profile) ||
     pathname.startsWith(routes.dashboard.password)
