@@ -1,23 +1,35 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import zlib from 'zlib';
+import { callPdfExtractFunction } from '@/lib/pdf/extractPdfText';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/**
- * Estrae testo da un PDF usando solo zlib (built-in Node.js).
- * Supporta:
- *  - FlateDecode (stream compressi con zlib)
- *  - Stringhe esadecimali <...> (pdf-lib)
- *  - Stringhe parentesizzate (...)
- *  - Testo raw per PDF non compressi
- *
- * Lavora direttamente sul Buffer per gestire correttamente i byte binari.
- */
-function extractPdfText(buf: Buffer): string {
+async function extractPdfText(buf: Buffer): Promise<string> {
+  // Tier 1: Netlify standalone function (bypasses webpack)
+  const netlifyText = await callPdfExtractFunction(buf);
+  if (netlifyText) return netlifyText;
+
+  // Tier 2: local pdf-parse via eval-require
+  try {
+    const _require = eval('require');
+    const pdfParse = _require('pdf-parse');
+    const PDFParse = pdfParse.PDFParse || pdfParse.default;
+    const parser = new PDFParse({ data: buf });
+    const data = await parser.getText();
+    await parser.destroy();
+    const text = String(data?.text ?? '').trim();
+    if (text.length >= 80) return text;
+  } catch { /* fallback to zlib */ }
+
+  // Tier 3: raw zlib extraction
+  return extractPdfTextZlib(buf);
+}
+
+function extractPdfTextZlib(buf: Buffer): string {
   const MARKER_STREAM = Buffer.from('stream\n');
   const MARKER_ENDSTREAM = Buffer.from('endstream');
   const textParts: string[] = [];
@@ -31,30 +43,23 @@ function extractPdfText(buf: Buffer): string {
     const streamEnd = buf.indexOf(MARKER_ENDSTREAM, dataStart);
     if (streamEnd === -1) break;
 
-    // Estrai i bytes dello stream (tra 'stream' e 'endstream')
     const streamBytes = buf.subarray(dataStart, streamEnd);
 
-    // Prova a decomprimere con zlib (FlateDecode)
     let decompressed: Buffer;
     try {
       decompressed = zlib.inflateSync(streamBytes);
     } catch {
-      // Non è compresso o è raw — usa i bytes così come sono
       decompressed = streamBytes;
     }
 
-    // Estrai testo dagli operatori Tj nel contenuto decompresso
-    // Pattern: (text) Tj oppure <hex> Tj
     const textOpRegex = /\(((?:[^()\\]|\\.)*)\)\s*Tj|<([0-9A-Fa-f\s]+)>\s*Tj/g;
-    const decoded = decompressed.toString('latin1'); // latin1 preserva i byte come chars
+    const decoded = decompressed.toString('latin1');
     const opMatches = decoded.matchAll(textOpRegex);
 
     for (const op of opMatches) {
       if (op[1]) {
-        // Stringa parentesizzata — gestisci escape PDF
         textParts.push(op[1].replace(/\\(.)/g, '$1'));
       } else if (op[2]) {
-        // Stringa esadecimale — decodifica
         const hex = op[2].replace(/\s/g, '');
         if (hex.length > 0 && hex.length % 2 === 0) {
           const hexBytes = Buffer.from(hex, 'hex');
@@ -66,7 +71,6 @@ function extractPdfText(buf: Buffer): string {
     pos = streamEnd + MARKER_ENDSTREAM.length;
   }
 
-  // Fallback: cerca stringhe parentesizzate nel PDF raw
   if (textParts.length === 0) {
     const raw = buf.toString('latin1');
     const parenMatches = raw.match(/\(([^)]*)\)/g);

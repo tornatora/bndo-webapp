@@ -64,6 +64,21 @@ const devFrameOrigins = ['http://localhost:3300', 'http://127.0.0.1:3300'];
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
+  experimental: {
+    serverComponentsExternalPackages: ['pdf-parse'],
+  },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      const extra = ['pdf-parse'];
+      if (Array.isArray(config.externals)) {
+        config.externals = [...config.externals, ...extra];
+      } else {
+        // Build fresh externals with the extra packages
+        config.externals = extra;
+      }
+    }
+    return config;
+  },
   async headers() {
     const csp = [
       "default-src 'self'",

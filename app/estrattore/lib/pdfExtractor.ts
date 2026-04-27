@@ -1,5 +1,5 @@
-import { PDFParse } from 'pdf-parse';
 import type { ExtractedData } from './types';
+import { callPdfExtractFunction } from '@/lib/pdf/extractPdfText';
 
 function normalizeForMatch(value: string) {
   return value
@@ -66,16 +66,25 @@ function extractSedeLegale(text: string): string | null {
   return null;
 }
 
+async function getPdfText(buffer: Buffer): Promise<{ text: string; pages: number | null }> {
+  // Tier 1: Netlify standalone function
+  const netlifyText = await callPdfExtractFunction(buffer);
+  if (netlifyText) return { text: netlifyText, pages: null };
+
+  // Tier 2: local pdf-parse
+  const { PDFParse } = await import('pdf-parse');
+  const parser = new PDFParse({ data: buffer });
+  const data = await parser.getText();
+  await parser.destroy();
+  return { text: String(data?.text ?? ''), pages: (data as any)?.total ?? null };
+}
+
 export async function extractFromPdf(buffer: Buffer): Promise<{
   extracted: ExtractedData;
   meta: { pages: number | null; textChars: number };
   warnings: string[];
 }> {
-  const parser = new PDFParse({ data: buffer });
-  const data = await parser.getText();
-  await parser.destroy();
-
-  const text = String(data?.text ?? '');
+  const { text, pages } = await getPdfText(buffer);
   const textNorm = normalizeForMatch(text);
   const textChars = textNorm.length;
 
@@ -89,7 +98,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
         rea: null,
         forma_giuridica: null,
       },
-      meta: { pages: (data as any)?.total ?? null, textChars },
+      meta: { pages, textChars },
       warnings: ['pdf_scanned_or_empty'],
     };
   }
@@ -121,7 +130,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
       rea,
       forma_giuridica,
     },
-    meta: { pages: (data as any)?.total ?? null, textChars },
+    meta: { pages, textChars },
     warnings,
   };
 }
