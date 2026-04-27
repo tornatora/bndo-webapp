@@ -64,11 +64,24 @@ const devFrameOrigins = ['http://localhost:3300', 'http://127.0.0.1:3300'];
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
-  serverExternalPackages: ['playwright-core', '@browserbasehq/sdk', 'canvas', 'unpdf'],
+  serverExternalPackages: [
+    'playwright-core',
+    '@browserbasehq/sdk',
+    'canvas',
+    'unpdf',
+    '@napi-rs/canvas',
+    'pdfjs-dist',
+  ],
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // canvas non serve in Netlify serverless
-      config.externals = [...(config.externals || []), 'canvas'];
+      // canvas, unpdf, pdfjs-dist non servono nel bundle webpack serverless
+      config.externals = [
+        ...(config.externals || []),
+        'canvas',
+        'unpdf',
+        'pdfjs-dist',
+        '@napi-rs/canvas',
+      ];
     }
     return config;
   },
