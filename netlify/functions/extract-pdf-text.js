@@ -1,5 +1,5 @@
 // Standalone Netlify function for PDF text extraction
-// Uses pdfjs-dist directly (text extraction only — no canvas/DOM needed)
+// Uses pdf-parse with DOMMatrix/Path2D polyfills for Netlify Lambda compat
 
 // Polyfill DOM APIs that pdfjs-dist references at load time on Netlify Lambda
 if (typeof globalThis.DOMMatrix === 'undefined') {
@@ -61,27 +61,13 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'No PDF file found in request' }) };
     }
 
-    // Dynamic import of ESM pdfjs-dist
-    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-
-    const doc = await pdfjsLib.getDocument({
-      data: new Uint8Array(part.data),
-      disableWorker: true,
-      verbosity: 0,
-    }).promise;
-
-    const textParts = [];
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items
-        .map((it) => it.str ?? '')
-        .join(' ');
-      textParts.push(pageText);
-    }
-
-    await doc.destroy();
-    const text = textParts.join('\n').trim();
+    // Use pdf-parse (wraps pdfjs-dist) — polyfills above prevent DOMMatrix error
+    const pdfParse = require('pdf-parse');
+    const PDFParse = pdfParse.PDFParse || pdfParse.default || pdfParse;
+    const parser = new PDFParse({ data: part.data });
+    const data = await parser.getText();
+    await parser.destroy();
+    const text = String(data?.text ?? '').trim();
 
     return {
       statusCode: 200,
