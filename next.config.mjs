@@ -67,7 +67,7 @@ const nextConfig = {
   serverExternalPackages: ['playwright-core', '@browserbasehq/sdk', 'canvas'],
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // pdfjs-dist@3 cerca 'canvas' al build time — non serve su Netlify serverless
+      // pdfjs-dist cerca 'canvas' al build time — non serve su Netlify serverless
       config.externals = [...(config.externals || []), 'canvas'];
     }
     return config;
