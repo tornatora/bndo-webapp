@@ -64,6 +64,21 @@ const devFrameOrigins = ['http://localhost:3300', 'http://127.0.0.1:3300'];
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
+  serverExternalPackages: [
+    'playwright-core',
+    '@browserbasehq/sdk',
+    'canvas',
+  ],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // canvas non serve nel bundle webpack serverless
+      config.externals = [
+        ...(config.externals || []),
+        'canvas',
+      ];
+    }
+    return config;
+  },
   async headers() {
     const csp = [
       "default-src 'self'",
