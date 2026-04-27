@@ -1,6 +1,24 @@
 // Standalone Netlify function for PDF text extraction
 // Uses pdfjs-dist directly (text extraction only — no canvas/DOM needed)
 
+// Polyfill DOM APIs that pdfjs-dist references at load time on Netlify Lambda
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  globalThis.DOMMatrix = class DOMMatrix {
+    constructor(init) {
+      if (typeof init === 'string' && init.startsWith('matrix(')) {
+        const parts = init.slice(7, -1).split(',').map(Number);
+        this.a = parts[0]; this.b = parts[1]; this.c = parts[2];
+        this.d = parts[3]; this.e = parts[4]; this.f = parts[5];
+      } else {
+        this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+      }
+    }
+  };
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  globalThis.Path2D = class Path2D {};
+}
+
 function extractFilePart(buffer, boundary) {
   const str = buffer.toString('binary');
   const boundaryMarker = `--${boundary}`;
