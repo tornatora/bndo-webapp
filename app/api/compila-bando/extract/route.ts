@@ -7,14 +7,11 @@ export const dynamic = 'force-dynamic';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // pdfjs-dist@4: disabilita worker (non serve su Netlify serverless)
+  // pdfjs-dist@3 supporta disableWorker: true (funziona in Node.js/Netlify senza worker)
   const pdfjsLib = await import('pdfjs-dist');
-  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '';
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
-    useSystemFonts: true,
-    disableFontFace: true,
-    disableRange: true,
+    disableWorker: true,
   } as any);
   const doc = await loadingTask.promise;
   const pages: string[] = [];
