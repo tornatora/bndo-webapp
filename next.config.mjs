@@ -64,11 +64,11 @@ const devFrameOrigins = ['http://localhost:3300', 'http://127.0.0.1:3300'];
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
-  serverExternalPackages: ['playwright-core', '@browserbasehq/sdk', 'canvas', 'pdfjs-dist'],
+  serverExternalPackages: ['playwright-core', '@browserbasehq/sdk', 'canvas'],
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // pdfjs-dist cerca 'canvas' al build time — non serve su Netlify serverless
-      config.externals = [...(config.externals || []), 'canvas', 'pdfjs-dist'];
+      // canvas non serve in Netlify serverless
+      config.externals = [...(config.externals || []), 'canvas'];
     }
     return config;
   },

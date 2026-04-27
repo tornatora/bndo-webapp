@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { extractText } from 'unpdf';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,18 +8,9 @@ export const dynamic = 'force-dynamic';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Usa pdfjs-dist legacy build (nessun worker/canvas richiesto, puro Node.js)
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.js');
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-  const doc = await loadingTask.promise;
-  const pages: string[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const text = content.items.map((item: any) => item.str).join(' ');
-    pages.push(text);
-  }
-  const text = pages.join('\n').trim();
+  // unpdf: estrazione testo da PDF senza worker, funziona in serverless
+  const result = await extractText(new Uint8Array(buffer), { mergePages: true });
+  const text = result.text.trim();
   if (!text) {
     // Fallback: estrazione raw come utf-8 per PDF malformati
     const raw = buffer.toString('utf-8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
