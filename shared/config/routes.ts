@@ -92,8 +92,7 @@ export function buildLogoutPath(redirectTarget: string) {
 
 export function getDashboardShellItems(): DashboardShellItem[] {
   return [
-    { key: 'home', label: 'Home', href: resolveAssistantHomeUrl(), icon: 'home', external: true },
-    { key: 'pratiche', label: 'Le tue pratiche', href: routes.dashboard.list, icon: 'pratiche' },
+    { key: 'home', label: 'Home', href: routes.dashboard.list, icon: 'home' },
     { key: 'catalogo_bandi', label: 'Catalogo Bandi', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
@@ -102,30 +101,71 @@ export function getDashboardShellItems(): DashboardShellItem[] {
 }
 
 export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
+  const normalizedPathname = pathname.replace(/\/+$/, '') || '/';
+
   if (
-    pathname === routes.dashboard.root ||
-    pathname === routes.dashboard.list ||
-    pathname.startsWith(routes.dashboard.practicesPrefix)
+    normalizedPathname === routes.dashboard.root ||
+    normalizedPathname === routes.dashboard.list ||
+    normalizedPathname.startsWith(routes.dashboard.practicesPrefix)
   ) {
-    return pathname === routes.dashboard.list ? 'pratiche' : 'messaggi';
+    return 'home';
   }
-  if (pathname === routes.dashboard.home) return 'home';
-  if (pathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo_bandi';
-  if (pathname.startsWith(routes.dashboard.documents)) return 'documenti';
+  if (normalizedPathname === routes.dashboard.home) return 'home';
+  if (normalizedPathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo_bandi';
+  if (normalizedPathname.startsWith(routes.dashboard.documents)) return 'documenti';
   if (
-    pathname.startsWith(routes.dashboard.messages) ||
-    pathname.startsWith(routes.dashboard.notifications)
+    normalizedPathname.startsWith(routes.dashboard.messages) ||
+    normalizedPathname.startsWith(routes.dashboard.notifications)
   ) {
     return 'messaggi';
   }
   if (
-    pathname.startsWith(routes.dashboard.profile) ||
-    pathname.startsWith(routes.dashboard.password)
+    normalizedPathname.startsWith(routes.dashboard.profile) ||
+    normalizedPathname.startsWith(routes.dashboard.password)
   ) {
     return 'profilo';
   }
-  if (pathname.startsWith(routes.dashboard.newPractice)) return 'new_practice';
+  if (normalizedPathname.startsWith(routes.dashboard.newPractice)) return 'new_practice';
   return 'messaggi';
+}
+
+export function resolveDashboardLoaderWord(pathname: string): string {
+  const normalizedPathname = pathname.replace(/\/+$/, '') || '/';
+
+  if (
+    normalizedPathname === routes.dashboard.root ||
+    normalizedPathname === routes.dashboard.list ||
+    normalizedPathname.startsWith(routes.dashboard.practicesPrefix)
+  ) {
+    return 'pratiche';
+  }
+
+  if (
+    normalizedPathname.startsWith(routes.dashboard.messages) ||
+    normalizedPathname.startsWith(routes.dashboard.notifications)
+  ) {
+    return 'messaggi';
+  }
+
+  if (
+    normalizedPathname.startsWith(routes.dashboard.profile) ||
+    normalizedPathname.startsWith(routes.dashboard.password)
+  ) {
+    return 'profilo';
+  }
+
+  if (normalizedPathname.startsWith(routes.dashboard.documents)) return 'documenti';
+  if (normalizedPathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo bandi';
+  if (normalizedPathname.startsWith(routes.dashboard.newPractice)) return 'nuova pratica';
+  if (normalizedPathname === routes.dashboard.chat) return 'chat';
+  if (
+    normalizedPathname === routes.dashboard.scanner ||
+    normalizedPathname === routes.dashboard.scannerLegacy
+  ) {
+    return 'scanner';
+  }
+
+  return 'dashboard';
 }
 
 export function isPublicDashboardShellPath(pathname: string) {

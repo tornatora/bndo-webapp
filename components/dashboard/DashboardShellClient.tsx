@@ -70,10 +70,9 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
   if (name === 'catalogo_bandi') {
     return (
       <svg {...common}>
-        <path
-          {...stroke}
-          d="M12 20s-6.5-3.9-8.4-7.6C2.2 9.9 3.3 7 5.9 6.2A4.7 4.7 0 0 1 12 8.4a4.7 4.7 0 0 1 6.1-2.2c2.6.8 3.7 3.7 2.3 6.2C18.5 16.1 12 20 12 20Z"
-        />
+        <path {...stroke} d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v12H9.7A2.7 2.7 0 0 0 7 21.7V4.5Z" />
+        <path {...stroke} d="M7 19h12.5" />
+        <path {...stroke} d="M10 9h6.5M10 12h6.5M10 15h4.5" />
       </svg>
     );
   }
@@ -88,6 +87,7 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
 export function DashboardShellClient({ children, username, viewerProfileId }: DashboardShellClientProps) {
   const pathname = usePathname();
   const activeKey = resolveDashboardNavKey(pathname);
+  const isMessagesRoute = activeKey === 'messaggi';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarUserMenuOpen, setSidebarUserMenuOpen] = useState(false);
   const [topbarUserMenuOpen, setTopbarUserMenuOpen] = useState(false);
@@ -160,8 +160,12 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
       </Link>
     );
 
+  const rootShellClass = `${
+    sidebarOpen ? 'bndo-shell with-sidebar sidebar-open dashboard-auth-shell' : 'bndo-shell with-sidebar dashboard-auth-shell'
+  }${isMessagesRoute ? ' is-messages-route' : ''}`;
+
   return (
-    <div className={sidebarOpen ? 'bndo-shell with-sidebar sidebar-open dashboard-auth-shell' : 'bndo-shell with-sidebar dashboard-auth-shell'}>
+    <div className={rootShellClass}>
       <aside className={sidebarOpen ? 'sidebar is-open' : 'sidebar'} aria-label="Menu dashboard">
         <div className="sidebar-top">
           <button
@@ -288,7 +292,11 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
           </div>
         </header>
 
-        <main className="dashboard-content dashboard-content-client">
+        <main
+          className={`dashboard-content dashboard-content-client${
+            isMessagesRoute ? ' dashboard-content-client-messages' : ''
+          }`}
+        >
           {children}
           <div className="mobile-content-spacer" aria-hidden="true" />
         </main>

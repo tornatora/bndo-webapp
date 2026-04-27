@@ -25,10 +25,12 @@ function Icon({ name }: { name: NavItem['icon'] }) {
   if (name === 'chat') {
     return (
       <svg {...common}>
-        {/* AI sparkles (3 stars) */}
-        <path d="M8.2 3.1 9.25 6 12.1 7.05 9.25 8.1 8.2 11 7.15 8.1 4.3 7.05 7.15 6 8.2 3.1Z" fill="currentColor" />
-        <path d="M16.35 4.8 17.1 6.75 19.05 7.5 17.1 8.25 16.35 10.2 15.6 8.25 13.65 7.5 15.6 6.75 16.35 4.8Z" fill="currentColor" />
-        <path d="M14.9 12.2 16 15.1 18.9 16.2 16 17.3 14.9 20.2 13.8 17.3 10.9 16.2 13.8 15.1 14.9 12.2Z" fill="currentColor" />
+        <path
+          {...stroke}
+          d="M6.75 18.5 4.5 20.75v-12A3.25 3.25 0 0 1 7.75 5.5h7.75a3.25 3.25 0 0 1 3.25 3.25v4.5a3.25 3.25 0 0 1-3.25 3.25H6.75Z"
+        />
+        <path {...stroke} d="M8.25 9.25h4.75M8.25 12h6.5" />
+        <path {...stroke} d="M18.75 2.75 19.65 5.35 22.25 6.25 19.65 7.15 18.75 9.75 17.85 7.15 15.25 6.25 17.85 5.35 18.75 2.75Z" />
       </svg>
     );
   }
@@ -135,7 +137,7 @@ export const Sidebar = memo(function Sidebar({
   const topItems = useMemo<NavItem[]>(
     () =>
       items ?? [
-        { id: 'chat', label: 'Chat AI', icon: 'chat', onClick: onNewChat },
+        { id: 'chat', label: 'Consulente AI', icon: 'chat', onClick: onNewChat },
         { id: 'search', label: 'Cerca', icon: 'search' }
       ],
     [items, onNewChat]

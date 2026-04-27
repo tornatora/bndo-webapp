@@ -4,6 +4,18 @@ You are working in the real BNDO codebase.
 
 These instructions are mandatory.
 
+## CRITICAL: working directory
+The BNDO codebase lives at:
+```
+/Users/nataleletteriotornatora/Documents/bndo-webapp/bndo-recovery/source
+```
+
+Every server, build, dev command, and file read MUST happen inside this directory.
+NEVER use `/Users/nataleletteriotornatora/Documents/bndo-webapp/` (the parent) — it contains stale/modified code and is NOT the production-aligned copy.
+
+Before starting any server or running any command, verify the working directory with `pwd`.
+If a server is already running, kill it and restart it from THIS directory.
+
 ## Scope
 Work ONLY on the single-bando "Verifica requisiti" engine and the wiring needed for it to run correctly in the real runtime path.
 

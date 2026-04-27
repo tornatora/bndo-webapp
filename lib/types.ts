@@ -68,3 +68,5 @@ export type ConsultantMessage = {
   body: string;
   created_at: string;
 };
+
+export type SupplementalData = Record<string, string>;

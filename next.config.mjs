@@ -96,7 +96,8 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-          { key: 'Cross-Origin-Resource-Policy', value: 'same-site' }
+          { key: 'Cross-Origin-Resource-Policy', value: 'same-site' },
+          ...(isProduction ? [] : [{ key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate' }, { key: 'Pragma', value: 'no-cache' }, { key: 'Expires', value: '0' }])
         ]
       }
     ];

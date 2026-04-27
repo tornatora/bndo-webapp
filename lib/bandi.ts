@@ -82,6 +82,25 @@ export function practiceTypeFromGrantSlug(slug: string | null | undefined): Prac
   return 'generic';
 }
 
+export function normalizeGrantSlugToken(raw: string | null | undefined): string | null {
+  const normalized = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || null;
+}
+
+export function canonicalGrantSlugFromAny(raw: string | null | undefined): GrantSlug | null {
+  const token = normalizeGrantSlugToken(raw);
+  if (!token) return null;
+  const practiceType = practiceTypeFromGrantSlug(token);
+  if (!practiceType) return null;
+  return grantSlugFromPracticeType(practiceType);
+}
+
 export function practiceStartFeeCents(type: PracticeType) {
   return BANDI[type].startFeeCents;
 }

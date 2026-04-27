@@ -1,20 +1,25 @@
 type AtomicPageLoaderProps = {
   title?: string;
   targetWord?: string;
+  strictTargetWord?: boolean;
   className?: string;
 };
 
 export function AtomicPageLoader({
   title = 'Sto caricando',
   targetWord = 'pagina',
+  strictTargetWord = false,
   className,
 }: AtomicPageLoaderProps) {
   const normalizedTarget = String(targetWord || 'pagina').trim().toLowerCase();
-  const pool = ['pratiche', 'messaggi', 'profilo', 'nuova pratica', 'scanner', 'quiz', 'documenti', 'dashboard'];
-  const alternates = pool.filter((word) => word !== normalizedTarget).slice(0, 4);
-  while (alternates.length < 4) alternates.push('dashboard');
-  // Keep target only at the end so animation lands on the final page word.
-  const rotatingWords = [...alternates, normalizedTarget];
+  const rotatingWords = strictTargetWord
+    ? [normalizedTarget, normalizedTarget, normalizedTarget, normalizedTarget, normalizedTarget]
+    : (() => {
+        const pool = ['pratiche', 'messaggi', 'profilo', 'nuova pratica', 'scanner', 'quiz', 'documenti', 'dashboard'];
+        const alternates = pool.filter((word) => word !== normalizedTarget).slice(0, 4);
+        while (alternates.length < 4) alternates.push('dashboard');
+        return [...alternates, normalizedTarget];
+      })();
 
   return (
     <section className={className ? `atomic-loader ${className}` : 'atomic-loader'} role="status" aria-live="polite">

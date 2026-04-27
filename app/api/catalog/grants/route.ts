@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { loadActiveGrantUniverse } from '@/lib/matching/activeGrantIndex';
 import type { IncentiviDoc } from '@/lib/matching/types';
+import { isLimitedReleaseMode, isLimitedCatalogGrantTitle } from '@/shared/config/release-mode';
 
 export const runtime = 'nodejs';
 
@@ -210,6 +211,7 @@ export async function GET(request: Request) {
     sort,
   } = parsed.data;
   const universe = await loadActiveGrantUniverse();
+  const limitedMode = isLimitedReleaseMode();
   const queryNorm = normalizeText(q);
   const authorityNorm = normalizeText(authority);
   const sectorNorm = normalizeText(sector);
@@ -217,6 +219,10 @@ export async function GET(request: Request) {
   const regionNorm = normalizeText(region);
 
   const filtered = universe.docs
+    .filter((doc) => {
+      if (!limitedMode) return true;
+      return isLimitedCatalogGrantTitle(String(doc.title ?? ''));
+    })
     .filter((doc) => {
       if (!queryNorm) return true;
       const haystack = normalizeText(

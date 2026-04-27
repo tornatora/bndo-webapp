@@ -1,5 +1,5 @@
-import { AtomicPageLoader } from '@/components/dashboard/AtomicPageLoader';
+import { DashboardRouteLoadingState } from '@/components/dashboard/DashboardRouteLoadingState';
 
 export default function DashboardLoading() {
-  return <AtomicPageLoader title="Sto caricando" targetWord="pratiche" />;
+  return <DashboardRouteLoadingState />;
 }

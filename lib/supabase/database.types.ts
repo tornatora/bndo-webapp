@@ -980,44 +980,6 @@ export type Database = {
         };
         Relationships: [];
       };
-      estrattore_extractions: {
-        Row: {
-          id: string;
-          user_id: string;
-          original_filename: string | null;
-          extracted_data: Json;
-          custom_fields: Json;
-          status: 'pending' | 'processing' | 'completed' | 'failed';
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          original_filename?: string | null;
-          extracted_data?: Json;
-          custom_fields?: Json;
-          status?: 'pending' | 'processing' | 'completed' | 'failed';
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          original_filename?: string | null;
-          extracted_data?: Json;
-          custom_fields?: Json;
-          status?: 'pending' | 'processing' | 'completed' | 'failed';
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'estrattore_extractions_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          }
-        ];
-      };
     };
     Views: {
       [_ in never]: never;

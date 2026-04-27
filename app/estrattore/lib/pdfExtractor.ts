@@ -36,10 +36,8 @@ function extractBlockValue(text: string, keys: string[]): string | null {
 
 function extractCodiceFiscale(text: string): string | null {
   const raw = text ?? '';
-  // Persona fisica: LLLLLL99L99L999L
   const pf = raw.match(/\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
   if (pf) return pf[1].toUpperCase();
-  // Azienda: 11 cifre
   const az = raw.match(/\b(\d{11})\b/);
   if (az) return az[1];
   return null;

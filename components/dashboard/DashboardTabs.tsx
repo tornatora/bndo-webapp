@@ -52,10 +52,9 @@ function DashboardIcon({ name }: { name: DashboardShellItem['icon'] }) {
   if (name === 'catalogo_bandi') {
     return (
       <svg {...common}>
-        <path
-          {...stroke}
-          d="M12 20s-6.5-3.9-8.4-7.6C2.2 9.9 3.3 7 5.9 6.2A4.7 4.7 0 0 1 12 8.4a4.7 4.7 0 0 1 6.1-2.2c2.6.8 3.7 3.7 2.3 6.2C18.5 16.1 12 20 12 20Z"
-        />
+        <path {...stroke} d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v12H9.7A2.7 2.7 0 0 0 7 21.7V4.5Z" />
+        <path {...stroke} d="M7 19h12.5" />
+        <path {...stroke} d="M10 9h6.5M10 12h6.5M10 15h4.5" />
       </svg>
     );
   }
@@ -135,7 +134,7 @@ export function DashboardTabs() {
               <span className="dashboard-sidebar-np2-sub">Torna alla chat</span>
             </span>
           </a>
-          <a className="dashboard-sidebar-np2-logout" href={buildLogoutPath('/login')}>
+          <a className="dashboard-sidebar-np2-logout" href={buildLogoutPath(resolveAssistantHomeUrl())}>
             Logout
           </a>
         </div>

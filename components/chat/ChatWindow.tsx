@@ -20,6 +20,7 @@ import { BandiCatalogView, prefetchCatalogBootstrap } from '@/components/views/B
 import { PracticeDetailView } from '@/components/views/PracticeDetailView';
 import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
 import { buildUnifiedScanRequestBody, selectUnifiedScanStrictness } from '@/lib/matching/scanRequestPolicy';
+import { isLimitedReleaseMode, LIMITED_CHAT_SCOPE_NOTICE } from '@/shared/config/release-mode';
 import './ThinkingBubble.css';
 
 type UserProfile = {
@@ -1349,7 +1350,8 @@ export function ChatWindow({
 
   const navItems = useMemo(
     () => {
-      return [
+      const limited = isLimitedReleaseMode();
+      const items = [
       {
         id: 'home',
         label: 'Home',
@@ -1387,6 +1389,7 @@ export function ChatWindow({
         }
       }
     ];
+      return limited ? items.filter((item) => item.id !== 'form') : items;
     },
     [goChat, goHome, goScanner, goMyPractices]
   );
@@ -1504,6 +1507,22 @@ export function ChatWindow({
         {view === 'chat' || messages.length > 0 ? (
           <div className={view === 'chat' ? 'view-pane chat-view-pane' : 'view-pane chat-view-pane is-hidden'} aria-hidden={view !== 'chat'}>
             <div className="chatgpt-stage">
+              {isLimitedReleaseMode() && (
+                <div className="limited-beta-banner" style={{
+                  background: 'linear-gradient(135deg, rgba(11,17,54,0.95), #0a2540)',
+                  color: '#fff',
+                  padding: '10px 18px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  textAlign: 'center',
+                  marginBottom: '16px',
+                  boxShadow: '0 4px 18px rgba(11,17,54,0.15)',
+                }}>
+                  <span style={{ marginRight: '6px' }}>🔒</span>
+                  Modalità limitata: {LIMITED_CHAT_SCOPE_NOTICE}
+                </div>
+              )}
               {messages.length === 0 ? (
                 <div className="chat-landing">
                   <div className="landing-title">
