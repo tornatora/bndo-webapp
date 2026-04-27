@@ -68,19 +68,13 @@ const nextConfig = {
     'playwright-core',
     '@browserbasehq/sdk',
     'canvas',
-    'unpdf',
-    '@napi-rs/canvas',
-    'pdfjs-dist',
   ],
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // canvas, unpdf, pdfjs-dist non servono nel bundle webpack serverless
+      // canvas non serve nel bundle webpack serverless
       config.externals = [
         ...(config.externals || []),
         'canvas',
-        'unpdf',
-        'pdfjs-dist',
-        '@napi-rs/canvas',
       ];
     }
     return config;
