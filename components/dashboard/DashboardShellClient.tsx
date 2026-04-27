@@ -128,7 +128,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
 
   const renderShellItem = (item: DashboardShellItem) =>
     item.external ? (
-      <a key={item.key} className="sidebar-item" href={item.href} title={item.label}>
+      <a key={item.key} className="sidebar-item" data-key={item.key} href={item.href} title={item.label}>
         <span className="sidebar-ico" aria-hidden="true">
           <Icon name={item.icon} />
         </span>
@@ -144,6 +144,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
       <Link
         key={item.key}
         className={`sidebar-item ${activeKey === item.key ? 'active' : ''}`}
+        data-key={item.key}
         href={item.href}
         title={item.label}
       >
@@ -162,6 +163,12 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
 
   return (
     <div className={sidebarOpen ? 'bndo-shell with-sidebar sidebar-open dashboard-auth-shell' : 'bndo-shell with-sidebar dashboard-auth-shell'}>
+      <Link className="mobile-profile-fab" href="/dashboard/profile" aria-label="Apri profilo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M4.5 21a7.5 7.5 0 1 1 15 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
       <aside className={sidebarOpen ? 'sidebar is-open' : 'sidebar'} aria-label="Menu dashboard">
         <div className="sidebar-top">
           <button
@@ -297,14 +304,14 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
       <nav className="mobile-tabs" aria-label="Navigazione mobile dashboard">
         {items.map((item) =>
           item.external ? (
-            <a key={item.key} className="mobile-tab" href={item.href}>
+            <a key={item.key} className="mobile-tab" data-key={item.key} href={item.href}>
               <span className="mobile-tab-icon" aria-hidden="true">
                 <Icon name={item.icon} />
               </span>
               <span className="mobile-tab-label">{item.label}</span>
             </a>
           ) : (
-            <Link key={item.key} className={`mobile-tab ${activeKey === item.key ? 'active' : ''}`} href={item.href}>
+            <Link key={item.key} className={`mobile-tab ${activeKey === item.key ? 'active' : ''}`} data-key={item.key} href={item.href}>
               <span className="mobile-tab-icon" aria-hidden="true">
                 <Icon name={item.icon} />
               </span>

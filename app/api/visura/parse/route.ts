@@ -1,8 +1,26 @@
 import { NextResponse } from 'next/server';
-import { PDFParse } from 'pdf-parse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+async function parsePdf(buffer: Buffer): Promise<string> {
+  const { PDFDocument } = await import('pdf-lib');
+  const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const pages = doc.getPages();
+  const lines: string[] = [];
+  for (const page of pages) {
+    const text = (page as any).getTextContent?.();
+    if (text) lines.push(text);
+  }
+  if (lines.length === 0) {
+    const raw = buffer.toString('utf-8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+    const matches = raw.match(/\(([^)]*)\)/g);
+    if (matches) {
+      matches.forEach(m => lines.push(m.slice(1, -1)));
+    }
+  }
+  return lines.join('\n') || '';
+}
 
 const IT_REGIONS = [
   'Abruzzo',
@@ -49,7 +67,6 @@ function extractAteco(text: string): string | null {
   const raw = text ?? '';
   const norm = normalizeForMatch(raw);
 
-  // Prefer codes near the "ateco" keyword.
   const idx = norm.indexOf('ateco');
   const window = idx >= 0 ? raw.slice(Math.max(0, idx - 180), Math.min(raw.length, idx + 260)) : raw;
 
@@ -66,7 +83,6 @@ function extractAteco(text: string): string | null {
     else candidates.push(a);
   }
 
-  // Fallback: scan entire document for dotted patterns, but take the most specific.
   if (candidates.length === 0) {
     while ((m = dotted.exec(raw))) {
       const a = m[1];
@@ -82,7 +98,6 @@ function extractAteco(text: string): string | null {
 
   if (candidates.length === 0) return null;
 
-  // Choose the most specific (longest) candidate, prefer ones with dots.
   const sorted = [...new Set(candidates)].sort((x, y) => y.length - x.length);
   return sorted[0] ?? null;
 }
@@ -114,11 +129,7 @@ export async function POST(req: Request) {
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const parser = new PDFParse({ data: buf });
-    const data = await parser.getText();
-    await parser.destroy();
-
-    const text = String(data?.text ?? '');
+    const text = await parsePdf(buf);
     const textNorm = normalizeForMatch(text);
     const textChars = textNorm.length;
 
@@ -145,7 +156,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       extracted: { region, ateco, denomination, legalForm },
-      meta: { pages: (data as any)?.total ?? null, textChars },
+      meta: { pages: null, textChars },
       warnings
     });
   } catch (e) {

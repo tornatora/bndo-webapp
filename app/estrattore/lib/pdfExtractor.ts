@@ -1,5 +1,23 @@
-import { PDFParse } from 'pdf-parse';
 import type { ExtractedData } from './types';
+
+async function parsePdf(buffer: Buffer): Promise<string> {
+  const { PDFDocument } = await import('pdf-lib');
+  const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const pages = doc.getPages();
+  const lines: string[] = [];
+  for (const page of pages) {
+    const text = (page as any).getTextContent?.();
+    if (text) lines.push(text);
+  }
+  if (lines.length === 0) {
+    const raw = buffer.toString('utf-8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
+    const matches = raw.match(/\(([^)]*)\)/g);
+    if (matches) {
+      matches.forEach(m => lines.push(m.slice(1, -1)));
+    }
+  }
+  return lines.join('\n') || '';
+}
 
 function normalizeForMatch(value: string) {
   return value
@@ -36,10 +54,8 @@ function extractBlockValue(text: string, keys: string[]): string | null {
 
 function extractCodiceFiscale(text: string): string | null {
   const raw = text ?? '';
-  // Persona fisica: LLLLLL99L99L999L
   const pf = raw.match(/\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
   if (pf) return pf[1].toUpperCase();
-  // Azienda: 11 cifre
   const az = raw.match(/\b(\d{11})\b/);
   if (az) return az[1];
   return null;
@@ -73,11 +89,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
   meta: { pages: number | null; textChars: number };
   warnings: string[];
 }> {
-  const parser = new PDFParse({ data: buffer });
-  const data = await parser.getText();
-  await parser.destroy();
-
-  const text = String(data?.text ?? '');
+  const text = await parsePdf(buffer);
   const textNorm = normalizeForMatch(text);
   const textChars = textNorm.length;
 
@@ -91,7 +103,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
         rea: null,
         forma_giuridica: null,
       },
-      meta: { pages: (data as any)?.total ?? null, textChars },
+      meta: { pages: null, textChars },
       warnings: ['pdf_scanned_or_empty'],
     };
   }
@@ -123,7 +135,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
       rea,
       forma_giuridica,
     },
-    meta: { pages: (data as any)?.total ?? null, textChars },
+    meta: { pages: null, textChars },
     warnings,
   };
 }
