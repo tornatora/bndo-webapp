@@ -7,12 +7,18 @@ export const dynamic = 'force-dynamic';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // pdf-parse è compatibile con Netlify serverless (non richiede worker)
-  const { PDFParse } = await import('pdf-parse');
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  const result = await parser.getText();
-  await parser.destroy();
-  const text = result.text?.trim() || '';
+  // pdfjs-dist@4 funziona in Node.js senza canvas/DOM (usa getDocument con data Uint8Array)
+  const pdfjsLib = await import('pdfjs-dist');
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const doc = await loadingTask.promise;
+  const pages: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map((item: any) => item.str).join(' ');
+    pages.push(text);
+  }
+  const text = pages.join('\n').trim();
   if (!text) {
     // Fallback: estrazione raw come utf-8 per PDF malformati
     const raw = buffer.toString('utf-8').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ');
