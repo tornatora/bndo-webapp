@@ -9,17 +9,13 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function extractPdfText(buffer: Buffer): Promise<string> {
   // pdfjs-dist@4: disabilita worker (non serve su Netlify serverless)
   const pdfjsLib = await import('pdfjs-dist');
-  // @ts-expect-error — GlobalWorkerOptions esiste ma non sempre in tipi
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = '';
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
     useSystemFonts: true,
     disableFontFace: true,
     disableRange: true,
-    nativeImageDecoderSupport: 'none',
-    cMapUrl: undefined as any,
-    cMapPacked: true,
-  });
+  } as any);
   const doc = await loadingTask.promise;
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
