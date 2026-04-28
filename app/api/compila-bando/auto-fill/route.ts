@@ -47,15 +47,19 @@ function buildPkceUrl(): string {
 }
 
 interface ExtractedData {
-  ragione_sociale: string;
-  sede_legale: string;
-  codice_fiscale: string;
-  partita_iva: string;
-  rea: string;
-  forma_giuridica: string;
-  nome_legale_rappresentante: string;
-  email_pec: string;
-  telefono: string;
+  ragione_sociale?: string | null;
+  sede_legale?: string | null;
+  codice_fiscale?: string | null;
+  partita_iva?: string | null;
+  rea?: string | null;
+  forma_giuridica?: string | null;
+  nome_legale_rappresentante?: string | null;
+  email_pec?: string | null;
+  telefono?: string | null;
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function extractCAP(sedeLegale: string): string {
@@ -74,25 +78,26 @@ function extractComune(sedeLegale: string): string {
 }
 
 function mapClientData(extracted: ExtractedData) {
-  const nome = extracted.nome_legale_rappresentante || '';
+  const nome = normalizeText(extracted.nome_legale_rappresentante);
   const nomeParts = nome.split(' ');
   const cognome = nomeParts.length > 1 ? nomeParts.slice(1).join(' ') : nome;
+  const sedeLegale = normalizeText(extracted.sede_legale);
 
   return {
     fullName: nome,
     firstName: nomeParts[0] || '',
     lastName: cognome,
-    zip: extractCAP(extracted.sede_legale),
-    province: extractProvincia(extracted.sede_legale),
-    city: extractComune(extracted.sede_legale),
-    pec: extracted.email_pec || '',
-    phone: extracted.telefono || '',
-    ragioneSociale: extracted.ragione_sociale || '',
-    codiceFiscale: extracted.codice_fiscale || '',
-    partitaIva: extracted.partita_iva || '',
-    rea: extracted.rea || '',
-    sedeLegale: extracted.sede_legale || '',
-    formaGiuridica: extracted.forma_giuridica || '',
+    zip: extractCAP(sedeLegale),
+    province: extractProvincia(sedeLegale),
+    city: extractComune(sedeLegale),
+    pec: normalizeText(extracted.email_pec),
+    phone: normalizeText(extracted.telefono),
+    ragioneSociale: normalizeText(extracted.ragione_sociale),
+    codiceFiscale: normalizeText(extracted.codice_fiscale),
+    partitaIva: normalizeText(extracted.partita_iva),
+    rea: normalizeText(extracted.rea),
+    sedeLegale,
+    formaGiuridica: normalizeText(extracted.forma_giuridica),
   };
 }
 
@@ -108,10 +113,10 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const data = body.data as ExtractedData;
+    const data = (body?.data ?? {}) as ExtractedData;
 
-    if (!data) {
-      return NextResponse.json({ error: 'Nessun dato ricevuto.' }, { status: 400 });
+    if (!data || typeof data !== 'object') {
+      return NextResponse.json({ error: 'Payload non valido.' }, { status: 400 });
     }
 
     const client = mapClientData(data);
