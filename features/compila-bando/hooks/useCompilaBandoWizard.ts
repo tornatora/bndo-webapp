@@ -22,10 +22,13 @@ function makeInitialState(): WizardState {
 export function useCompilaBandoWizard() {
   const [state, setState] = useState<WizardState>(makeInitialState);
   const maxReachedRef = useRef<number>(1);
+  const step9LockRef = useRef(false);
 
   const goToStep = useCallback((step: WizardStep) => {
     setState((prev) => {
+      if (step9LockRef.current && step < 9) return prev;
       const direction: WizardDirection = step > prev.currentStep ? 'next' : 'back';
+      if (step >= 9) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction };
     });
@@ -35,6 +38,7 @@ export function useCompilaBandoWizard() {
     setState((prev) => {
       if (prev.currentStep >= 10) return prev;
       const step = (prev.currentStep + 1) as WizardStep;
+      if (step >= 9) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction: 'next' };
     });
@@ -44,6 +48,7 @@ export function useCompilaBandoWizard() {
     setState((prev) => {
       if (prev.currentStep <= 1) return prev;
       const step = (prev.currentStep - 1) as WizardStep;
+      if (step9LockRef.current && step < 9) return prev;
       return { ...prev, currentStep: step, direction: 'back' };
     });
   }, []);
@@ -130,6 +135,7 @@ export function useCompilaBandoWizard() {
   const reset = useCallback(() => {
     setState(makeInitialState());
     maxReachedRef.current = 1;
+    step9LockRef.current = false;
   }, []);
 
   return {
