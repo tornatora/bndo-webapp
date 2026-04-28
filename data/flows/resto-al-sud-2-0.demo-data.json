@@ -1,0 +1,34 @@
+{
+  "template": {
+    "name": "Invitalia 2026-04-23_00-01",
+    "bandoKey": "resto-al-sud-2-0",
+    "proceduraKey": "default"
+  },
+  "summary": {
+    "totalValueFrom": 8,
+    "coveredByFieldMapping": 6,
+    "requiredInDataFile": 2,
+    "runtimeOnly": 0
+  },
+  "required": {
+    "requiredInDataFile": [
+      "client.zip",
+      "client.fullName"
+    ],
+    "coveredByFieldMapping": [
+      "recorded.1776895429198",
+      "recorded.1776895444343",
+      "recorded.1776895450320",
+      "recorded.1776895462217",
+      "recorded.1776895466504",
+      "recorded.1776895468141"
+    ],
+    "runtimeOnly": []
+  },
+  "demoData": {
+    "client": {
+      "zip": "89021",
+      "fullName": "Mario Rossi"
+    }
+  }
+}

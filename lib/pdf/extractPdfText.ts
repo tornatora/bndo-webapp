@@ -1,11 +1,18 @@
 function getPdfExtractFunctionUrl(): string | null {
-  const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY_LOCAL === 'true';
+  // Netlify always sets DEPLOY_ID in its runtime. Also check NETLIFY/LOCAL for dev.
+  const isNetlify =
+    process.env.NETLIFY === 'true' ||
+    process.env.NETLIFY_LOCAL === 'true' ||
+    !!process.env.DEPLOY_ID;
+
   if (!isNetlify) return null;
 
+  // DEPLOY_URL is the full deploy URL (e.g. https://xxx--site.netlify.app)
   const base = (
     process.env.DEPLOY_PRIME_URL ||
     process.env.URL ||
-    (process.env.NETLIFY_LOCAL === 'true' ? 'http://localhost:8888' : '')
+    process.env.DEPLOY_URL ||
+    ''
   ).trim().replace(/\/+$/, '');
 
   return base ? `${base}/.netlify/functions/extract-pdf-text` : null;

@@ -1,31 +1,67 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import zlib from 'zlib';
-import { callPdfExtractFunction } from '@/lib/pdf/extractPdfText';
+
+// Polyfill DOM APIs needed by pdf-parse/pdfjs-dist on Netlify Lambda
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class {
+    a=1;b=0;c=0;d=1;e=0;f=0;
+    constructor(init?: string) {
+      if (typeof init === 'string' && init.startsWith('matrix(')) {
+        const p = init.slice(7,-1).split(',').map(Number);
+        this.a=p[0];this.b=p[1];this.c=p[2];this.d=p[3];this.e=p[4];this.f=p[5];
+      }
+    }
+  };
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  (globalThis as any).Path2D = class {};
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const deepseek = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY || 'sk-e25689394fe94ceaba818e8dcc1d3024',
+  baseURL: 'https://api.deepseek.com/v1',
+});
 
-async function extractPdfText(buf: Buffer): Promise<string> {
-  // Tier 1: Netlify standalone function (bypasses webpack)
-  const netlifyText = await callPdfExtractFunction(buf);
-  if (netlifyText) return netlifyText;
-
-  // Tier 2: local pdf-parse via eval-require
+async function extractPdfText(buf: Buffer, _baseUrl?: string): Promise<string> {
+  // Tier 1: native require bypassing webpack (same mechanism as the working standalone function)
   try {
-    const _require = eval('require');
-    const pdfParse = _require('pdf-parse');
-    const PDFParse = pdfParse.PDFParse || pdfParse.default;
+    const nativeReq: any =
+      typeof (globalThis as any).__non_webpack_require__ !== 'undefined'
+        ? (globalThis as any).__non_webpack_require__
+        : eval('require');
+    const pdfParse = nativeReq('pdf-parse');
+    const PDFParse = pdfParse.PDFParse || pdfParse;
     const parser = new PDFParse({ data: buf });
     const data = await parser.getText();
     await parser.destroy();
     const text = String(data?.text ?? '').trim();
     if (text.length >= 80) return text;
-  } catch { /* fallback to zlib */ }
+  } catch {}
 
-  // Tier 3: raw zlib extraction
+  // Tier 2: HTTP call to standalone Netlify function (http://localhost:8888 in netlify dev)
+  try {
+    const base = process.env.DEPLOY_PRIME_URL || process.env.URL || '';
+    if (base) {
+      const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
+      const formData = new FormData();
+      formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.text?.length >= 80) return json.text;
+      }
+    }
+  } catch {}
+
+  // Tier 3: raw zlib
   return extractPdfTextZlib(buf);
 }
 
@@ -131,8 +167,8 @@ Formato risposta:
 
 export async function POST(req: Request) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: 'OPENAI_API_KEY non configurata.' }, { status: 500 });
+    if (!deepseek.apiKey) {
+      return NextResponse.json({ error: 'DEEPSEEK_API_KEY non configurata.' }, { status: 500 });
     }
 
     const form = await req.formData();
@@ -155,8 +191,8 @@ export async function POST(req: Request) {
       contents.push(await fileToOpenAiContent(cartaIdentitaFile));
     }
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const response = await deepseek.chat.completions.create({
+      model: 'deepseek-chat',
       messages: [
         { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
         { role: 'user', content: contents },
@@ -184,7 +220,7 @@ export async function POST(req: Request) {
         email_pec: extracted.email_pec || null,
         telefono: extracted.telefono || null,
       },
-      model: 'gpt-4o',
+      model: 'deepseek-chat',
     });
   } catch (e) {
     return NextResponse.json(

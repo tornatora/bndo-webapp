@@ -1,0 +1,605 @@
+{
+  "name": "Invitalia 2026-04-23_00-01",
+  "bandoKey": "resto-al-sud-2-0",
+  "proceduraKey": "default",
+  "domain": "invitalia-areariservata-fe.npi.invitalia.it",
+  "saveMode": "new_version",
+  "status": "active",
+  "requiresFinalConfirmation": true,
+  "expectedDurationSeconds": 320,
+  "fieldMapping": {
+    "recorded.1776895429198": "Piano Integrato Autoimpiego",
+    "recorded.1776895444343": "1: Object",
+    "recorded.1776895450320": "Libero professionista",
+    "recorded.1776895461095": "0001-09-25",
+    "recorded.1776895461327": "0019-09-25",
+    "recorded.1776895461527": "0199-09-25",
+    "recorded.1776895462217": "1996-09-25",
+    "recorded.1776895466504": "Cinquefrondi",
+    "recorded.1776895468141": "Cinquefrondi"
+  },
+  "steps": [
+    {
+      "type": "goto",
+      "url": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "waitUntil": "load",
+      "actionKind": "goto",
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    },
+    {
+      "type": "scroll",
+      "direction": "down",
+      "amount": 320,
+      "actionKind": "scroll",
+      "stepId": "step_1776895427469_2",
+      "pageKey": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "tabKey": "a5ad4aef-dadd-4405-a256-d27b55f5dc99",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 320
+      },
+      "scrollMeta": {
+        "startY": 0,
+        "endY": 320,
+        "deltaY": 320,
+        "semanticReason": "section_scroll"
+      },
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "css": "#mat-select-value-5",
+        "id": "mat-select-value-5",
+        "tag": "div",
+        "text": "Seleziona",
+        "xpath": "/html[0]/body[1]/app-root[1]/div[1]/home[1]/div[4]/div[1]/presenta-domanda[1]/div[1]/div[1]/div[1]/div[2]/mat-form-field[1]/div[1]/div[1]/div[1]/mat-select[1]/div[1]/div[1]"
+      },
+      "actionKind": "click_only",
+      "stepId": "step_1776895428048_3",
+      "pageKey": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "tabKey": "a5ad4aef-dadd-4405-a256-d27b55f5dc99",
+      "anchor": "mat-select-value-5 | Seleziona",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 320
+      },
+      "targetHint": "mat-select-value-5 Seleziona",
+      "clickPoint": {
+        "xRatio": 0.316,
+        "yRatio": 0.4909
+      },
+      "timing": {
+        "preDelayMs": 579
+      }
+    },
+    {
+      "type": "select",
+      "target": {
+        "css": "#mat-option-18",
+        "id": "mat-option-18",
+        "role": "option",
+        "tag": "mat-option",
+        "text": "Piano Integrato Autoimpiego",
+        "xpath": "/html[0]/body[1]/div[8]/div[2]/div[1]/div[1]/div[1]/mat-option[3]"
+      },
+      "valueFrom": "recorded.1776895429198",
+      "actionKind": "select_option",
+      "stepId": "step_1776895429198_4",
+      "pageKey": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "tabKey": "a5ad4aef-dadd-4405-a256-d27b55f5dc99",
+      "anchor": "mat-option-18 | option | Piano Integrato Autoimpiego",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 320
+      },
+      "targetHint": "mat-option-18 Piano Integrato Autoimpiego",
+      "clickPoint": {
+        "xRatio": 0.2996,
+        "yRatio": 0.3299
+      },
+      "timing": {
+        "preDelayMs": 1150
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "inputType": "button",
+        "tag": "button",
+        "text": "Presenta la domanda",
+        "xpath": "/html[0]/body[1]/app-root[1]/div[1]/home[1]/div[4]/div[1]/presenta-domanda[1]/div[1]/div[1]/div[2]/button[1]"
+      },
+      "actionKind": "submit",
+      "stepId": "step_1776895430741_5",
+      "pageKey": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "tabKey": "a5ad4aef-dadd-4405-a256-d27b55f5dc99",
+      "anchor": "Presenta la domanda",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 320
+      },
+      "targetHint": "Presenta la domanda",
+      "clickPoint": {
+        "xRatio": 0.2573,
+        "yRatio": 0.4601
+      },
+      "timing": {
+        "preDelayMs": 1543
+      }
+    },
+    {
+      "type": "goto",
+      "url": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "waitUntil": "load",
+      "actionKind": "goto",
+      "stepId": "step_1776895430743_6",
+      "pageKey": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "tabKey": "a5ad4aef-dadd-4405-a256-d27b55f5dc99",
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 320
+      }
+    },
+    {
+      "type": "goto",
+      "url": "https://presentazione-domanda-pia.npi.invitalia.it/",
+      "waitUntil": "load",
+      "actionKind": "goto",
+      "stepId": "step_1776895431038_1",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "tag": "div",
+        "text": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI ",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[1]/div[2]"
+      },
+      "actionKind": "click_only",
+      "stepId": "step_1776895434014_2",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI",
+      "clickPoint": {
+        "xRatio": 0.9576,
+        "yRatio": 0.1383
+      },
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "scroll",
+      "direction": "down",
+      "amount": 1753,
+      "target": {
+        "tag": "div",
+        "text": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI ",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[1]/div[2]"
+      },
+      "actionKind": "scroll",
+      "stepId": "step_1776895435403_3",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "scrollMeta": {
+        "startY": 7,
+        "endY": 1761,
+        "deltaY": 1753,
+        "semanticReason": "reached_bottom"
+      },
+      "targetHint": "INFORMATIVA EX ART. 13 DEL REGOLAMENTO (UE) 679 DEL 2016 PER LA CONCESSIONE DELLE AGEVOLAZIONI PREVISTE DALLE MISURE DI",
+      "timing": {
+        "preDelayMs": 1389
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "css": "#acknowledgement",
+        "id": "acknowledgement",
+        "inputType": "checkbox",
+        "label": "Presa visione",
+        "name": "acknowledgement",
+        "tag": "input",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[1]/div[3]/div[1]/input[1]"
+      },
+      "actionKind": "click_only",
+      "stepId": "step_1776895437969_4",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Presa visione | acknowledgement | acknowledgement",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "acknowledgement acknowledgement",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "select",
+      "target": {
+        "css": "#lineaIntervento",
+        "id": "lineaIntervento",
+        "label": "Linea di intervento",
+        "name": "lineaIntervento",
+        "tag": "select",
+        "text": "Scegli un'opzione Capo III - Autoimpiego Centro-Nord Capo IV - Resto al Sud 2.0",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[2]/div[1]/div[1]/div[1]/div[1]/div[1]/select[1]"
+      },
+      "valueFrom": "client.zip",
+      "actionKind": "select_option",
+      "stepId": "step_1776895441960_5",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Linea di intervento | lineaIntervento | lineaIntervento | Scegli un'opzione Capo III - Autoimpiego Centro-Nord Capo IV - Resto al Sud 2.0",
+      "confidence": "medium",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "lineaIntervento lineaIntervento Scegli un'opzione Capo III - Autoimpiego Centro-Nord Capo IV - Resto al Sud 2.0",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "select",
+      "target": {
+        "css": "#tipologiaProponente",
+        "id": "tipologiaProponente",
+        "label": "Tipologia di proponente",
+        "name": "tipologiaProponente",
+        "tag": "select",
+        "text": "Scegli un'opzione Voucher Lavoratore autonomo-libero professionista Contributo B-C Lav. autonomo-libero professionista C",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/select[1]"
+      },
+      "valueFrom": "recorded.1776895444343",
+      "actionKind": "select_option",
+      "stepId": "step_1776895444343_6",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Tipologia di proponente | tipologiaProponente | tipologiaProponente | Scegli un'opzione Voucher Lavoratore autonomo-libero professionista Contributo B-C Lav. autonomo-libero professionista C",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "tipologiaProponente tipologiaProponente Scegli un'opzione Voucher Lavoratore autonomo-libero professionista Contributo B",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "tag": "button",
+        "text": "Inizia la compilazione",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/sticky-btn-bar[1]/div[1]/div[2]/button[1]"
+      },
+      "actionKind": "submit",
+      "stepId": "step_1776895445764_7",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/info-privacy",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Inizia la compilazione",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "Inizia la compilazione",
+      "clickPoint": {
+        "xRatio": 0.4224,
+        "yRatio": 0.54
+      },
+      "timing": {
+        "preDelayMs": 1421
+      }
+    },
+    {
+      "type": "select",
+      "target": {
+        "css": "#ngb-typeahead-0-0",
+        "id": "ngb-typeahead-0-0",
+        "inputType": "button",
+        "role": "option",
+        "tag": "button",
+        "text": "Libero professionista",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[2]/ngb-typeahead-window[1]/cdk-virtual-scroll-viewport[1]/div[1]/button[1]"
+      },
+      "valueFrom": "recorded.1776895450320",
+      "actionKind": "select_option",
+      "stepId": "step_1776895450320_8",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "ngb-typeahead-0-0 | option | Libero professionista",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "ngb-typeahead-0-0 Libero professionista",
+      "clickPoint": {
+        "xRatio": 0.4239,
+        "yRatio": 0.6808
+      },
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "css": "#Nome",
+        "id": "Nome",
+        "inputType": "text",
+        "label": "Nome",
+        "name": "Nome",
+        "placeholder": "Inserire un valore",
+        "tag": "input",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[3]/input[1]"
+      },
+      "valueFrom": "client.fullName",
+      "actionKind": "type",
+      "stepId": "step_1776895453712_9",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Nome | Inserire un valore | Nome | Nome",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "Nome Nome",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "css": "#Cognome",
+        "id": "Cognome",
+        "inputType": "text",
+        "label": "Cognome",
+        "name": "Cognome",
+        "placeholder": "Inserire un valore",
+        "tag": "input",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[4]/input[1]"
+      },
+      "valueFrom": "client.fullName",
+      "actionKind": "type",
+      "stepId": "step_1776895457251_10",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Cognome | Inserire un valore | Cognome | Cognome",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "Cognome Cognome",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "css": "#DataDiNascita",
+        "id": "DataDiNascita",
+        "inputType": "date",
+        "label": "Data di nascita",
+        "name": "DataDiNascita",
+        "placeholder": "Inserire un valore",
+        "tag": "input",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[5]/input[1]"
+      },
+      "actionKind": "type",
+      "stepId": "step_1776895457262_11",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Data di nascita | Inserire un valore | DataDiNascita | DataDiNascita",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "DataDiNascita DataDiNascita",
+      "clickPoint": {
+        "xRatio": 0.0833,
+        "yRatio": 0.6616
+      },
+      "timing": {
+        "preDelayMs": 20
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "css": "#DataDiNascita",
+        "id": "DataDiNascita",
+        "inputType": "date",
+        "label": "Data di nascita",
+        "name": "DataDiNascita",
+        "placeholder": "Inserire un valore",
+        "tag": "input",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[5]/input[1]"
+      },
+      "valueFrom": "recorded.1776895462217",
+      "actionKind": "type",
+      "stepId": "step_1776895462217_15",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Data di nascita | Inserire un valore | DataDiNascita | DataDiNascita",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "DataDiNascita DataDiNascita",
+      "timing": {
+        "preDelayMs": 690
+      }
+    },
+    {
+      "type": "select",
+      "target": {
+        "css": "#ngb-typeahead-2-0",
+        "id": "ngb-typeahead-2-0",
+        "inputType": "button",
+        "role": "option",
+        "tag": "button",
+        "text": "Cinquefrondi",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[6]/ngb-typeahead-window[1]/cdk-virtual-scroll-viewport[1]/div[1]/button[1]"
+      },
+      "valueFrom": "recorded.1776895466504",
+      "actionKind": "select_option",
+      "stepId": "step_1776895466504_16",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "ngb-typeahead-2-0 | option | Cinquefrondi",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "ngb-typeahead-2-0 Cinquefrondi",
+      "clickPoint": {
+        "xRatio": 0.2489,
+        "yRatio": 0.6392
+      },
+      "timing": {
+        "preDelayMs": 1600
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "css": "#LuogoDiNascita",
+        "id": "LuogoDiNascita",
+        "inputType": "text",
+        "label": "Luogo di nascita",
+        "name": "LuogoDiNascita",
+        "placeholder": "Scegliere un valore dall'elenco",
+        "role": "combobox",
+        "tag": "input",
+        "testId": "Luogo di nascita",
+        "xpath": "/html[0]/body[1]/app-root[1]/app-layout[1]/div[1]/div[2]/div[1]/ng-component[1]/div[1]/div[1]/div[3]/div[1]/ng-component[1]/form[1]/form[1]/div[2]/div[6]/input[1]"
+      },
+      "valueFrom": "recorded.1776895468141",
+      "actionKind": "type",
+      "stepId": "step_1776895468141_17",
+      "pageKey": "https://presentazione-domanda-pia.npi.invitalia.it/domanda/a2a7bd7e-f44c-43ad-bf0b-68554903c699/persona-giuridica/af80ccb3-4eb5-41dd-a50c-109ddedb4707",
+      "tabKey": "31892b81-17e7-4392-8769-1a52d314fbbe",
+      "anchor": "Luogo di nascita | Luogo di nascita | Scegliere un valore dall'elenco | LuogoDiNascita | LuogoDiNascita | combobox",
+      "confidence": "low",
+      "reviewRequired": true,
+      "confirmationStatus": "confirmed",
+      "viewport": {
+        "width": 1470,
+        "height": 740,
+        "scrollX": 0,
+        "scrollY": 0
+      },
+      "targetHint": "Luogo di nascita LuogoDiNascita LuogoDiNascita",
+      "timing": {
+        "preDelayMs": 1600
+      }
+    }
+  ]
+}

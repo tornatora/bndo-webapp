@@ -1,6 +1,22 @@
 import type { ExtractedData } from './types';
 import { callPdfExtractFunction } from '@/lib/pdf/extractPdfText';
 
+// Polyfill DOM APIs needed by pdf-parse/pdfjs-dist on Netlify Lambda
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class {
+    a=1;b=0;c=0;d=1;e=0;f=0;
+    constructor(init?: string) {
+      if (typeof init === 'string' && init.startsWith('matrix(')) {
+        const p = init.slice(7,-1).split(',').map(Number);
+        this.a=p[0];this.b=p[1];this.c=p[2];this.d=p[3];this.e=p[4];this.f=p[5];
+      }
+    }
+  };
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  (globalThis as any).Path2D = class {};
+}
+
 function normalizeForMatch(value: string) {
   return value
     .toLowerCase()
