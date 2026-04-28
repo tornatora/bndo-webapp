@@ -12,10 +12,21 @@ import { loadFlowTemplate } from '@/lib/compila-bando/flow-template';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const B2C_AUTHORITY = 'https://minervaorgb2c.b2clogin.com/minervaorgb2c.onmicrosoft.com/b2c_1a_invitalia_signin/oauth2/v2.0/authorize';
+const B2C_AUTHORITY =
+  'https://minervaorgb2c.b2clogin.com/minervaorgb2c.onmicrosoft.com/b2c_1a_invitalia_signin/oauth2/v2.0/authorize';
 const B2C_CLIENT_ID = '74cea3c0-5ab9-4414-bf4d-9c80b9824a9f';
 const B2C_REDIRECT = 'https://invitalia-areariservata-fe.npi.invitalia.it/home';
 const B2C_SCOPES = 'openid profile offline_access';
+
+// IMPORTANT:
+// We must NOT deep-link directly to the B2C /authorize URL for SPID login.
+// Invitalia's frontend uses MSAL (PKCE) and expects to have generated/stored the code_verifier
+// in-browser before starting the authorization request. If we start /authorize ourselves, the
+// user can hit AADB2C99059 ("must present a code_challenge") or complete login but then fail
+// to redeem the code because the verifier is missing/mismatched.
+//
+// Therefore we prime the remote browser to Invitalia's home, and the user initiates SPID from there.
+const INVITALIA_HOME_URL = 'https://invitalia-areariservata-fe.npi.invitalia.it/home';
 
 function base64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -101,13 +112,6 @@ function mapClientData(extracted: ExtractedData) {
   };
 }
 
-const SPID_LOGIN_URL =
-  'https://minervaorgb2c.b2clogin.com/minervaorgb2c.onmicrosoft.com/b2c_1a_invitalia_signin/oauth2/v2.0/authorize' +
-  '?client_id=74cea3c0-5ab9-4414-bf4d-9c80b9824a9f' +
-  '&scope=openid%20profile%20offline_access' +
-  '&redirect_uri=https%3A%2F%2Finvitalia-areariservata-fe.npi.invitalia.it%2Fhome' +
-  '&response_mode=fragment&response_type=code&x-client-SKU=msal.js.browser&x-client-VER=2.32.2&client_info=1';
-
 export async function POST(req: Request) {
   let browserbaseSessionId: string | null = null;
 
@@ -190,7 +194,7 @@ export async function POST(req: Request) {
         if (!session.connectUrl || !session.liveViewUrl) {
           providerError = 'Sessione Browserbase incompleta: connectUrl/liveViewUrl mancanti.';
         } else {
-          void primeBrowserbaseSessionToInvitalia(session.connectUrl, SPID_LOGIN_URL);
+          void primeBrowserbaseSessionToInvitalia(session.connectUrl, INVITALIA_HOME_URL);
           status = 'live';
           provider = 'browserbase';
         }
