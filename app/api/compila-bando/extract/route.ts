@@ -26,7 +26,7 @@ const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com/v1',
 });
 
-async function extractPdfText(buf: Buffer, _baseUrl?: string): Promise<string> {
+async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
   // Tier 1: native require bypassing webpack (same mechanism as the working standalone function)
   try {
     const nativeReq: any =
@@ -42,24 +42,32 @@ async function extractPdfText(buf: Buffer, _baseUrl?: string): Promise<string> {
     if (text.length >= 80) return text;
   } catch {}
 
-  // Tier 2: HTTP call to standalone Netlify function (http://localhost:8888 in netlify dev)
-  try {
-    const base = process.env.DEPLOY_PRIME_URL || process.env.URL || '';
-    if (base) {
+  // Tier 2: HTTP call to standalone Netlify function
+  // Try multiple sources for the base URL (env vars may not be available in Next.js Lambda)
+  const bases = [
+    process.env.DEPLOY_PRIME_URL,
+    process.env.URL,
+    baseUrl,
+    'https://bndo.it',
+    'https://cheerful-cobbler-f23efc.netlify.app',
+  ].filter((b): b is string => !!b && b.length > 0);
+
+  for (const base of bases) {
+    try {
       const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
       const formData = new FormData();
       formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
       const res = await fetch(fnUrl, {
         method: 'POST',
         body: formData,
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {
         const json = await res.json();
         if (json.text?.length >= 80) return json.text;
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // Tier 3: raw zlib
   return extractPdfTextZlib(buf);
@@ -119,11 +127,11 @@ function extractPdfTextZlib(buf: Buffer): string {
   return textParts.join(' ');
 }
 
-async function fileToOpenAiContent(file: File): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart> {
+async function fileToOpenAiContent(file: File, baseUrl?: string): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart> {
   const buf = Buffer.from(await file.arrayBuffer());
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (isPdf) {
-    const text = await extractPdfText(buf);
+    const text = await extractPdfText(buf, baseUrl);
     return { type: 'text', text: `=== DOCUMENTO PDF ===\n${text}\n=== FINE DOCUMENTO ===` };
   }
   return {
@@ -179,16 +187,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Carica almeno un documento.' }, { status: 400 });
     }
 
+    // Derive base URL from request for calling standalone function
+    const host = req.headers.get('host') || '';
+    const proto = host.startsWith('localhost') || host.startsWith('127.0.0.1') || host.startsWith('192.168') ? 'http' : 'https';
+    const baseUrl = host ? `${proto}://${host}` : '';
+
     const contents: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
       { type: 'text', text: 'Estrai i dati da questi documenti.' },
     ];
 
     if (visuraFile) {
-      contents.push(await fileToOpenAiContent(visuraFile));
+      contents.push(await fileToOpenAiContent(visuraFile, baseUrl));
     }
 
     if (cartaIdentitaFile) {
-      contents.push(await fileToOpenAiContent(cartaIdentitaFile));
+      contents.push(await fileToOpenAiContent(cartaIdentitaFile, baseUrl));
     }
 
     const response = await deepseek.chat.completions.create({
