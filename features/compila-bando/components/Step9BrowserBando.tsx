@@ -363,7 +363,6 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                   src={session.liveViewUrl}
                   style={{ width: '100%', height: '100%', border: 'none' }}
                   title="Browserbase Live Browser"
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
                 />
               )}
 
