@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { Check, Loader2, Send, ExternalLink } from 'lucide-react';
-import { useAutoFill } from '../hooks/useAutoFill';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Loader2, RefreshCcw, Send } from 'lucide-react';
+import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
 import s from '../styles/compila-bando.module.css';
@@ -18,101 +18,204 @@ type Phase =
   | 'loading'
   | 'spid-login'
   | 'spid-auth-wait'
-  | 'spid-authenticated'
   | 'auto-filling'
   | 'uploading-docs'
   | 'ready-to-submit'
   | 'submitted';
 
-interface AutoFillApiResponse {
-  status: 'live' | 'demo';
-  client: Record<string, string>;
+type SessionData = {
+  liveViewUrl: string;
+  connectUrl: string;
+  sessionId: string;
+  provider: string;
+  sessionExpiresAt: string | null;
+};
+
+type AutoFillResponse = {
+  status?: 'live' | 'demo';
+  provider?: string;
   liveViewUrl?: string | null;
+  connectUrl?: string | null;
   browserbaseSessionId?: string | null;
-  flowTemplate?: { name: string; bandoKey: string; stepsCount: number; expectedDurationSeconds: number } | null;
-  error?: string;
+  sessionExpiresAt?: string | null;
+  providerError?: string | null;
+};
+
+function buildClientPayload(extracted: ExtractedData) {
+  return {
+    firstName: extracted.nome_legale_rappresentante?.split(' ')[0] || '',
+    lastName: extracted.nome_legale_rappresentante?.split(' ').slice(1).join(' ') || '',
+    fullName: extracted.nome_legale_rappresentante || '',
+    zip: (extracted.sede_legale?.match(/\b(\d{5})\b/) || [])[1] || '',
+    province: (extracted.sede_legale?.match(/\(([A-Z]{2})\)/) || [])[1] || '',
+    city: (extracted.sede_legale?.match(/^([^,(]+)/) || [])[1]?.trim() || '',
+    pec: extracted.email_pec || '',
+    phone: extracted.telefono || '',
+    ragioneSociale: extracted.ragione_sociale || '',
+    codiceFiscale: extracted.codice_fiscale || '',
+    partitaIva: extracted.partita_iva || '',
+    rea: extracted.rea || '',
+    sedeLegale: extracted.sede_legale || '',
+    formaGiuridica: extracted.forma_giuridica || '',
+  };
 }
 
-export function Step9BrowserBando({ extracted, spidAuthenticated, onSpidLogin, onComplete }: Props) {
+export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthenticated, onSpidLogin, onComplete }: Props) {
   const [phase, setPhase] = useState<Phase>('loading');
-  const [liveViewUrl, setLiveViewUrl] = useState<string | null>(null);
-  const [isLive, setIsLive] = useState(false);
-  const [sessionError, setSessionError] = useState('');
-  const [apiResult, setApiResult] = useState<AutoFillApiResponse | null>(null);
-  const { fillingFields, completedFields, allDone, startAutoFill } = useAutoFill();
+  const [session, setSession] = useState<SessionData | null>(null);
+  const [flowResult, setFlowResult] = useState<string | null>(null);
+  const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const initRef = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const fieldValues: Record<string, string> = {};
-  FORM_FIELDS.forEach((f) => {
-    if (extracted[f.key]) fieldValues[f.label] = extracted[f.key];
-  });
+  const initializeSession = useCallback(async () => {
+    setIsInitializing(true);
+    setPhase('loading');
+    setSession(null);
+    setDisconnectNotice(null);
+    setFlowResult(null);
 
-  const callAutoFillApi = useCallback(async () => {
+    const fieldValues: Record<string, string> = {};
+    FORM_FIELDS.forEach((field) => {
+      const value = (extracted as Record<string, string | undefined>)[field.key];
+      if (value) fieldValues[field.key] = value;
+    });
+
     try {
-      const res = await fetch('/api/compila-bando/auto-fill', {
+      const response = await fetch('/api/compila-bando/auto-fill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: extracted }),
+        body: JSON.stringify({ data: fieldValues }),
       });
+      const data = (await response.json()) as AutoFillResponse;
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: '' }));
-        throw new Error(err.error || `Errore ${res.status}`);
+      if (
+        data.status === 'live' &&
+        data.liveViewUrl &&
+        data.connectUrl &&
+        data.browserbaseSessionId
+      ) {
+        setSession({
+          liveViewUrl: data.liveViewUrl,
+          connectUrl: data.connectUrl,
+          sessionId: data.browserbaseSessionId,
+          provider: data.provider || 'browserbase',
+          sessionExpiresAt: data.sessionExpiresAt || null,
+        });
+        setPhase('spid-login');
+        return;
       }
 
-      const json: AutoFillApiResponse = await res.json();
-      setApiResult(json);
-
-      if (json.status === 'live' && json.liveViewUrl) {
-        setLiveViewUrl(json.liveViewUrl);
-        setIsLive(true);
-      } else if (json.status === 'demo') {
-        setIsLive(false);
-      }
-    } catch (e) {
-      setSessionError(e instanceof Error ? e.message : 'Errore avvio sessione');
-      setIsLive(false);
+      setPhase('spid-login');
+      setFlowResult(
+        data.providerError
+          ? `Errore provider Browserbase: ${data.providerError}`
+          : 'Browserbase non disponibile. Verifica le variabili env.'
+      );
+    } catch (error) {
+      setPhase('spid-login');
+      setFlowResult(
+        `Errore inizializzazione sessione: ${
+          error instanceof Error ? error.message : 'errore non gestito'
+        }`
+      );
+    } finally {
+      setIsInitializing(false);
     }
   }, [extracted]);
 
-  // Avvia la chiamata API all'inizio
   useEffect(() => {
-    void callAutoFillApi().then(() => setPhase('spid-login'));
-  }, [callAutoFillApi]);
+    if (initRef.current) return;
+    initRef.current = true;
+    void initializeSession();
+  }, [initializeSession]);
 
-  const handleSpidClick = useCallback(async () => {
+  useEffect(() => {
+    function handleIframeMessage(event: MessageEvent) {
+      if (event.data !== 'browserbase-disconnected') return;
+
+      setDisconnectNotice('Connessione al browser cloud interrotta.');
+      setFlowResult('Sessione browser disconnessa. Riconnetti e ripeti l\'accesso SPID.');
+      setIsExecuting(false);
+      setPhase('spid-login');
+    }
+
+    window.addEventListener('message', handleIframeMessage);
+    return () => window.removeEventListener('message', handleIframeMessage);
+  }, []);
+
+  const handleRetrySession = useCallback(() => {
+    void initializeSession();
+  }, [initializeSession]);
+
+  const handleSpidClick = useCallback(() => {
     setPhase('spid-auth-wait');
-    onSpidLogin();
+  }, []);
 
-    // Simula autenticazione SPID
-    setTimeout(() => {
-      setPhase('spid-authenticated');
-    }, 2500);
+  const handleSpidComplete = useCallback(async () => {
+    if (!session) return;
 
-    // Dopo autenticazione, avvia auto-fill animato
-    setTimeout(() => {
-      setPhase('auto-filling');
-      startAutoFill(fieldValues, () => {
-        setTimeout(() => {
-          setPhase('uploading-docs');
-          setTimeout(() => {
-            setPhase('ready-to-submit');
-          }, 2000);
-        }, 600);
+    setDisconnectNotice(null);
+    setPhase('auto-filling');
+    setFlowResult(null);
+    setIsExecuting(true);
+
+    try {
+      const response = await fetch('/api/compila-bando/execute-flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connectUrl: session.connectUrl,
+          client: buildClientPayload(extracted),
+        }),
       });
-    }, 3500);
-  }, [onSpidLogin, fieldValues, startAutoFill]);
+
+      const data = (await response.json()) as
+        | FlowExecutionResult
+        | { error?: string; ok?: false; failedSteps?: Array<{ error?: string }> };
+
+      if ('ok' in data && data.ok) {
+        onSpidLogin();
+        const failedCount = data.failedSteps.length;
+        setFlowResult(
+          failedCount > 0
+            ? `Compilazione quasi completata: ${data.stepsExecuted} step ok, ${failedCount} da rifinire.`
+            : `Compilazione completata: ${data.stepsExecuted} step eseguiti in ${data.elapsedMs}ms.`
+        );
+        setPhase('uploading-docs');
+        return;
+      }
+
+      const failMsg =
+        'error' in data && data.error
+          ? data.error
+          : Array.isArray((data as { failedSteps?: Array<{ error?: string }> }).failedSteps) &&
+            (data as { failedSteps?: Array<{ error?: string }> }).failedSteps![0]?.error
+          ? (data as { failedSteps?: Array<{ error?: string }> }).failedSteps![0].error
+          : 'Errore sconosciuto in execute-flow';
+
+      setFlowResult(`Errore compilazione: ${failMsg}`);
+      setPhase('spid-auth-wait');
+    } catch (error) {
+      setFlowResult(`Errore compilazione: ${error instanceof Error ? error.message : 'errore non gestito'}`);
+      setPhase('spid-auth-wait');
+    } finally {
+      setIsExecuting(false);
+    }
+  }, [session, extracted, onSpidLogin]);
+
+  useEffect(() => {
+    if (phase !== 'uploading-docs') return;
+    const timer = setTimeout(() => setPhase('ready-to-submit'), 2_000);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   const handleSubmit = useCallback(() => {
     setPhase('submitted');
     setTimeout(onComplete, 800);
   }, [onComplete]);
-
-  const spidLoginUrl =
-    'https://minervaorgb2c.b2clogin.com/minervaorgb2c.onmicrosoft.com/b2c_1a_invitalia_signin/oauth2/v2.0/authorize' +
-    '?client_id=74cea3c0-5ab9-4414-bf4d-9c80b9824a9f' +
-    '&scope=openid%20profile%20offline_access' +
-    '&redirect_uri=https%3A%2F%2Finvitalia-areariservata-fe.npi.invitalia.it%2Fhome' +
-    '&response_mode=fragment&response_type=code&x-client-SKU=msal.js.browser&x-client-VER=2.32.2&client_info=1';
 
   return (
     <div>
@@ -121,38 +224,17 @@ export function Step9BrowserBando({ extracted, spidAuthenticated, onSpidLogin, o
       </h2>
       <p className={s.cbCardSubtitle} style={{ marginBottom: 20 }}>
         {phase === 'loading'
-          ? 'Avvio sessione browser...'
-          : phase === 'spid-login' || phase === 'spid-auth-wait'
-          ? 'Accedi con SPID per autenticarti sul portale Invitalia.'
-          : phase === 'spid-authenticated'
-          ? 'Accesso completato. L\'Agente AI iniziera la compilazione automatica.'
+          ? 'Avvio sessione browser cloud...'
+          : phase === 'submitted'
+          ? 'Domanda inviata con successo!'
+          : phase === 'spid-auth-wait'
+          ? 'Completa l\'autenticazione SPID nel browser qui sotto, poi clicca "Ho completato"'
           : phase === 'auto-filling'
-          ? 'L\'Agente AI sta compilando i campi del bando...'
-          : phase === 'uploading-docs'
-          ? 'Caricamento dei documenti generati in corso...'
-          : phase === 'ready-to-submit'
-          ? 'Tutti i campi sono stati compilati. Verifica e invia la domanda.'
-          : 'Domanda inviata con successo!'}
+          ? 'L\'Agente AI sta compilando la domanda sul sito reale di Invitalia...'
+          : 'Browser cloud connesso — autenticati con SPID per proseguire'}
       </p>
 
-      {sessionError && (
-        <div
-          style={{
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: 12,
-            padding: '12px 16px',
-            marginBottom: 16,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <span style={{ fontSize: 13, color: '#991b1b' }}>{sessionError}</span>
-        </div>
-      )}
-
-      {isLive && liveViewUrl && (
+      {(phase === 'auto-filling' || phase === 'uploading-docs' || phase === 'ready-to-submit') && (
         <div
           style={{
             background: '#ecfdf5',
@@ -168,16 +250,52 @@ export function Step9BrowserBando({ extracted, spidAuthenticated, onSpidLogin, o
           }}
         >
           <Check size={14} />
-          Sessione Browserbase attiva &middot; Browser reale in esecuzione
-          <a
-            href={liveViewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, color: '#059669', textDecoration: 'underline' }}
-          >
-            <ExternalLink size={12} />
-            Apri in nuova finestra
-          </a>
+          Autenticato come: {extracted.nome_legale_rappresentante || 'MARIO ROSSI'} — Invitalia Area
+          Riservata
+        </div>
+      )}
+
+      {disconnectNotice && (
+        <div
+          style={{
+            background: '#fff7ed',
+            border: '1px solid #fed7aa',
+            borderRadius: 10,
+            padding: '10px 14px',
+            marginBottom: 12,
+            fontSize: 12,
+            color: '#9a3412',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={14} />
+            {disconnectNotice}
+          </span>
+          <button className={s.cbBtnMuted} onClick={handleRetrySession} type="button" disabled={isInitializing}>
+            <RefreshCcw size={14} />
+            Riconnetti sessione
+          </button>
+        </div>
+      )}
+
+      {flowResult && (
+        <div
+          style={{
+            background: flowResult.includes('Errore') ? '#fef2f2' : '#ecfdf5',
+            border: `1px solid ${flowResult.includes('Errore') ? '#fecaca' : '#a7f3d0'}`,
+            borderRadius: 10,
+            padding: '8px 14px',
+            marginBottom: 12,
+            fontSize: 12,
+            color: flowResult.includes('Errore') ? '#991b1b' : '#065f46',
+          }}
+        >
+          {flowResult}
         </div>
       )}
 
@@ -193,213 +311,301 @@ export function Step9BrowserBando({ extracted, spidAuthenticated, onSpidLogin, o
               ? 'Caricamento...'
               : phase === 'spid-login' || phase === 'spid-auth-wait'
               ? 'minervaorgb2c.b2clogin.com — Accesso SPID Invitalia'
-              : phase === 'spid-authenticated' || phase === 'auto-filling' || phase === 'uploading-docs' || phase === 'ready-to-submit'
-              ? 'invitalia-areariservata.npi.invitalia.it — Area Riservata'
-              : 'invitalia.it — Domanda inviata'}
+              : phase === 'submitted'
+              ? 'invitalia-areariservata-fe.npi.invitalia.it — Domanda Inviata'
+              : 'invitalia-areariservata-fe.npi.invitalia.it — Domanda di Candidatura'}
           </div>
         </div>
 
         <div className={s.cbBrowserContent}>
-          {/* Browserbase Live View: mostra la pagina SPID reale */}
-          {(phase === 'spid-login' || phase === 'spid-auth-wait') && isLive && liveViewUrl && (
-            <iframe
-              src={liveViewUrl}
-              style={{ width: '100%', height: '100%', border: 'none', borderRadius: '0 0 12px 12px' }}
-              title="Browserbase Live View - SPID Login"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
-          )}
-
-          {/* Versione simulata (DEMO) quando Browserbase non e disponibile */}
-          {(phase === 'spid-login' || phase === 'spid-auth-wait') && !isLive && (
-            <>
-              {phase === 'spid-login' && (
-                <div style={{ padding: 32, textAlign: 'center' }}>
-                  <div className={`${s.cbSpidStatus} ${s.cbSpidStatusWaiting}`}>
-                    <Loader2 size={16} className={s.cbSpinner} />
-                    Pagina di login SPID pronta
-                  </div>
-                  <button className={s.cbBtnGreen} onClick={handleSpidClick} type="button" style={{ marginTop: 16 }}>
-                    Accedi con SPID
-                  </button>
-                  <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 12 }}>
-                    DEMO MODE — Browserbase non configurato. L&apos;autenticazione e simulata.
-                  </p>
-                </div>
-              )}
-
-              {phase === 'spid-auth-wait' && (
-                <div style={{ padding: 32, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                  <div style={{ marginBottom: 24, padding: 16, background: '#f0f2f5', borderRadius: 12, maxWidth: 320 }}>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: '#0b1136', margin: '0 0 12px' }}>
-                      Scegli il tuo provider SPID
-                    </p>
-                    {['Poste Italiane', 'Aruba', 'Sielte', 'Infocert'].map((p, i) => (
-                      <div
-                        key={p}
-                        style={{
-                          padding: '10px 14px',
-                          margin: '0 0 6px',
-                          background: i === 0 ? 'rgba(34,197,95,0.08)' : '#ffffff',
-                          border: i === 0 ? '1px solid rgba(34,197,95,0.3)' : '1px solid #e8ecf4',
-                          borderRadius: 10,
-                          fontSize: 13,
-                          fontWeight: i === 0 ? 600 : 400,
-                          color: i === 0 ? '#16a34a' : '#0b1136',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                        }}
-                      >
-                        {i === 0 && <Check size={14} />}
-                        {p}
-                      </div>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 12, color: '#64748b' }}>
-                    Autenticazione in corso con Poste Italiane...
-                  </p>
-                  <Loader2 size={16} className={s.cbSpinner} style={{ marginTop: 8 }} />
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Se Browserbase e live, mostra anche dopo il login */}
-          {(phase === 'spid-authenticated' || phase === 'auto-filling' || phase === 'uploading-docs' || phase === 'ready-to-submit') && isLive && liveViewUrl && (
-            <iframe
-              src={liveViewUrl}
-              style={{ width: '100%', height: '100%', border: 'none', borderRadius: '0 0 12px 12px' }}
-              title="Browserbase Live View - Invitalia"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
-          )}
-
-          {/* Autenticazione completata badge */}
-          {(phase === 'spid-authenticated' || phase === 'auto-filling' || phase === 'uploading-docs' || phase === 'ready-to-submit') && (
-            <div className={`${s.cbSpidStatus} ${s.cbSpidStatusAuth}`} style={{ margin: isLive ? 0 : 16, position: isLive ? 'absolute' : 'static', top: isLive ? 8 : 'auto', left: isLive ? 8 : 'auto', zIndex: 2 }}>
-              <Check size={16} />
-              {isLive
-                ? 'Browser Live — Invitalia Area Riservata'
-                : 'Autenticato come: MARIO ROSSI — Invitalia Area Riservata'}
-            </div>
-          )}
-
-          {/* Auto-fill overlay (DEMO) */}
-          {!isLive && (phase === 'auto-filling' || phase === 'uploading-docs' || phase === 'ready-to-submit') && (
-            <div className={s.cbAutofillOverlay}>
-              {allDone && (
-                <div className={s.cbAutofillDoneBanner}>
-                  <p className={s.cbAutofillDoneTitle}>Tutti i campi compilati</p>
-                  <p className={s.cbAutofillDoneSub}>
-                    L&apos;Agente AI ha completato l&apos;inserimento di tutti i dati
-                  </p>
-                </div>
-              )}
-
-              {FORM_FIELDS.map((f) => {
-                const label = f.label;
-                const isFieldDone = completedFields.has(label);
-                const isFieldFilling = !isFieldDone && fillingFields[label] !== undefined;
-                const displayValue = fillingFields[label] ?? (isFieldDone ? extracted[f.key] : '');
-
-                return (
-                  <div
-                    key={f.key}
-                    className={`${s.cbAutofillField} ${
-                      isFieldDone
-                        ? s.cbAutofillFieldDone
-                        : isFieldFilling
-                        ? s.cbAutofillFieldFilling
-                        : ''
-                    }`}
-                  >
-                    <span className={s.cbAutofillFieldLabel}>{label}</span>
-                    <span className={s.cbAutofillFieldValue}>
-                      {isFieldDone ? (
-                        <span style={{ color: '#16a34a' }}>{displayValue}</span>
-                      ) : isFieldFilling ? (
-                        <>
-                          {displayValue}
-                          <span style={{ animation: 'cb-pulse 0.8s step-end infinite', color: '#22c55f' }}>|</span>
-                        </>
-                      ) : (
-                        <span style={{ color: '#94a3b8' }}>In attesa...</span>
-                      )}
-                    </span>
-                    {isFieldDone && (
-                      <div className={s.cbAutofillFieldCheck}>
-                        <Check size={12} strokeWidth={4} />
-                      </div>
-                    )}
-                    {isFieldFilling && !isFieldDone && (
-                      <Loader2 size={14} className={s.cbSpinner} style={{ color: '#22c55f' }} />
-                    )}
-                  </div>
-                );
-              })}
-
-              {phase === 'uploading-docs' && (
-                <div style={{ marginTop: 16 }}>
-                  <div className={s.cbAutofillSectionTitle}>Caricamento Documenti</div>
-                  {['Scheda-Aziendale-BNDO.pdf', 'Documento-Anagrafico-BNDO.docx'].map((name, i) => (
-                    <div key={name} className={`${s.cbAutofillField} ${s.cbAutofillFieldFilling}`}>
-                      <span className={s.cbAutofillFieldLabel}>Allegato {i + 1}</span>
-                      <span className={s.cbAutofillFieldValue}>{name}</span>
-                      <Loader2 size={14} className={s.cbSpinner} style={{ color: '#22c55f' }} />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {(phase === 'uploading-docs' || phase === 'ready-to-submit') && (
-                <div style={{ marginTop: 8 }}>
-                  {['Scheda-Aziendale-BNDO.pdf', 'Documento-Anagrafico-BNDO.docx'].map((name, i) => (
-                    <div
-                      key={name}
-                      className={`${s.cbAutofillField} ${phase === 'ready-to-submit' ? s.cbAutofillFieldDone : ''}`}
-                    >
-                      <span className={s.cbAutofillFieldLabel}>Allegato {i + 1}</span>
-                      <span className={s.cbAutofillFieldValue} style={{ color: phase === 'ready-to-submit' ? '#16a34a' : '#0b1136' }}>
-                        {name}
-                      </span>
-                      {phase === 'ready-to-submit' ? (
-                        <div className={s.cbAutofillFieldCheck}>
-                          <Check size={12} strokeWidth={4} />
-                        </div>
-                      ) : (
-                        <Loader2 size={14} className={s.cbSpinner} style={{ color: '#22c55f' }} />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Bottone invio domanda */}
-          {phase === 'ready-to-submit' && (
+          {phase === 'loading' && (
             <div
               style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                padding: '16px 24px',
-                background: '#ffffff',
-                borderTop: '1px solid #e8ecf4',
-                zIndex: 3,
-                textAlign: 'center',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                flexDirection: 'column',
+                gap: 12,
               }}
             >
-              <button className={s.cbInviaBtn} onClick={handleSubmit} type="button">
-                <Send size={16} />
-                Invia Domanda
+              <Loader2 size={24} className={s.cbSpinner} />
+              <span style={{ fontSize: 13, color: '#94a3b8' }}>
+                Connessione al browser cloud Browserbase...
+              </span>
+            </div>
+          )}
+
+          {!session && phase !== 'loading' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <p style={{ fontSize: 14, color: '#ef4444' }}>Browserbase non disponibile</p>
+              <button className={s.cbBtnMuted} onClick={handleRetrySession} type="button" disabled={isInitializing}>
+                {isInitializing ? <Loader2 size={14} className={s.cbSpinner} /> : <RefreshCcw size={14} />}
+                Riprova connessione
               </button>
             </div>
           )}
 
-          {/* Stato inviato */}
+          {session && phase !== 'submitted' && (
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              {(phase === 'spid-login' || phase === 'spid-auth-wait') && (
+                <iframe
+                  ref={iframeRef}
+                  src={session.liveViewUrl}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                  title="Browserbase Live Browser"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                />
+              )}
+
+              {phase === 'spid-login' && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    padding: '16px 24px',
+                    background: 'rgba(255,255,255,0.97)',
+                    borderTop: '1px solid #e8ecf4',
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 12,
+                    flexDirection: 'column',
+                  }}
+                >
+                  <p style={{ fontSize: 12, color: '#64748b', margin: 0, textAlign: 'center' }}>
+                    Il browser qui sopra mostra la vera pagina SPID Invitalia ({session.provider}).
+                    Clicca &ldquo;Accedi con SPID&rdquo; e autenticati direttamente nell&apos;iframe.
+                  </p>
+                  {session.sessionExpiresAt && (
+                    <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
+                      Sessione valida fino a: {session.sessionExpiresAt}
+                    </p>
+                  )}
+                  <button className={s.cbBtnGreen} onClick={handleSpidClick} type="button">
+                    Accedi con SPID
+                  </button>
+                </div>
+              )}
+
+              {phase === 'spid-auth-wait' && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    padding: '16px 24px',
+                    background: 'rgba(255,255,255,0.98)',
+                    borderTop: '1px solid #e8ecf4',
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0b1136', margin: 0 }}>
+                      Scegli il provider SPID e inserisci le credenziali
+                    </p>
+                    <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
+                      Poi clicca &ldquo;Ho completato l&apos;accesso&rdquo;
+                    </p>
+                  </div>
+                  <button
+                    className={s.cbBtnGreen}
+                    onClick={handleSpidComplete}
+                    type="button"
+                    style={{ whiteSpace: 'nowrap' }}
+                    disabled={isExecuting}
+                  >
+                    {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
+                    Ho completato l&apos;accesso
+                  </button>
+                </div>
+              )}
+
+              {phase === 'auto-filling' && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    flexDirection: 'column',
+                    gap: 16,
+                    padding: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '12px 20px',
+                      background: '#f0fdf4',
+                      borderRadius: 10,
+                      border: '1px solid #bbf7d0',
+                    }}
+                  >
+                    <Loader2 size={14} className={s.cbSpinner} style={{ color: '#22c55f' }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#166534' }}>
+                      Agente AI al lavoro sul sito reale di Invitalia...
+                    </span>
+                  </div>
+
+                  {FORM_FIELDS.map((field) => {
+                    const value = (extracted as Record<string, string | undefined>)[field.key] || '';
+                    return (
+                      <div
+                        key={field.key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '10px 14px',
+                          width: '100%',
+                          maxWidth: 400,
+                          background: value ? '#f8fafc' : '#fef2f2',
+                          borderRadius: 8,
+                          border: value ? '1px solid #e2e8f0' : '1px solid #fecaca',
+                          fontSize: 13,
+                        }}
+                      >
+                        <span style={{ color: '#64748b', minWidth: 160 }}>{field.label}</span>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            color: value ? '#0b1136' : '#991b1b',
+                            flex: 1,
+                          }}
+                        >
+                          {value || 'Dato mancante'}
+                        </span>
+                        {value ? (
+                          <Check size={12} style={{ color: '#22c55e' }} />
+                        ) : (
+                          <span style={{ fontSize: 10, color: '#991b1b' }}>!</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {phase === 'uploading-docs' && (
+                <div style={{ padding: 20, overflow: 'auto', height: '100%' }}>
+                  {FORM_FIELDS.map((field) => (
+                    <div
+                      key={field.key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 14px',
+                        marginBottom: 6,
+                        background: '#f0fdf4',
+                        borderRadius: 8,
+                        border: '1px solid #bbf7d0',
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ color: '#64748b', minWidth: 160 }}>{field.label}</span>
+                      <span style={{ fontWeight: 600, color: '#166534' }}>
+                        {(extracted as Record<string, string | undefined>)[field.key] || ''}
+                      </span>
+                      <Check size={12} style={{ color: '#22c55e', marginLeft: 'auto' }} />
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 16 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0b1136', margin: '0 0 12px' }}>
+                      Caricamento Documenti
+                    </p>
+                    {['Scheda-Aziendale-BNDO.pdf', 'Documento-Anagrafico-BNDO.docx'].map((name, index) => (
+                      <div
+                        key={name}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '8px 0',
+                          borderBottom: index === 0 ? '1px solid #f1f5f9' : 'none',
+                          fontSize: 12,
+                          color: '#0b1136',
+                        }}
+                      >
+                        <span style={{ flex: 1 }}>{name}</span>
+                        <Loader2 size={14} className={s.cbSpinner} style={{ color: '#22c55f' }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {phase === 'ready-to-submit' && (
+                <div style={{ padding: 20, overflow: 'auto', height: '100%' }}>
+                  {FORM_FIELDS.map((field) => (
+                    <div
+                      key={field.key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 14px',
+                        marginBottom: 6,
+                        background: '#f0fdf4',
+                        borderRadius: 8,
+                        border: '1px solid #bbf7d0',
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ color: '#64748b', minWidth: 160 }}>{field.label}</span>
+                      <span style={{ fontWeight: 600, color: '#166534' }}>
+                        {(extracted as Record<string, string | undefined>)[field.key] || ''}
+                      </span>
+                      <Check size={12} style={{ color: '#22c55e', marginLeft: 'auto' }} />
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 16 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0b1136', margin: '0 0 8px' }}>
+                      Documenti caricati
+                    </p>
+                    {['Scheda-Aziendale-BNDO.pdf', 'Documento-Anagrafico-BNDO.docx'].map((name) => (
+                      <div
+                        key={name}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 0',
+                          fontSize: 12,
+                          color: '#166534',
+                        }}
+                      >
+                        <Check size={12} />
+                        {name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {phase === 'submitted' && (
             <div
               style={{
@@ -422,6 +628,27 @@ export function Step9BrowserBando({ extracted, spidAuthenticated, onSpidLogin, o
             </div>
           )}
         </div>
+
+        {phase === 'ready-to-submit' && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: '16px 24px',
+              background: '#ffffff',
+              borderTop: '1px solid #e8ecf4',
+              zIndex: 3,
+              textAlign: 'center',
+            }}
+          >
+            <button className={s.cbInviaBtn} onClick={handleSubmit} type="button">
+              <Send size={16} />
+              Invia Domanda
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

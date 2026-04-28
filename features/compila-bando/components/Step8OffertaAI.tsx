@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bot, Sparkles } from 'lucide-react';
 import s from '../styles/compila-bando.module.css';
 
@@ -9,7 +11,10 @@ type Props = {
 };
 
 export function Step8OffertaAI({ onAccept, onDecline }: Props) {
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const modal = (
     <div className={s.cbModalBackdrop}>
       <div className={s.cbModal}>
         <div className={s.cbModalIcon}>
@@ -37,4 +42,10 @@ export function Step8OffertaAI({ onAccept, onDecline }: Props) {
       </div>
     </div>
   );
+
+  if (mounted) {
+    return createPortal(modal, document.body);
+  }
+
+  return null;
 }

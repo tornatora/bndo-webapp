@@ -1,21 +1,50 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import crypto from 'crypto';
 import {
   createBrowserbaseSession,
   primeBrowserbaseSessionToInvitalia,
   closeBrowserbaseSession,
   browserbaseReady,
+  validateBrowserbaseEnv,
 } from '@/lib/copilot/browserbase';
-import {
-  createBrowserlessSession,
-  closeBrowserlessSession,
-  browserlessReady,
-} from '@/lib/browser/browserless';
-import type { BrowserlessSessionResult } from '@/lib/browser/browserless';
+import { loadFlowTemplate } from '@/lib/compila-bando/flow-template';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const B2C_AUTHORITY = 'https://minervaorgb2c.b2clogin.com/minervaorgb2c.onmicrosoft.com/b2c_1a_invitalia_signin/oauth2/v2.0/authorize';
+const B2C_CLIENT_ID = '74cea3c0-5ab9-4414-bf4d-9c80b9824a9f';
+const B2C_REDIRECT = 'https://invitalia-areariservata-fe.npi.invitalia.it/home';
+const B2C_SCOPES = 'openid profile offline_access';
+
+function base64url(buf: Buffer): string {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function buildPkceUrl(): string {
+  const codeVerifier = base64url(crypto.randomBytes(32));
+  const hash = crypto.createHash('sha256').update(codeVerifier).digest();
+  const codeChallenge = base64url(hash);
+  const state = base64url(crypto.randomBytes(16));
+  const nonce = base64url(crypto.randomBytes(16));
+
+  const params = new URLSearchParams({
+    client_id: B2C_CLIENT_ID,
+    scope: B2C_SCOPES,
+    redirect_uri: B2C_REDIRECT,
+    response_mode: 'fragment',
+    response_type: 'code',
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state,
+    nonce,
+    'x-client-SKU': 'msal.js.browser',
+    'x-client-VER': '2.32.2',
+    client_info: '1',
+  });
+
+  return `${B2C_AUTHORITY}?${params.toString()}`;
+}
 
 interface ExtractedData {
   ragione_sociale: string;
@@ -87,70 +116,102 @@ export async function POST(req: Request) {
 
     const client = mapClientData(data);
 
-    let flowTemplate = null;
+    let flowTemplateSummary: {
+      name: string;
+      bandoKey: string;
+      stepsCount: number;
+      expectedDurationSeconds: number | null;
+      version: number | null;
+      source: string | null;
+      updatedAt: string | null;
+      checksumSha256: string | null;
+    } | null = null;
     try {
-      const flowPath = path.join(process.cwd(), 'data', 'flows', 'resto-al-sud-2-0.json');
-      flowTemplate = JSON.parse(fs.readFileSync(flowPath, 'utf-8'));
+      const { template, checksumSha256 } = loadFlowTemplate();
+      flowTemplateSummary = {
+        name: template.name,
+        bandoKey: template.bandoKey,
+        stepsCount: template.steps?.length ?? 0,
+        expectedDurationSeconds: template.expectedDurationSeconds ?? null,
+        version: template.version ?? null,
+        source: template.source ?? null,
+        updatedAt: template.updatedAt ?? null,
+        checksumSha256,
+      };
+      console.info('[compila-bando][auto-fill] flow_template_loaded', {
+        name: template.name,
+        version: template.version ?? null,
+        steps: template.steps.length,
+        checksumSha256,
+      });
     } catch {
       // Flow template not found
     }
 
-    // Browser session: Browserless (open source) > Browserbase > demo
+    // Browser session: Browserbase only for Step9 live flow.
     let liveViewUrl: string | null = null;
     let sessionId: string | null = null;
+    let connectUrl: string | null = null;
+    let sessionExpiresAt: string | null = null;
     let status: 'live' | 'demo' = 'demo';
+    let provider: 'browserbase' | 'demo' = 'demo';
+    let providerError: string | null = null;
 
-    // Tier 1: Browserless v2 (open source, BROWSERLESS_URL env var)
-    if (browserlessReady()) {
-      try {
-        const session = await createBrowserlessSession();
-        sessionId = session.sessionId;
-        liveViewUrl = session.liveViewUrl;
-        browserbaseSessionId = session.sessionId; // reuse for cleanup
-        status = 'live';
-      } catch {
-        // Fall through to Browserbase
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+      Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+
+    if (browserbaseReady()) {
+      const envValidation = validateBrowserbaseEnv();
+      if (!envValidation.ok) {
+        providerError = envValidation.errors.join(' ');
+      } else {
+        if (envValidation.warnings.length > 0) {
+          console.warn('[compila-bando][auto-fill] browserbase_env_warnings', envValidation.warnings);
+        }
       }
+    } else {
+      providerError = 'BROWSERBASE_API_KEY non configurata.';
     }
 
-    // Tier 2: Browserbase (API key)
-    if (status === 'demo' && browserbaseReady()) {
+    if (!providerError) {
       try {
-        const session = await createBrowserbaseSession({});
+        const session = await withTimeout(createBrowserbaseSession({}), 10_000);
         sessionId = session.sessionId;
         liveViewUrl = session.liveViewUrl;
+        connectUrl = session.connectUrl;
+        sessionExpiresAt = session.expiresAt;
         browserbaseSessionId = session.sessionId;
 
-        if (session.connectUrl) {
+        if (!session.connectUrl || !session.liveViewUrl) {
+          providerError = 'Sessione Browserbase incompleta: connectUrl/liveViewUrl mancanti.';
+        } else {
           void primeBrowserbaseSessionToInvitalia(session.connectUrl, SPID_LOGIN_URL);
+          status = 'live';
+          provider = 'browserbase';
         }
-
-        status = 'live';
-      } catch {
-        // Fallback a demo
+      } catch (error) {
+        providerError = error instanceof Error ? error.message : 'Errore Browserbase non gestito.';
       }
     }
+
+    const spidPopupUrl = buildPkceUrl();
 
     return NextResponse.json({
       status,
-      browserless: browserlessReady(),
+      provider,
       browserbase: browserbaseReady(),
       client,
       liveViewUrl,
+      connectUrl,
+      sessionExpiresAt,
+      spidPopupUrl,
       browserbaseSessionId,
-      flowTemplate: flowTemplate
-        ? {
-            name: flowTemplate.name,
-            bandoKey: flowTemplate.bandoKey,
-            stepsCount: flowTemplate.steps?.length ?? 0,
-            expectedDurationSeconds: flowTemplate.expectedDurationSeconds,
-          }
-        : null,
+      providerError,
+      flowTemplate: flowTemplateSummary,
     });
   } catch (e) {
     // Cleanup session on error
     if (browserbaseSessionId) {
-      void closeBrowserlessSession(browserbaseSessionId).catch(() => {});
       void closeBrowserbaseSession(browserbaseSessionId);
     }
     return NextResponse.json(

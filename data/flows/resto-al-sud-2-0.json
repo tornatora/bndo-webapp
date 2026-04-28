@@ -1,5 +1,8 @@
 {
   "name": "Invitalia 2026-04-23_00-01",
+  "version": 1,
+  "source": "invitalia-2026-04-23-00-01_2026-04-23_00-04-33.json",
+  "updatedAt": "2026-04-28",
   "bandoKey": "resto-al-sud-2-0",
   "proceduraKey": "default",
   "domain": "invitalia-areariservata-fe.npi.invitalia.it",

@@ -33,9 +33,13 @@ const frameOrigins = Array.from(
       'https://hooks.stripe.com',
       'https://buy.stripe.com',
       'https://js.stripe.com',
+      'https://www.browserbase.com',
+      'https://connect-v2.usw2.browserbase.com',
+      'https://*.browserbase.com',
       normalizeOrigin(process.env.NEXT_PUBLIC_MARKETING_URL),
       normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
-      normalizeOrigin(process.env.NEXT_PUBLIC_ADMIN_URL)
+      normalizeOrigin(process.env.NEXT_PUBLIC_ADMIN_URL),
+      normalizeOrigin(process.env.BROWSERBASE_LIVEVIEW_ORIGIN),
     ].filter(Boolean)
   )
 );

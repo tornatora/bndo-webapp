@@ -3,6 +3,7 @@ import fs from 'node:fs';
 export type BrowserbaseSessionCreateResult = {
   id: string;
   connectUrl?: string;
+  expiresAt?: string;
 };
 
 export type BrowserbaseDebugResult = {
@@ -23,15 +24,41 @@ type BrowserbaseInstance = {
 };
 
 function hasBrowserbaseConfig() {
-  return Boolean(process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID);
+  return Boolean(process.env.BROWSERBASE_API_KEY);
+}
+
+export type BrowserbaseEnvValidation = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
+export function validateBrowserbaseEnv(): BrowserbaseEnvValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const apiKey = (process.env.BROWSERBASE_API_KEY || '').trim();
+  const projectId = (process.env.BROWSERBASE_PROJECT_ID || '').trim();
+  const extensionId = (process.env.BROWSERBASE_EXTENSION_ID || '').trim();
+
+  if (!apiKey) {
+    errors.push('BROWSERBASE_API_KEY mancante.');
+  }
+  if (apiKey && !/^bb_(live|test)_/.test(apiKey)) {
+    warnings.push('BROWSERBASE_API_KEY ha formato inatteso.');
+  }
+  if (!projectId) {
+    warnings.push('BROWSERBASE_PROJECT_ID non impostata: il progetto verra inferito dalla API key.');
+  }
+  if (!extensionId) {
+    warnings.push('BROWSERBASE_EXTENSION_ID non impostata: sessione senza estensione custom.');
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 async function importBrowserbaseSdk() {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (
-    moduleName: string
-  ) => Promise<Record<string, unknown>>;
-
-  const mod = await dynamicImport('@browserbasehq/sdk');
+  const mod = (await import('@browserbasehq/sdk')) as Record<string, unknown>;
   const maybeDefault = mod.default as new (...args: unknown[]) => BrowserbaseInstance;
   const maybeNamed = mod.Browserbase as new (...args: unknown[]) => BrowserbaseInstance;
   const Ctor = maybeDefault ?? maybeNamed;
@@ -42,8 +69,9 @@ async function importBrowserbaseSdk() {
 }
 
 export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
-  if (!process.env.BROWSERBASE_API_KEY) {
-    throw new Error('BROWSERBASE_API_KEY non configurata.');
+  const validation = validateBrowserbaseEnv();
+  if (!validation.ok) {
+    throw new Error(validation.errors.join(' '));
   }
 
   const BrowserbaseCtor = await importBrowserbaseSdk();
@@ -52,15 +80,15 @@ export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
 
 export async function createBrowserbaseSession(input: {
   extensionId?: string;
-}): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null }> {
+}): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null; expiresAt: string | null }> {
   if (!hasBrowserbaseConfig()) {
-    return { sessionId: '', connectUrl: null, liveViewUrl: null };
+    return { sessionId: '', connectUrl: null, liveViewUrl: null, expiresAt: null };
   }
 
   const bb = await createBrowserbaseClient();
   const created = await bb.sessions.create({
-    projectId: process.env.BROWSERBASE_PROJECT_ID,
-    extensionId: input.extensionId ?? process.env.BROWSERBASE_EXTENSION_ID,
+    projectId: process.env.BROWSERBASE_PROJECT_ID || undefined,
+    extensionId: input.extensionId || process.env.BROWSERBASE_EXTENSION_ID || undefined,
   });
   let liveViewUrl: string | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -77,6 +105,7 @@ export async function createBrowserbaseSession(input: {
     sessionId: created.id,
     connectUrl: created.connectUrl ?? null,
     liveViewUrl,
+    expiresAt: created.expiresAt ?? null,
   };
 }
 
@@ -87,10 +116,7 @@ export async function primeBrowserbaseSessionToInvitalia(
   if (!connectUrl) return;
 
   try {
-    const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (
-      moduleName: string
-    ) => Promise<Record<string, unknown>>;
-    const mod = await dynamicImport('playwright-core');
+    const mod = (await import('playwright')) as Record<string, unknown>;
     const chromium = mod.chromium as
       | {
           connectOverCDP: (

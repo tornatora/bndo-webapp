@@ -1,0 +1,130 @@
+import type { ClientData, FlowStep, FlowTemplate } from './types';
+
+const DEFAULT_LINEA_INTERVENTO = 'Capo IV - Resto al Sud 2.0';
+const DEFAULT_TIPOLOGIA_PROPONENTE = 'Voucher Lavoratore autonomo-libero professionista';
+const CORPORATE_TIPOLOGIA_PROPONENTE = 'Voucher Società e ditte individuali';
+
+const CORPORATE_FORM_KEYS = [
+  'societa',
+  'società',
+  's.r.l',
+  'srl',
+  's.p.a',
+  'spa',
+  's.n.c',
+  'snc',
+  's.a.s',
+  'sas',
+  'cooperativa',
+  'ditta individuale',
+];
+
+const WAIT_UNTIL_ALLOWED = new Set(['load', 'domcontentloaded', 'networkidle', 'commit']);
+
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function getBoundValue(valueFrom: string | undefined, fieldMapping: Record<string, string>, client: ClientData): string {
+  if (!valueFrom) return '';
+  if (valueFrom.startsWith('recorded.')) return fieldMapping[valueFrom] || '';
+  if (valueFrom.startsWith('client.')) {
+    const key = valueFrom.replace('client.', '') as keyof ClientData;
+    return String(client[key] || '');
+  }
+  return valueFrom;
+}
+
+export function resolveTipologiaProponente(formaGiuridica: string, fallback?: string): string {
+  const normalized = normalizeText(formaGiuridica || '');
+  if (normalized && CORPORATE_FORM_KEYS.some((key) => normalized.includes(key))) {
+    return CORPORATE_TIPOLOGIA_PROPONENTE;
+  }
+  return fallback?.trim() || DEFAULT_TIPOLOGIA_PROPONENTE;
+}
+
+export function resolveFlowStepValue(step: FlowStep, flowTemplate: FlowTemplate, client: ClientData): string {
+  const targetId = step.target?.id || '';
+  const bound = getBoundValue(step.valueFrom, flowTemplate.fieldMapping, client);
+
+  if (targetId === 'lineaIntervento') {
+    return DEFAULT_LINEA_INTERVENTO;
+  }
+  if (targetId === 'tipologiaProponente') {
+    return resolveTipologiaProponente(
+      client.formaGiuridica,
+      process.env.COMPILA_BANDO_DEFAULT_TIPOLOGIA_PROPONENTE
+    );
+  }
+  if (targetId === 'Nome') {
+    return client.firstName || client.fullName.split(' ')[0] || bound;
+  }
+  if (targetId === 'Cognome') {
+    const fromClient = client.lastName || client.fullName.split(' ').slice(1).join(' ');
+    return fromClient || bound;
+  }
+
+  return bound;
+}
+
+function escapeForSelector(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function pushCandidate(list: string[], candidate: string | undefined) {
+  const normalized = (candidate || '').trim();
+  if (!normalized || list.includes(normalized)) return;
+  list.push(normalized);
+}
+
+export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
+  const t = step.target;
+  if (!t) return [];
+
+  const candidates: string[] = [];
+  const escapedText = t.text ? escapeForSelector(t.text) : '';
+  const escapedLabel = t.label ? escapeForSelector(t.label) : '';
+  const escapedPlaceholder = t.placeholder ? escapeForSelector(t.placeholder) : '';
+
+  pushCandidate(candidates, t.css);
+  if (t.id) pushCandidate(candidates, `#${t.id}`);
+  if (t.name) pushCandidate(candidates, `[name="${escapeForSelector(t.name)}"]`);
+  if (t.testId) pushCandidate(candidates, `[data-testid="${escapeForSelector(t.testId)}"]`);
+  if (t.placeholder) pushCandidate(candidates, `[placeholder="${escapedPlaceholder}"]`);
+  if (t.role && t.text) pushCandidate(candidates, `[role="${escapeForSelector(t.role)}"]:has-text("${escapedText}")`);
+  if (t.tag && t.text) pushCandidate(candidates, `${t.tag}:has-text("${escapedText}")`);
+  if (t.label) {
+    pushCandidate(candidates, `label:has-text("${escapedLabel}")`);
+    pushCandidate(candidates, `label:has-text("${escapedLabel}") + input`);
+    pushCandidate(candidates, `label:has-text("${escapedLabel}") + select`);
+  }
+  if (t.text) pushCandidate(candidates, `text="${escapedText}"`);
+  if (t.tag) pushCandidate(candidates, t.tag);
+
+  const xpath = t.xpath?.trim();
+  if (xpath) {
+    if (xpath.startsWith('xpath=')) {
+      pushCandidate(candidates, xpath);
+    } else if (xpath.startsWith('//') || xpath.startsWith('/')) {
+      pushCandidate(candidates, `xpath=${xpath}`);
+    }
+  }
+
+  return candidates;
+}
+
+export function resolveWaitUntil(raw: string | undefined): 'load' | 'domcontentloaded' | 'networkidle' | 'commit' {
+  const normalized = (raw || 'domcontentloaded').toLowerCase();
+  if (WAIT_UNTIL_ALLOWED.has(normalized)) {
+    return normalized as 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
+  }
+  return 'domcontentloaded';
+}
+
+export function buildStrictExecutionQueue(flowTemplate: FlowTemplate): Array<{ stepIndex: number; step: FlowStep }> {
+  return flowTemplate.steps.map((step, stepIndex) => ({ stepIndex, step }));
+}
