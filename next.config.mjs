@@ -94,6 +94,10 @@ const nextConfig = {
       [
         "connect-src 'self'",
         'https:',
+        // Browserbase live view / devtools uses WebSockets.
+        'wss:',
+        'wss://connect-v2.usw2.browserbase.com',
+        'wss://*.browserbase.com',
         supabaseRealtimeOrigin,
         ...(isProduction ? [] : devConnectOrigins)
       ]
