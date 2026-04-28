@@ -116,7 +116,8 @@ export async function primeBrowserbaseSessionToInvitalia(
   if (!connectUrl) return;
 
   try {
-    const mod = (await import('playwright')) as Record<string, unknown>;
+    // Use playwright-core for deploy friendliness (smaller + explicit dependency tracing).
+    const mod = (await import('playwright-core')) as Record<string, unknown>;
     const chromium = mod.chromium as
       | {
           connectOverCDP: (

@@ -69,11 +69,12 @@ const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse'],
+    // Keep heavy Node-only dependencies out of the Next.js bundle (Netlify-friendly).
+    serverComponentsExternalPackages: ['pdf-parse', 'playwright-core', 'playwright'],
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      const extra = ['pdf-parse'];
+      const extra = ['pdf-parse', 'playwright-core', 'playwright'];
       if (Array.isArray(config.externals)) {
         config.externals = [...config.externals, ...extra];
       } else {

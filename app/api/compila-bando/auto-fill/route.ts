@@ -194,7 +194,8 @@ export async function POST(req: Request) {
         if (!session.connectUrl || !session.liveViewUrl) {
           providerError = 'Sessione Browserbase incompleta: connectUrl/liveViewUrl mancanti.';
         } else {
-          void primeBrowserbaseSessionToInvitalia(session.connectUrl, INVITALIA_HOME_URL);
+          // Prime synchronously so the user always lands on Invitalia HOME (MSAL will generate PKCE properly).
+          await primeBrowserbaseSessionToInvitalia(session.connectUrl, INVITALIA_HOME_URL);
           status = 'live';
           provider = 'browserbase';
         }
