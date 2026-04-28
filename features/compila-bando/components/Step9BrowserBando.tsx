@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Loader2, RefreshCcw, Send } from 'lucide-react';
+import { AlertTriangle, Check, ExternalLink, Loader2, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
@@ -144,20 +144,27 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
       if (event.data !== 'browserbase-disconnected') return;
 
       setIsExecuting(false);
-      setDisconnectNotice('Connessione al browser cloud interrotta. Riconnessione automatica in corso...');
+      const attempt = reconnectAttemptRef.current + 1;
+      reconnectAttemptRef.current = attempt;
+
+      // If WebSockets are blocked (network / browser policy), reconnecting forever is useless.
+      // We stop after a few attempts and guide the user to open the live view in a new tab.
+      if (attempt > 3) {
+        setDisconnectNotice('Connessione WebSocket bloccata o instabile. Apri il browser in una nuova scheda.');
+        setFlowResult(
+          'La Live View non riesce a mantenere il WebSocket. Tipico di reti aziendali/VPN o policy browser su iframe.'
+        );
+        setPhase('spid-login');
+        return;
+      }
+
+      setDisconnectNotice(`Connessione al browser cloud interrotta. Riconnessione automatica (${attempt}/3)...`);
       setFlowResult(null);
       setPhase('loading');
 
-      // Auto-reconnect (no manual retry loops).
-      // Browserbase live view can drop; we keep the user in Step 9 and recreate a fresh session.
-      const attempt = reconnectAttemptRef.current + 1;
-      reconnectAttemptRef.current = attempt;
       const backoffMs = Math.min(8000, 800 * Math.pow(2, attempt - 1));
-
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = window.setTimeout(() => {
-        void initializeSession();
-      }, backoffMs);
+      reconnectTimerRef.current = window.setTimeout(() => void initializeSession(), backoffMs);
     }
 
     window.addEventListener('message', handleIframeMessage);
@@ -414,6 +421,16 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                   <button className={s.cbBtnGreen} onClick={handleSpidClick} type="button">
                     Accedi con SPID
                   </button>
+                  {session?.liveViewUrl && (
+                    <button
+                      className={s.cbBtnMuted}
+                      type="button"
+                      onClick={() => window.open(session.liveViewUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      <ExternalLink size={14} />
+                      Apri in nuova scheda
+                    </button>
+                  )}
                 </div>
               )}
 
