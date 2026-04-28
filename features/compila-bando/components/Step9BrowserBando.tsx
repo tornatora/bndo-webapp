@@ -69,8 +69,15 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const [isExecuting, setIsExecuting] = useState(false);
   const initRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   const initializeSession = useCallback(async () => {
+    reconnectAttemptRef.current = 0;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     setIsInitializing(true);
     setPhase('loading');
     setSession(null);
@@ -136,15 +143,26 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     function handleIframeMessage(event: MessageEvent) {
       if (event.data !== 'browserbase-disconnected') return;
 
-      setDisconnectNotice('Connessione al browser cloud interrotta.');
-      setFlowResult('Sessione browser disconnessa. Riconnetti e ripeti l\'accesso SPID.');
       setIsExecuting(false);
-      setPhase('spid-login');
+      setDisconnectNotice('Connessione al browser cloud interrotta. Riconnessione automatica in corso...');
+      setFlowResult(null);
+      setPhase('loading');
+
+      // Auto-reconnect (no manual retry loops).
+      // Browserbase live view can drop; we keep the user in Step 9 and recreate a fresh session.
+      const attempt = reconnectAttemptRef.current + 1;
+      reconnectAttemptRef.current = attempt;
+      const backoffMs = Math.min(8000, 800 * Math.pow(2, attempt - 1));
+
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        void initializeSession();
+      }, backoffMs);
     }
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, []);
+  }, [initializeSession]);
 
   const handleRetrySession = useCallback(() => {
     void initializeSession();
