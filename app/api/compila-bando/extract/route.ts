@@ -259,7 +259,8 @@ async function extractWithLlm(
 }
 
 async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
-  // Tier 1: dynamic import (deploy-safe; works with next.config externals)
+  // Tier 1: pdf-parse (preferred). We want this to work in Netlify preview too, so do not
+  // silently fall back unless we really must.
   try {
     const mod = (await import('pdf-parse')) as unknown as {
       PDFParse?: new (opts: { data: Buffer }) => { getText: () => Promise<any>; destroy: () => Promise<void> };
@@ -272,10 +273,13 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
       const text = String(data?.text ?? '').trim();
       if (text.length >= 80) return text;
     }
-  } catch {}
+  } catch (e) {
+    // If pdf-parse is missing or fails, we keep a fallback, but surface a short hint in logs.
+    console.warn('[compila-bando/extract] pdf-parse failed, falling back:', e instanceof Error ? e.message : e);
+  }
 
-  // Tier 2: HTTP call to standalone Netlify function
-  // Try multiple sources for the base URL (env vars may not be available in Next.js Lambda)
+  // Tier 2: HTTP call to standalone Netlify function (legacy fallback)
+  // Try multiple sources for the base URL (env vars may not be available in Next.js Lambda).
   const bases = [
     baseUrl,
     process.env.DEPLOY_PRIME_URL,

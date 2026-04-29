@@ -70,11 +70,11 @@ const nextConfig = {
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
   experimental: {
     // Keep heavy Node-only dependencies out of the Next.js bundle (Netlify-friendly).
-    serverComponentsExternalPackages: ['pdf-parse', 'playwright-core', 'playwright', 'puppeteer-core'],
+    serverComponentsExternalPackages: ['playwright-core', 'playwright', 'puppeteer-core'],
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      const extra = ['pdf-parse', 'playwright-core', 'playwright', 'puppeteer-core'];
+      const extra = ['playwright-core', 'playwright', 'puppeteer-core'];
       if (Array.isArray(config.externals)) {
         config.externals = [...config.externals, ...extra];
       } else {
