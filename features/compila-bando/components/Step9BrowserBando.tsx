@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, RefreshCcw, Send } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, OctagonX, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
@@ -48,6 +48,10 @@ type MirrorFrame = {
   ts: number;
 };
 
+type SessionStatusResponse =
+  | { ok: true; url: string; loggedIn: boolean; hint: string }
+  | { ok?: false; error?: string };
+
 function buildClientPayload(extracted: ExtractedData) {
   return {
     firstName: extracted.nome_legale_rappresentante?.split(' ')[0] || '',
@@ -74,12 +78,16 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [spidTabOpened, setSpidTabOpened] = useState(false);
+  const [statusHint, setStatusHint] = useState<string | null>(null);
   const [mirrorFrame, setMirrorFrame] = useState<MirrorFrame | null>(null);
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [typeBuffer, setTypeBuffer] = useState('');
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const initRef = useRef(false);
   const mirrorImgRef = useRef<HTMLImageElement>(null);
+  const hasStartedRef = useRef(false);
+  const executeAbortRef = useRef<AbortController | null>(null);
 
   const initializeSession = useCallback(async () => {
     setIsInitializing(true);
@@ -89,6 +97,11 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     setFlowResult(null);
     setMirrorFrame(null);
     setMirrorError(null);
+    setSpidTabOpened(false);
+    setStatusHint(null);
+    hasStartedRef.current = false;
+    executeAbortRef.current?.abort();
+    executeAbortRef.current = null;
 
     const fieldValues: Record<string, string> = {};
     FORM_FIELDS.forEach((field) => {
@@ -177,7 +190,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
 
   useEffect(() => {
     if (!session) return;
-    if (!(phase === 'spid-login' || phase === 'spid-auth-wait')) return;
+    if (!(phase === 'spid-login' || phase === 'spid-auth-wait' || phase === 'auto-filling')) return;
 
     let alive = true;
     let timer: number | null = null;
@@ -200,9 +213,34 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     void initializeSession();
   }, [initializeSession]);
 
-  const handleSpidClick = useCallback(() => {
+  const handleOpenSpidTab = useCallback(() => {
+    if (!session?.liveViewUrl) return;
+    const w = window.open(session.liveViewUrl, '_blank', 'noopener,noreferrer');
+    setSpidTabOpened(Boolean(w));
     setPhase('spid-auth-wait');
-  }, []);
+  }, [session]);
+
+  const handleStop = useCallback(async () => {
+    executeAbortRef.current?.abort();
+    executeAbortRef.current = null;
+    setIsExecuting(false);
+    hasStartedRef.current = false;
+    setFlowResult('Operazione interrotta.');
+
+    if (session?.sessionId) {
+      try {
+        await fetch('/api/compila-bando/close-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: session.sessionId }),
+        });
+      } catch {
+        // Best effort
+      }
+    }
+
+    void initializeSession();
+  }, [session, initializeSession]);
 
   const remoteAction = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -228,18 +266,33 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const handleMirrorClick = useCallback(
     async (event: MouseEvent<HTMLImageElement>) => {
       if (!mirrorFrame) return;
+      // Mirror is only interactive as fallback when the new tab could not be opened.
+      if (spidTabOpened) return;
       const rect = event.currentTarget.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
 
-      const rx = (event.clientX - rect.left) / rect.width;
-      const ry = (event.clientY - rect.top) / rect.height;
-      const x = Math.max(0, Math.round(rx * mirrorFrame.meta.width));
-      const y = Math.max(0, Math.round(ry * mirrorFrame.meta.height));
+      // Letterbox-aware mapping for objectFit: 'contain'
+      const imgW = rect.width;
+      const imgH = rect.height;
+      const srcW = mirrorFrame.meta.width;
+      const srcH = mirrorFrame.meta.height;
+      const scale = Math.min(imgW / srcW, imgH / srcH);
+      const drawnW = srcW * scale;
+      const drawnH = srcH * scale;
+      const offsetX = (imgW - drawnW) / 2;
+      const offsetY = (imgH - drawnH) / 2;
+
+      const localX = event.clientX - rect.left - offsetX;
+      const localY = event.clientY - rect.top - offsetY;
+      if (localX < 0 || localY < 0 || localX > drawnW || localY > drawnH) return;
+
+      const x = Math.max(0, Math.round((localX / drawnW) * srcW));
+      const y = Math.max(0, Math.round((localY / drawnH) * srcH));
 
       const ok = await remoteAction({ action: 'click', x, y });
       if (ok) void fetchMirrorFrame();
     },
-    [mirrorFrame, remoteAction, fetchMirrorFrame]
+    [mirrorFrame, remoteAction, fetchMirrorFrame, spidTabOpened]
   );
 
   const handleSendType = useCallback(async () => {
@@ -268,8 +321,10 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     [remoteAction, fetchMirrorFrame]
   );
 
-  const handleSpidComplete = useCallback(async () => {
+  const startExecuteFlow = useCallback(async () => {
     if (!session) return;
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
 
     setDisconnectNotice(null);
     setPhase('auto-filling');
@@ -277,6 +332,8 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     setIsExecuting(true);
 
     try {
+      const controller = new AbortController();
+      executeAbortRef.current = controller;
       const response = await fetch('/api/compila-bando/execute-flow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -284,6 +341,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
           connectUrl: session.connectUrl,
           client: buildClientPayload(extracted),
         }),
+        signal: controller.signal,
       });
 
       const data = (await response.json()) as
@@ -313,12 +371,57 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
       setFlowResult(`Errore compilazione: ${failMsg}`);
       setPhase('spid-auth-wait');
     } catch (error) {
-      setFlowResult(`Errore compilazione: ${error instanceof Error ? error.message : 'errore non gestito'}`);
+      const msg = error instanceof Error ? error.message : 'errore non gestito';
+      if (msg.toLowerCase().includes('aborted')) {
+        setFlowResult('Operazione interrotta.');
+      } else {
+        setFlowResult(`Errore compilazione: ${msg}`);
+      }
       setPhase('spid-auth-wait');
     } finally {
       setIsExecuting(false);
+      executeAbortRef.current = null;
     }
   }, [session, extracted, onSpidLogin]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!(phase === 'spid-auth-wait' || phase === 'spid-login')) return;
+    if (isExecuting) return;
+
+    let alive = true;
+    let timer: number | null = null;
+
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        const res = await fetch('/api/compila-bando/session-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: session.sessionId }),
+        });
+        const json = (await res.json()) as SessionStatusResponse;
+        if (!alive) return;
+        if ('ok' in json && json.ok) {
+          setStatusHint(json.hint || null);
+          if (json.loggedIn) {
+            onSpidLogin();
+            void startExecuteFlow();
+            return;
+          }
+        }
+      } catch {
+        // ignore transient polling failures
+      }
+      timer = window.setTimeout(tick, 2000);
+    };
+
+    void tick();
+    return () => {
+      alive = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [session, phase, isExecuting, onSpidLogin, startExecuteFlow]);
 
   useEffect(() => {
     if (phase !== 'uploading-docs') return;
@@ -342,7 +445,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
           : phase === 'submitted'
           ? 'Domanda inviata con successo!'
           : phase === 'spid-auth-wait'
-          ? 'Completa l\'autenticazione SPID nel browser qui sotto, poi clicca "Ho completato"'
+          ? 'Completa l\'autenticazione SPID nella scheda aperta. Appena hai finito, la compilazione parte da sola.'
           : phase === 'auto-filling'
           ? 'L\'Agente AI sta compilando la domanda sul sito reale di Invitalia...'
           : 'Browser cloud connesso — autenticati con SPID per proseguire'}
@@ -481,7 +584,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                         width: '100%',
                         height: '100%',
                         objectFit: 'contain',
-                        cursor: 'crosshair',
+                        cursor: spidTabOpened ? 'default' : 'crosshair',
                         background: '#0b1136',
                         display: 'block',
                       }}
@@ -546,17 +649,22 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                     flexDirection: 'column',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 12, color: '#64748b' }}>
-                        Interagisci con la schermata sopra. Poi clicca “Ho completato l’accesso”.
-                      </span>
-                      {session.sessionExpiresAt && (
-                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                          Scade: {session.sessionExpiresAt}
-                        </span>
-                      )}
-                    </div>
+	                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'space-between' }}>
+	                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+	                      <span style={{ fontSize: 12, color: '#64748b' }}>
+	                        Apri SPID in nuova scheda. Quando finisci, la compilazione parte automaticamente.
+	                      </span>
+	                      {session.sessionExpiresAt && (
+	                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+	                          Scade: {session.sessionExpiresAt}
+	                        </span>
+	                      )}
+	                      {statusHint && (
+	                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+	                          Stato: {statusHint}
+	                        </span>
+	                      )}
+	                    </div>
                     <button
                       className={s.cbBtnMuted}
                       type="button"
@@ -568,63 +676,68 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                     </button>
                   </div>
 
-                  {!controlsCollapsed && (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')}>
-                          TAB
-                        </button>
-                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')}>
-                          INVIO
-                        </button>
-                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')}>
-                          BACK
-                        </button>
-                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)}>
-                          Su
-                        </button>
-                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)}>
-                          Giu
-                        </button>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
-                        <input
-                          value={typeBuffer}
-                          onChange={(e) => setTypeBuffer(e.target.value)}
-                          placeholder="Scrivi qui e invia alla sessione..."
-                          style={{
-                            flex: 1,
-                            border: '1px solid #e2e8f0',
-                            borderRadius: 10,
+	                  {!controlsCollapsed && (
+	                    <>
+	                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+	                        <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
+	                          {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
+	                          Accedi con SPID (nuova scheda)
+	                        </button>
+	                        <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
+	                          <OctagonX size={14} />
+	                          Stop
+	                        </button>
+	                        {!spidTabOpened && (
+	                          <span style={{ fontSize: 11, color: '#991b1b', alignSelf: 'center' }}>
+	                            Se la scheda non si apre, puoi usare il mirror cliccando sulla schermata sopra.
+	                          </span>
+	                        )}
+	                      </div>
+	                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')} disabled={spidTabOpened}>
+	                          TAB
+	                        </button>
+	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')} disabled={spidTabOpened}>
+	                          INVIO
+	                        </button>
+	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')} disabled={spidTabOpened}>
+	                          BACK
+	                        </button>
+	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)} disabled={spidTabOpened}>
+	                          Su
+	                        </button>
+	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)} disabled={spidTabOpened}>
+	                          Giu
+	                        </button>
+	                      </div>
+	                      <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
+	                        <input
+	                          value={typeBuffer}
+	                          onChange={(e) => setTypeBuffer(e.target.value)}
+	                          placeholder="Scrivi qui e invia alla sessione..."
+	                          disabled={spidTabOpened}
+	                          style={{
+	                            flex: 1,
+	                            border: '1px solid #e2e8f0',
+	                            borderRadius: 10,
                             padding: '10px 12px',
                             fontSize: 13,
-                            outline: 'none',
-                          }}
-                        />
-                        <button className={s.cbBtnGreen} type="button" onClick={handleSendType}>
-                          <Send size={14} />
-                          Invia
-                        </button>
-                      </div>
-                    </>
-                  )}
+	                            outline: 'none',
+	                          }}
+	                        />
+	                        <button className={s.cbBtnGreen} type="button" onClick={handleSendType} disabled={spidTabOpened}>
+	                          <Send size={14} />
+	                          Invia
+	                        </button>
+	                      </div>
+	                    </>
+	                  )}
+	                </div>
+	              )}
 
-                  <button
-                    className={s.cbBtnGreen}
-                    onClick={handleSpidComplete}
-                    type="button"
-                    style={{ whiteSpace: 'nowrap' }}
-                    disabled={isExecuting}
-                  >
-                    {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-                    Ho completato l&apos;accesso
-                  </button>
-                </div>
-              )}
-
-              {phase === 'spid-auth-wait' && (
-                <div
-                  style={{
+	              {phase === 'spid-auth-wait' && (
+	                <div
+	                  style={{
                     position: 'absolute',
                     bottom: 0,
                     left: 0,
@@ -640,26 +753,26 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                     flexWrap: 'wrap',
                   }}
                 >
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0b1136', margin: 0 }}>
-                      Scegli il provider SPID e inserisci le credenziali
-                    </p>
-                    <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
-                      Poi clicca &ldquo;Ho completato l&apos;accesso&rdquo;
-                    </p>
-                  </div>
-                  <button
-                    className={s.cbBtnGreen}
-                    onClick={handleSpidComplete}
-                    type="button"
-                    style={{ whiteSpace: 'nowrap' }}
-                    disabled={isExecuting}
-                  >
-                    {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-                    Ho completato l&apos;accesso
-                  </button>
-                </div>
-              )}
+	                  <div>
+	                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0b1136', margin: 0 }}>
+	                      Completa SPID nella scheda aperta. La compilazione parte automaticamente.
+	                    </p>
+	                    <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
+	                      {statusHint ? `Stato: ${statusHint}` : 'In attesa di login completato...'}
+	                    </p>
+	                  </div>
+	                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+	                    <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
+	                      {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
+	                      Riapri SPID
+	                    </button>
+	                    <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
+	                      <OctagonX size={14} />
+	                      Stop
+	                    </button>
+	                  </div>
+	                </div>
+	              )}
 
               {phase === 'auto-filling' && (
                 <div
