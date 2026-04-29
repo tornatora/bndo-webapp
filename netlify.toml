@@ -1,6 +1,6 @@
 [build]
   command = "npm run build:app"
-  publish = ".next"
+  publish = ".netlify/static"
 
 [build.environment]
   NODE_VERSION = "20"
