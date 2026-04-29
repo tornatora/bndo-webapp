@@ -95,3 +95,5 @@ Verifica automaticamente:
 - handoff consulente umano con raccolta dati obbligatoria
 - matching con `matchScore/matchReasons`
 - robustezza scan anche con campi `null` dal profilo chat
+
+<!-- Deploy sync: 2026-04-30T00:01:49 -->
