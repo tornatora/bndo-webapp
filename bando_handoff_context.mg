@@ -1,7 +1,7 @@
 # BNDO Handoff Context (auto-updated)
 
 ## Timestamp
-- 2026-04-29 22:10 Europe/Rome
+- 2026-04-29 22:18 Europe/Rome
 
 ## Git
 - Commit SHA base: `75e63cb2f7864f62e32f7dd0e307681575f9dd5f`
@@ -52,6 +52,10 @@
 9. `Step9BrowserBando` miglioramento UX richiesto:
    - velocità typing resa leggermente più rapida dell'umano
    - aggiunto fake cursor visivo con movimento tra campi + feedback click
+10. Fix deploy branch Netlify (env mancanti):
+   - `app/reset-password/page.tsx` ora non va in crash a build-time se mancano env Supabase
+   - fallback UI: messaggio esplicito in preview non configurata
+   - build testato con `.env` assenti: `npm run build:app` OK
 
 ## File toccati
 - `app/api/compila-bando/readiness-check/route.ts`
@@ -78,6 +82,10 @@
 - Branch deploy Netlify (Git) operativo:
   - `/login` -> `200`
   - `/dashboard/compila-bando` -> `307 /login` (comportamento atteso se non autenticato)
+- Branch deploy successivi (`75e63cb`, `4a84d40`) falliti prima del fix con errore build:
+  - `@supabase/ssr: Your project's URL and API key are required...`
+  - causa: env Supabase assenti nel contesto branch deploy
+  - fix applicato su `/reset-password`; in corso nuovo push/deploy.
 - Netlify build completa, ma sui deploy CLI preview/prod le route app rispondono 404 mentre gli asset statici `_next/static` sono serviti.
 - Tentativo fallback redirect `/* -> /.netlify/functions/___netlify-server-handler` rimosso: eliminava i 404 ma introduceva 502 (`invalid character '\x00' after top-level value`).
 - Da API Netlify: nei deploy CLI `plugin_state` risulta `none`; in alcuni deploy compare `___netlify-server-handler`, ma il routing pagina resta 404.
