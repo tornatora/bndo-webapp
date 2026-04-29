@@ -88,16 +88,38 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const data = body.data as Record<string, string | null>;
+    const mode = typeof body.mode === 'string' ? body.mode : 'binary';
 
     if (!data || Object.keys(data).length === 0) {
       return NextResponse.json({ error: 'Nessun dato ricevuto.' }, { status: 400 });
     }
 
     const docxBlob = await generateDOCXBlob(data);
-    const pdfBlob = null; // PDF generato lato client via jsPDF
+    const generatedDocs = [
+      {
+        key: 'documento_anagrafico',
+        fileName: 'Documento-Anagrafico-BNDO.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        key: 'scheda_aziendale',
+        fileName: 'Scheda-Aziendale-BNDO.pdf',
+        mimeType: 'application/pdf',
+      },
+    ];
+
+    if (mode === 'manifest') {
+      return NextResponse.json(
+        {
+          ok: true,
+          generatedDocs,
+          reviewRequired: [],
+        },
+        { status: 200 }
+      );
+    }
 
     const docxBuf = Buffer.from(await docxBlob.arrayBuffer());
-
     return new NextResponse(docxBuf, {
       status: 200,
       headers: {

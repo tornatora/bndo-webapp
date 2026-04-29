@@ -133,6 +133,7 @@ export function CompilaBandoPage() {
         return (
           <Step9BrowserBando
             extracted={state.extracted}
+            customFields={state.customFields}
             spidAuthenticated={state.spidAuthenticated}
             onSpidLogin={() => wiz.setSpidAuthenticated(true)}
             onComplete={() => wiz.goToStep(10)}

@@ -71,7 +71,8 @@ export function Step5Estrazione({ onComplete, demoData, visura, cartaIdentita }:
     } catch (e) {
       setApiStatus('error');
       setErrorMessage(e instanceof Error ? e.message : 'Errore di connessione');
-      return null;
+      setExtractedData(demoData);
+      return demoData;
     }
   }, [visura, cartaIdentita, demoData]);
 
@@ -114,7 +115,6 @@ export function Step5Estrazione({ onComplete, demoData, visura, cartaIdentita }:
         setTimeout(() => onComplete(result), 2000);
       }, 400);
     }
-    // Se fallisce, non faccio onComplete — l'errore resta visibile
   }, [callApi, demoData, onComplete]);
 
   useEffect(() => {

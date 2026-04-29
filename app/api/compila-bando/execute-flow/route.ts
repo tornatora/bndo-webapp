@@ -7,8 +7,10 @@ import {
   resolveFlowStepValue,
   resolveWaitUntil,
 } from '@/lib/compila-bando/flow-runtime';
+import { createBrowserbaseClient } from '@/lib/copilot/browserbase';
 import type {
   ClientData,
+  FlowExecutionPhase,
   FlowExecutionResult,
   FlowStep,
   FlowStepExecutionResult,
@@ -388,15 +390,47 @@ async function executeStep(
   }
 }
 
-function parseRequestBody(raw: unknown): { connectUrl: string; client: ClientData } | null {
+function parseRequestBody(raw: unknown): {
+  connectUrl: string;
+  client: ClientData;
+  phase: FlowExecutionPhase;
+  applicationId: string | null;
+  sessionId: string | null;
+} | null {
   if (!raw || typeof raw !== 'object') return null;
-  const maybe = raw as { connectUrl?: unknown; client?: unknown };
-  if (typeof maybe.connectUrl !== 'string' || !maybe.connectUrl.trim()) return null;
-  if (!maybe.client || typeof maybe.client !== 'object') return null;
-  return {
-    connectUrl: maybe.connectUrl,
-    client: maybe.client as ClientData,
+  const maybe = raw as {
+    connectUrl?: unknown;
+    client?: unknown;
+    phase?: unknown;
+    applicationId?: unknown;
+    sessionId?: unknown;
   };
+  if (typeof maybe.connectUrl !== 'string' && typeof maybe.sessionId !== 'string') return null;
+  if (!maybe.client || typeof maybe.client !== 'object') return null;
+  const phase = typeof maybe.phase === 'string' && maybe.phase.trim() ? maybe.phase.trim() : 'form_fill';
+  const applicationId = typeof maybe.applicationId === 'string' && maybe.applicationId.trim() ? maybe.applicationId.trim() : null;
+  const sessionId = typeof maybe.sessionId === 'string' && maybe.sessionId.trim() ? maybe.sessionId.trim() : null;
+  return {
+    connectUrl: typeof maybe.connectUrl === 'string' ? maybe.connectUrl : '',
+    client: maybe.client as ClientData,
+    phase,
+    applicationId,
+    sessionId,
+  };
+}
+
+async function resolveConnectUrl(payload: {
+  connectUrl: string;
+  sessionId: string | null;
+}): Promise<string> {
+  if (payload.connectUrl.trim()) return payload.connectUrl.trim();
+  if (!payload.sessionId) {
+    throw new Error('connectUrl o sessionId richiesto');
+  }
+  const bb = await createBrowserbaseClient();
+  const session = await bb.sessions.retrieve(payload.sessionId);
+  if (!session.connectUrl) throw new Error('Sessione Browserbase senza connectUrl');
+  return session.connectUrl;
 }
 
 async function resolvePage(connectUrl: string): Promise<{ browser: Browser; page: Page }> {
@@ -512,6 +546,7 @@ export async function POST(req: Request) {
     if (!payload) {
       return NextResponse.json({ error: 'connectUrl e client richiesti' }, { status: 400 });
     }
+    const connectUrl = await resolveConnectUrl(payload);
 
     const { template: flowTemplate, checksumSha256 } = loadFlowTemplate();
     console.info('[compila-bando][execute-flow] flow_template_loaded', {
@@ -521,7 +556,7 @@ export async function POST(req: Request) {
       checksumSha256,
     });
 
-    const { browser, page } = await resolvePage(payload.connectUrl);
+    const { browser, page } = await resolvePage(connectUrl);
     const stepResults: FlowStepExecutionResult[] = [];
     const failedSteps: FlowStepExecutionResult[] = [];
 
@@ -567,6 +602,10 @@ export async function POST(req: Request) {
 
     const response: FlowExecutionResult = {
       ok: failedSteps.length === 0,
+      phase: payload.phase,
+      applicationId: payload.applicationId,
+      sessionId: payload.sessionId,
+      requiresHumanAction: failedSteps.length > 0,
       elapsedMs: Date.now() - startedAt,
       stepsExecuted: stepResults.filter((r) => r.success).length,
       stepResults,

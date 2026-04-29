@@ -187,6 +187,7 @@ export async function POST(req: Request) {
       loggedIn: result.loggedIn,
       hint: result.hint,
       title: result.title,
+      lastSeenAt: new Date().toISOString(),
     });
   } catch (e) {
     return NextResponse.json(

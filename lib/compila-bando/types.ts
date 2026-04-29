@@ -65,8 +65,19 @@ export type FlowStepExecutionResult = {
   error?: string;
 };
 
+export type FlowExecutionPhase =
+  | 'form_fill'
+  | 'post_sign_upload'
+  | 'attachments'
+  | 'final_submit'
+  | string;
+
 export type FlowExecutionResult = {
   ok: boolean;
+  phase?: FlowExecutionPhase;
+  applicationId?: string | null;
+  sessionId?: string | null;
+  requiresHumanAction?: boolean;
   elapsedMs: number;
   stepsExecuted: number;
   stepResults: FlowStepExecutionResult[];

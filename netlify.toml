@@ -1,6 +1,5 @@
 [build]
   command = "npm run build:app"
-  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -9,7 +8,7 @@
   CHAT_PROXY_TIMEOUT_MS = "30000"
 
 [functions]
-  directory = "netlify/functions"
+  directory = ".netlify/functions"
 
 [functions.refresh-bandi]
   schedule = "0 3 * * *"

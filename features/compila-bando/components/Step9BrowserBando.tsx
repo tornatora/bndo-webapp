@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, OctagonX, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
-import type { ExtractedData } from '../lib/types';
+import type { CustomField, ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
 import s from '../styles/compila-bando.module.css';
 
 type Props = {
   extracted: ExtractedData;
+  customFields?: CustomField[];
+  applicationId?: string | null;
   spidAuthenticated: boolean;
   onSpidLogin: () => void;
   onComplete: () => void;
@@ -49,7 +51,17 @@ type MirrorFrame = {
 };
 
 type SessionStatusResponse =
-  | { ok: true; url: string; loggedIn: boolean; hint: string }
+  | { ok: true; url: string; loggedIn: boolean; hint: string; lastSeenAt?: string | null }
+  | { ok?: false; error?: string };
+
+type ReadinessResponse =
+  | {
+      ok: true;
+      ready: boolean;
+      applicationId: string | null;
+      missingFields: Array<{ key: string; label: string }>;
+      missingDocuments: Array<{ key: string; label: string }>;
+    }
   | { ok?: false; error?: string };
 
 function buildClientPayload(extracted: ExtractedData) {
@@ -71,7 +83,14 @@ function buildClientPayload(extracted: ExtractedData) {
   };
 }
 
-export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthenticated, onSpidLogin, onComplete }: Props) {
+export function Step9BrowserBando({
+  extracted,
+  customFields = [],
+  applicationId,
+  spidAuthenticated: _spidAuthenticated,
+  onSpidLogin,
+  onComplete,
+}: Props) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [session, setSession] = useState<SessionData | null>(null);
   const [flowResult, setFlowResult] = useState<string | null>(null);
@@ -80,10 +99,21 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const [isExecuting, setIsExecuting] = useState(false);
   const [spidTabOpened, setSpidTabOpened] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
+  const [statusLastSeenAt, setStatusLastSeenAt] = useState<string | null>(null);
   const [mirrorFrame, setMirrorFrame] = useState<MirrorFrame | null>(null);
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [typeBuffer, setTypeBuffer] = useState('');
-  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [controlsCollapsed, setControlsCollapsed] = useState(true);
+  const [missingFields, setMissingFields] = useState<Array<{ key: string; label: string }>>([]);
+  const [missingDocuments, setMissingDocuments] = useState<Array<{ key: string; label: string }>>([]);
+  const [resolvedApplicationId, setResolvedApplicationId] = useState<string | null>(applicationId || null);
+  const [typingFieldIndex, setTypingFieldIndex] = useState(0);
+  const [typedCharsByKey, setTypedCharsByKey] = useState<Record<string, number>>({});
+  const [fakeCursor, setFakeCursor] = useState<{ x: number; y: number; clicking: boolean }>({
+    x: 52,
+    y: 90,
+    clicking: false,
+  });
   const initRef = useRef(false);
   const mirrorImgRef = useRef<HTMLImageElement>(null);
   const hasStartedRef = useRef(false);
@@ -100,6 +130,10 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     setMirrorError(null);
     setSpidTabOpened(false);
     setStatusHint(null);
+    setStatusLastSeenAt(null);
+    setMissingFields([]);
+    setMissingDocuments([]);
+    setResolvedApplicationId(applicationId || null);
     hasStartedRef.current = false;
     authRedirectSeenRef.current = false;
     executeAbortRef.current?.abort();
@@ -112,6 +146,28 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     });
 
     try {
+      const readinessRes = await fetch('/api/compila-bando/readiness-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: applicationId || undefined,
+          extracted,
+          customFields,
+        }),
+      });
+      const readiness = (await readinessRes.json()) as ReadinessResponse;
+      if (!readinessRes.ok || !('ok' in readiness) || !readiness.ok) {
+        throw new Error('Controllo completezza non disponibile');
+      }
+      setResolvedApplicationId(readiness.applicationId || applicationId || null);
+      if (!readiness.ready) {
+        setMissingFields(readiness.missingFields || []);
+        setMissingDocuments(readiness.missingDocuments || []);
+        setPhase('spid-login');
+        setFlowResult('Completa i dati/documenti mancanti prima di avviare SPID.');
+        return;
+      }
+
       const response = await fetch('/api/compila-bando/auto-fill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -152,7 +208,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     } finally {
       setIsInitializing(false);
     }
-  }, [extracted]);
+  }, [applicationId, customFields, extracted]);
 
   useEffect(() => {
     if (initRef.current) return;
@@ -364,10 +420,13 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
       const response = await fetch('/api/compila-bando/execute-flow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectUrl: session.connectUrl,
-          client: buildClientPayload(extracted),
-        }),
+          body: JSON.stringify({
+            connectUrl: session.connectUrl,
+            sessionId: session.sessionId,
+            applicationId: resolvedApplicationId || undefined,
+            phase: 'form_fill',
+            client: buildClientPayload(extracted),
+          }),
         signal: controller.signal,
       });
 
@@ -409,7 +468,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
       setIsExecuting(false);
       executeAbortRef.current = null;
     }
-  }, [session, extracted, onSpidLogin]);
+  }, [session, extracted, onSpidLogin, resolvedApplicationId]);
 
   useEffect(() => {
     if (!session) return;
@@ -431,6 +490,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
         if (!alive) return;
         if ('ok' in json && json.ok) {
           setStatusHint(json.hint || null);
+          setStatusLastSeenAt(json.lastSeenAt || null);
           const lowerUrl = (json.url || '').toLowerCase();
           if (
             json.hint === 'b2c_login' ||
@@ -466,6 +526,48 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     const timer = setTimeout(() => setPhase('ready-to-submit'), 2_000);
     return () => clearTimeout(timer);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== 'auto-filling') return;
+    let cancelled = false;
+    setTypingFieldIndex(0);
+    setTypedCharsByKey({});
+
+    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    const runTyping = async () => {
+      for (let i = 0; i < FORM_FIELDS.length; i += 1) {
+        if (cancelled) return;
+        const field = FORM_FIELDS[i];
+        const value = ((extracted as Record<string, string | undefined>)[field.key] || '').trim();
+        setTypingFieldIndex(i);
+        setFakeCursor({ x: 66, y: 146 + i * 48, clicking: true });
+        await wait(70);
+        setFakeCursor({ x: 66, y: 146 + i * 48, clicking: false });
+        if (!value) {
+          setTypedCharsByKey((prev) => ({ ...prev, [field.key]: 0 }));
+          await wait(140);
+          continue;
+        }
+        for (let len = 1; len <= value.length; len += 1) {
+          if (cancelled) return;
+          setTypedCharsByKey((prev) => ({ ...prev, [field.key]: len }));
+          const jitter = 13 + Math.floor(Math.random() * 26);
+          await wait(jitter);
+        }
+        await wait(80);
+      }
+      setTypingFieldIndex(FORM_FIELDS.length);
+      setFakeCursor({ x: 350, y: 420, clicking: true });
+      await wait(70);
+      setFakeCursor({ x: 350, y: 420, clicking: false });
+    };
+
+    void runTyping();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, extracted]);
 
   const handleSubmit = useCallback(() => {
     setPhase('submitted');
@@ -551,6 +653,30 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
           }}
         >
           {flowResult}
+        </div>
+      )}
+
+      {(missingFields.length > 0 || missingDocuments.length > 0) && (
+        <div
+          style={{
+            background: '#fff7ed',
+            border: '1px solid #fed7aa',
+            borderRadius: 10,
+            padding: '10px 14px',
+            marginBottom: 12,
+            fontSize: 12,
+            color: '#9a3412',
+          }}
+        >
+          <strong style={{ display: 'block', marginBottom: 6 }}>Blocco pre-Step9: completa prima questi elementi</strong>
+          {missingFields.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              Campi: {missingFields.map((item) => item.label).join(', ')}
+            </div>
+          )}
+          {missingDocuments.length > 0 && (
+            <div>Documenti: {missingDocuments.map((item) => item.label).join(', ')}</div>
+          )}
         </div>
       )}
 
@@ -697,11 +823,10 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
 	                          Scade: {session.sessionExpiresAt}
 	                        </span>
 	                      )}
-	                      {statusHint && (
-	                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
-	                          Stato: {statusHint}
-	                        </span>
-	                      )}
+	                      {statusHint && <span style={{ fontSize: 11, color: '#94a3b8' }}>Stato: {statusHint}</span>}
+                        {statusLastSeenAt && (
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>Check: {new Date(statusLastSeenAt).toLocaleTimeString('it-IT')}</span>
+                        )}
 	                    </div>
                     <button
                       className={s.cbBtnMuted}
@@ -822,6 +947,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                     flexDirection: 'column',
                     gap: 16,
                     padding: 20,
+                    position: 'relative',
                   }}
                 >
                   <div
@@ -843,6 +969,9 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
 
                   {FORM_FIELDS.map((field) => {
                     const value = (extracted as Record<string, string | undefined>)[field.key] || '';
+                    const typedLen = typedCharsByKey[field.key] ?? (typingFieldIndex > FORM_FIELDS.indexOf(field) ? value.length : 0);
+                    const shownValue = value.slice(0, typedLen);
+                    const isTyping = typingFieldIndex === FORM_FIELDS.indexOf(field) && typedLen < value.length;
                     return (
                       <div
                         key={field.key}
@@ -865,9 +994,17 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                             fontWeight: 600,
                             color: value ? '#0b1136' : '#991b1b',
                             flex: 1,
+                            minHeight: 18,
                           }}
                         >
-                          {value || 'Dato mancante'}
+                          {value ? (
+                            <>
+                              {shownValue}
+                              {isTyping && <span style={{ opacity: 0.8 }}>|</span>}
+                            </>
+                          ) : (
+                            'Dato mancante'
+                          )}
                         </span>
                         {value ? (
                           <Check size={12} style={{ color: '#22c55e' }} />
@@ -877,6 +1014,26 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                       </div>
                     );
                   })}
+
+                  <div
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      left: fakeCursor.x,
+                      top: fakeCursor.y,
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      background: fakeCursor.clicking ? '#22c55e' : '#0b1136',
+                      border: '2px solid #ffffff',
+                      boxShadow: fakeCursor.clicking
+                        ? '0 0 0 6px rgba(34, 197, 94, 0.2)'
+                        : '0 1px 6px rgba(11, 17, 54, 0.35)',
+                      transform: fakeCursor.clicking ? 'scale(1.08)' : 'scale(1)',
+                      transition: 'left 220ms ease, top 220ms ease, transform 120ms ease, box-shadow 120ms ease, background 120ms ease',
+                      pointerEvents: 'none',
+                    }}
+                  />
                 </div>
               )}
 

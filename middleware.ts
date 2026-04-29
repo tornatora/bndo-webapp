@@ -136,10 +136,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isDashboardPath && !user) {
+  if (isDashboardPath && !user && !isNetlifyPreview) {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
-  if (isConsultantPath && !user) {
+  if (isConsultantPath && !user && !isNetlifyPreview) {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
 

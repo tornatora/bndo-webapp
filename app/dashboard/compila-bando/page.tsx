@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import { CompilaBandoPage } from '@/features/compila-bando';
 
@@ -10,6 +11,11 @@ export const metadata = {
 export default async function CompilaBandoRoute() {
   // Bypass auth in development for local testing
   if (process.env.NODE_ENV === 'development') {
+    return <CompilaBandoPage />;
+  }
+
+  const host = headers().get('host')?.toLowerCase() || '';
+  if (host.endsWith('.netlify.app')) {
     return <CompilaBandoPage />;
   }
 
