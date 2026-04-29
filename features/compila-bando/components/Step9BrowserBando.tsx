@@ -87,6 +87,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const initRef = useRef(false);
   const mirrorImgRef = useRef<HTMLImageElement>(null);
   const hasStartedRef = useRef(false);
+  const authRedirectSeenRef = useRef(false);
   const executeAbortRef = useRef<AbortController | null>(null);
 
   const initializeSession = useCallback(async () => {
@@ -100,6 +101,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     setSpidTabOpened(false);
     setStatusHint(null);
     hasStartedRef.current = false;
+    authRedirectSeenRef.current = false;
     executeAbortRef.current?.abort();
     executeAbortRef.current = null;
 
@@ -215,9 +217,34 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
 
   const handleOpenSpidTab = useCallback(() => {
     if (!session?.liveViewUrl) return;
-    const w = window.open(session.liveViewUrl, '_blank', 'noopener,noreferrer');
-    setSpidTabOpened(Boolean(w));
+    const spidWindow = window.open(session.liveViewUrl, 'bndo_spid_live_view');
+    const opened = Boolean(spidWindow);
+    setSpidTabOpened(opened);
     setPhase('spid-auth-wait');
+    setDisconnectNotice(opened ? null : 'Popup bloccato: usa il mirror nella dashboard oppure abilita i popup per BNDO.');
+    setFlowResult(
+      opened
+        ? 'Scheda SPID aperta: torna qui, la dashboard avvia la compilazione appena rileva il login.'
+        : null
+    );
+
+    // Best effort: browser vendors may still keep the new tab focused, but when allowed
+    // we bring BNDO back in front so the user sees the control center again.
+    window.setTimeout(() => {
+      try {
+        spidWindow?.blur();
+        window.focus();
+      } catch {
+        // Best effort only.
+      }
+    }, 350);
+    window.setTimeout(() => {
+      try {
+        window.focus();
+      } catch {
+        // Best effort only.
+      }
+    }, 1200);
   }, [session]);
 
   const handleStop = useCallback(async () => {
@@ -328,7 +355,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
 
     setDisconnectNotice(null);
     setPhase('auto-filling');
-    setFlowResult(null);
+    setFlowResult('Accesso SPID rilevato: avvio compilazione automatica dal JSON...');
     setIsExecuting(true);
 
     try {
@@ -404,7 +431,18 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
         if (!alive) return;
         if ('ok' in json && json.ok) {
           setStatusHint(json.hint || null);
-          if (json.loggedIn) {
+          const lowerUrl = (json.url || '').toLowerCase();
+          if (
+            json.hint === 'b2c_login' ||
+            json.hint === 'spid_provider' ||
+            (!!lowerUrl &&
+              lowerUrl !== 'about:blank' &&
+              !lowerUrl.includes('invitalia-areariservata-fe.npi.invitalia.it'))
+          ) {
+            authRedirectSeenRef.current = true;
+          }
+
+          if (json.loggedIn && (phase === 'spid-auth-wait' || authRedirectSeenRef.current)) {
             onSpidLogin();
             void startExecuteFlow();
             return;

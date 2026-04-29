@@ -13,6 +13,17 @@ type Hint =
   | 'invitalia_home_logged_out'
   | 'unknown';
 
+type PageInspection = {
+  index: number;
+  url: string;
+  title: string;
+  text: string;
+  loggedIn: boolean;
+  hint: Hint;
+};
+
+const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -25,16 +36,14 @@ async function getConnectUrl(sessionId: string): Promise<string> {
   return connectUrl;
 }
 
-async function withRemotePage<T>(connectUrl: string, fn: (page: any) => Promise<T>): Promise<T> {
+async function withRemoteBrowser<T>(connectUrl: string, fn: (browser: any) => Promise<T>): Promise<T> {
   const mod = (await import('puppeteer-core')) as any;
   const puppeteer = mod?.default ?? mod;
   if (!puppeteer?.connect) throw new Error('puppeteer-core non disponibile');
 
   const browser = await puppeteer.connect({ browserWSEndpoint: connectUrl, defaultViewport: null });
   try {
-    const pages = (await browser.pages()) as any[];
-    const page = pages[0] ?? (await browser.newPage());
-    return await fn(page);
+    return await fn(browser);
   } finally {
     if (typeof browser.disconnect === 'function') browser.disconnect();
     else if (typeof browser.close === 'function') await browser.close();
@@ -48,11 +57,11 @@ function classify(url: string, text: string): { loggedIn: boolean; hint: Hint } 
   if (lowerUrl.includes('.b2clogin.com')) return { loggedIn: false, hint: 'b2c_login' };
 
   // Heuristic for SPID provider pages: often external domains after "entra con spid".
-  if (!lowerUrl.includes('invitalia-areariservata-fe.npi.invitalia.it') && lowerText.includes('spid')) {
+  if (!lowerUrl.includes(INVITALIA_AREA_HOST) && lowerText.includes('spid')) {
     return { loggedIn: false, hint: 'spid_provider' };
   }
 
-  const isInvitaliaArea = lowerUrl.includes('invitalia-areariservata-fe.npi.invitalia.it');
+  const isInvitaliaArea = lowerUrl.includes(INVITALIA_AREA_HOST);
   if (!isInvitaliaArea) return { loggedIn: false, hint: 'unknown' };
 
   const looksLoggedOut =
@@ -60,16 +69,85 @@ function classify(url: string, text: string): { loggedIn: boolean; hint: Hint } 
     lowerText.includes('accedi con la tua identità') ||
     lowerText.includes('entra con spid') ||
     lowerText.includes('identita digitale') ||
-    lowerText.includes('identità digitale');
+    lowerText.includes('identità digitale') ||
+    lowerText.includes('scegli il tuo provider') ||
+    lowerText.includes('seleziona il gestore');
 
   const looksLoggedIn =
     lowerText.includes('presenta domanda') ||
     lowerText.includes('area riservata') ||
     lowerText.includes('le mie domande') ||
-    lowerText.includes('profilo');
+    lowerText.includes('nuova domanda') ||
+    lowerText.includes('cruscotto') ||
+    lowerText.includes('fascicolo') ||
+    lowerText.includes('agevolazioni') ||
+    lowerText.includes('profilo') ||
+    lowerText.includes('logout') ||
+    lowerText.includes('esci');
+  const looksLikeReturnedHome = lowerUrl.includes('/home') && lowerText.length > 250;
 
-  if (looksLoggedIn && !looksLoggedOut) return { loggedIn: true, hint: 'invitalia_home_logged_in' };
+  if ((looksLoggedIn || looksLikeReturnedHome) && !looksLoggedOut) {
+    return { loggedIn: true, hint: 'invitalia_home_logged_in' };
+  }
   return { loggedIn: false, hint: 'invitalia_home_logged_out' };
+}
+
+async function inspectPage(page: any, index: number): Promise<PageInspection> {
+  const fallback: PageInspection = {
+    index,
+    url: '',
+    title: '',
+    text: '',
+    loggedIn: false,
+    hint: 'unknown',
+  };
+
+  try {
+    const url = typeof page.url === 'function' ? String(page.url()) : '';
+    const data = await page
+      .evaluate(() => ({
+        title: document.title || '',
+        text: (document.body?.innerText || '').slice(0, 15000),
+      }))
+      .catch(() => ({ title: '', text: '' }));
+    const { loggedIn, hint } = classify(url, data.text);
+    return {
+      index,
+      url,
+      title: data.title,
+      text: data.text,
+      loggedIn,
+      hint,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function pickBestInspection(inspections: PageInspection[]): PageInspection {
+  const nonBlank = inspections.filter((item) => item.url && item.url !== 'about:blank');
+  const pool = nonBlank.length > 0 ? nonBlank : inspections;
+
+  const loggedIn = pool.find((item) => item.loggedIn);
+  if (loggedIn) return loggedIn;
+
+  const spid = pool.find((item) => item.hint === 'spid_provider');
+  if (spid) return spid;
+
+  const b2c = pool.find((item) => item.hint === 'b2c_login');
+  if (b2c) return b2c;
+
+  const invitalia = pool.find((item) => item.hint === 'invitalia_home_logged_out');
+  if (invitalia) return invitalia;
+
+  return pool[pool.length - 1] ?? {
+    index: 0,
+    url: '',
+    title: '',
+    text: '',
+    loggedIn: false,
+    hint: 'unknown',
+  };
 }
 
 export async function POST(req: Request) {
@@ -90,17 +168,26 @@ export async function POST(req: Request) {
     }
 
     const connectUrl = await getConnectUrl(sessionId);
-    const result = await withRemotePage(connectUrl, async (page) => {
-      const url = typeof page.url === 'function' ? String(page.url()) : '';
-      const text = await page.evaluate(() => {
-        const bodyText = document.body?.innerText || '';
-        return bodyText.slice(0, 15000);
+    const result = await withRemoteBrowser(connectUrl, async (browser) => {
+      const pages = ((await browser.pages()) as any[]).filter((page) => {
+        try {
+          return !page.isClosed?.();
+        } catch {
+          return true;
+        }
       });
-      return { url, text };
+      const usablePages = pages.length > 0 ? pages : [await browser.newPage()];
+      const inspections = await Promise.all(usablePages.map((page, index) => inspectPage(page, index)));
+      return pickBestInspection(inspections);
     });
 
-    const { loggedIn, hint } = classify(result.url, result.text);
-    return NextResponse.json({ ok: true, url: result.url, loggedIn, hint });
+    return NextResponse.json({
+      ok: true,
+      url: result.url,
+      loggedIn: result.loggedIn,
+      hint: result.hint,
+      title: result.title,
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : 'Errore session-status' },
@@ -108,4 +195,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

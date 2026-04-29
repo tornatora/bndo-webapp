@@ -19,6 +19,7 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_STEP_TIMEOUT_MS = 8_000;
 const DEFAULT_FLOW_BUDGET_MS = 45_000;
+const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
 
 function getPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -353,12 +354,40 @@ async function resolvePage(connectUrl: string): Promise<{ browser: Browser; page
     throw new Error('Nessun contesto browser disponibile');
   }
 
-  const existingPage = context.pages()[0];
-  const page = existingPage || (await context.newPage());
+  const pages = context.pages().filter((candidate) => !candidate.isClosed());
+  const scored = await Promise.all(
+    pages.map(async (candidate, index) => {
+      const url = candidate.url().toLowerCase();
+      let score = index;
+      if (url && url !== 'about:blank') score += 100;
+      if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+
+      if (url.includes(INVITALIA_AREA_HOST)) {
+        const bodyText = await candidate
+          .locator('body')
+          .innerText({ timeout: 750 })
+          .catch(() => '');
+        const lowerText = bodyText.toLowerCase();
+        const loggedOut =
+          lowerText.includes('accedi con la tua identita') ||
+          lowerText.includes('accedi con la tua identità') ||
+          lowerText.includes('entra con spid') ||
+          lowerText.includes('identita digitale') ||
+          lowerText.includes('identità digitale');
+        if (!loggedOut) score += 300;
+      }
+
+      return { page: candidate, score };
+    })
+  );
+  scored.sort((a, b) => b.score - a.score);
+
+  const page = scored[0]?.page || (await context.newPage());
   if (!page || page.isClosed()) {
     await browser.close();
     throw new Error('Nessuna pagina disponibile');
   }
+  await page.bringToFront().catch(() => undefined);
 
   return { browser, page };
 }

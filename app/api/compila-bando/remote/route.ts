@@ -15,6 +15,8 @@ type RemoteRequest =
   | { action: 'press'; sessionId: string; key: string }
   | { action: 'scroll'; sessionId: string; deltaY: number; deltaX?: number };
 
+const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -29,6 +31,42 @@ async function getConnectUrl(sessionId: string): Promise<string> {
   return connectUrl;
 }
 
+async function selectRemotePage(browser: any) {
+  const pages = ((await browser.pages()) as any[]).filter((page) => {
+    try {
+      return !page.isClosed?.();
+    } catch {
+      return true;
+    }
+  });
+  if (pages.length === 0) return browser.newPage();
+
+  const scored = pages.map((page, index) => {
+    let url = '';
+    try {
+      url = typeof page.url === 'function' ? String(page.url()).toLowerCase() : '';
+    } catch {
+      url = '';
+    }
+
+    let score = index;
+    if (url && url !== 'about:blank') score += 100;
+    if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+    if (url.includes('.b2clogin.com')) score += 900;
+    if (url.includes('spid')) score += 800;
+    return { page, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const page = scored[0]?.page ?? pages[0];
+  try {
+    await page.bringToFront?.();
+  } catch {
+    // Best effort.
+  }
+  return page;
+}
+
 async function withRemotePage<T>(sessionId: string, fn: (page: any, browser: any) => Promise<T>): Promise<T> {
   const connectUrl = await getConnectUrl(sessionId);
   const mod = (await import('puppeteer-core')) as any;
@@ -41,8 +79,7 @@ async function withRemotePage<T>(sessionId: string, fn: (page: any, browser: any
   });
 
   try {
-    const pages = (await browser.pages()) as any[];
-    const page = pages[0] ?? (await browser.newPage());
+    const page = await selectRemotePage(browser);
     return await fn(page, browser);
   } finally {
     // Detach without ending the remote session (keepAlive=true on Browserbase session).
@@ -157,4 +194,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
