@@ -142,6 +142,20 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
     .replace(/[’‘]/g, "'");
   const normalized = normalizeSpaces(normalizedRaw);
 
+  function extractBetween(label: string, endLabels: string[]): string | null {
+    const hay = normalized.toLowerCase();
+    const start = hay.indexOf(label.toLowerCase());
+    if (start === -1) return null;
+    const after = start + label.length;
+    let end = normalized.length;
+    for (const endLabel of endLabels) {
+      const idx = hay.indexOf(endLabel.toLowerCase(), after);
+      if (idx !== -1 && idx < end) end = idx;
+    }
+    const slice = normalized.slice(after, end);
+    return toCleanNullable(slice);
+  }
+
   // Pattern set 1: "classical" visura with explicit labels
   const ragioneSocialeLabeled = extractRegexValue(
     normalized,
@@ -159,18 +173,17 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
 
   const sedeLegale =
     extractSedeLegale(normalizedRaw) ??
-    extractRegexValue(
-      normalized,
-      /Indirizzo\s+Sede\s+(.{6,220}?\bCAP\s*\d{5}\b.{0,60}?)(?:\s+Domicilio\b|\s+Numero\s+REA\b|$)/i
-    );
+    extractBetween('Indirizzo Sede', ['Domicilio digitale', 'Domicilio digitale/PEC', 'Numero REA', 'Partita IVA', 'Codice fiscale']);
 
   const emailPec =
-    extractRegexValue(normalized, /(?:domicilio\s+digitale\/pec|domicilio\s+digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i) ??
-    extractRegexValue(normalized, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
+    extractRegexValue(
+      normalized,
+      /(?:domicilio\s+digitale\/pec|domicilio\s+digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i
+    ) ?? extractRegexValue(normalized, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
 
   const rea =
     extractRegexValue(normalized, /Numero\s+REA\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i) ??
-    extractRegexValue(normalized, /(?:numero\s+rea|rea)\s*[:\-]?\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
+    extractBetween('Numero REA', ['Codice fiscale', 'Partita IVA', 'Forma giuridica', 'Telefono', 'Email', 'Domicilio digitale']);
 
   const partitaIva =
     extractRegexValue(normalized, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
