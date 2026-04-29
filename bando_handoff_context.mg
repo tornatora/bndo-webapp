@@ -4,10 +4,11 @@
 - 2026-04-29 22:10 Europe/Rome
 
 ## Git
-- Commit SHA base: `15fa33d98d121a7b510312ca903085ebbb4dfb77`
+- Commit SHA base: `75e63cb2f7864f62e32f7dd0e307681575f9dd5f`
 - Working tree: modified (non committed)
 
 ## Preview
+- URL branch deploy stabile (consigliata per test): `https://fix-pdf-extraction--cheerful-cobbler-f23efc.netlify.app`
 - URL ultimo draft (sito dedicato): `https://69f264c5abe40ff6927858ac--bndo-step9-preview-20260429.netlify.app`
 - URL sito dedicato: `https://bndo-step9-preview-20260429.netlify.app`
 - Deploy ID (sito dedicato): `69f264c5abe40ff6927858ac`
@@ -74,6 +75,9 @@
 - warning lint non bloccanti già esistenti in altre aree
 
 ## Nota deploy corrente
+- Branch deploy Netlify (Git) operativo:
+  - `/login` -> `200`
+  - `/dashboard/compila-bando` -> `307 /login` (comportamento atteso se non autenticato)
 - Netlify build completa, ma sui deploy CLI preview/prod le route app rispondono 404 mentre gli asset statici `_next/static` sono serviti.
 - Tentativo fallback redirect `/* -> /.netlify/functions/___netlify-server-handler` rimosso: eliminava i 404 ma introduceva 502 (`invalid character '\x00' after top-level value`).
 - Da API Netlify: nei deploy CLI `plugin_state` risulta `none`; in alcuni deploy compare `___netlify-server-handler`, ma il routing pagina resta 404.
