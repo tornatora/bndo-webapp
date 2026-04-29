@@ -223,29 +223,28 @@ async function extractWithLlm(
 }
 
 async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
-  // Tier 1: native require bypassing webpack (same mechanism as the working standalone function)
+  // Tier 1: dynamic import (deploy-safe; works with next.config externals)
   try {
-    const nativeReq: any =
-      typeof (globalThis as any).__non_webpack_require__ !== 'undefined'
-        ? (globalThis as any).__non_webpack_require__
-        : eval('require');
-    const pdfParse = nativeReq('pdf-parse');
-    const PDFParse = pdfParse.PDFParse || pdfParse;
-    const parser = new PDFParse({ data: buf });
-    const data = await parser.getText();
-    await parser.destroy();
-    const text = String(data?.text ?? '').trim();
-    if (text.length >= 80) return text;
+    const mod = (await import('pdf-parse')) as unknown as {
+      PDFParse?: new (opts: { data: Buffer }) => { getText: () => Promise<any>; destroy: () => Promise<void> };
+    };
+    const PDFParse = mod?.PDFParse;
+    if (PDFParse) {
+      const parser = new PDFParse({ data: buf });
+      const data = await parser.getText();
+      await parser.destroy();
+      const text = String(data?.text ?? '').trim();
+      if (text.length >= 80) return text;
+    }
   } catch {}
 
   // Tier 2: HTTP call to standalone Netlify function
   // Try multiple sources for the base URL (env vars may not be available in Next.js Lambda)
   const bases = [
+    baseUrl,
     process.env.DEPLOY_PRIME_URL,
     process.env.URL,
-    baseUrl,
-    'https://bndo.it',
-    'https://cheerful-cobbler-f23efc.netlify.app',
+    process.env.DEPLOY_URL,
   ].filter((b): b is string => !!b && b.length > 0);
 
   for (const base of bases) {

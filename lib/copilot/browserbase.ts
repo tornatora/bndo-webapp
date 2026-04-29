@@ -6,6 +6,12 @@ export type BrowserbaseSessionCreateResult = {
   expiresAt?: string;
 };
 
+export type BrowserbaseSessionRetrieveResult = {
+  id: string;
+  connectUrl?: string;
+  expiresAt?: string;
+};
+
 export type BrowserbaseDebugResult = {
   debuggerUrl?: string;
   debuggerFullscreenUrl?: string;
@@ -14,8 +20,17 @@ export type BrowserbaseDebugResult = {
 
 type BrowserbaseInstance = {
   sessions: {
-    create: (input: { projectId?: string; extensionId?: string }) => Promise<BrowserbaseSessionCreateResult>;
+    create: (input: {
+      projectId?: string;
+      extensionId?: string;
+      keepAlive?: boolean;
+      timeout?: number;
+      browserSettings?: {
+        viewport?: { width: number; height: number };
+      };
+    }) => Promise<BrowserbaseSessionCreateResult>;
     debug: (sessionId: string) => Promise<BrowserbaseDebugResult>;
+    retrieve: (sessionId: string) => Promise<BrowserbaseSessionRetrieveResult>;
     close?: (sessionId: string) => Promise<unknown>;
   };
   extensions: {
@@ -80,6 +95,9 @@ export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
 
 export async function createBrowserbaseSession(input: {
   extensionId?: string;
+  keepAlive?: boolean;
+  timeoutSeconds?: number;
+  viewport?: { width: number; height: number };
 }): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null; expiresAt: string | null }> {
   if (!hasBrowserbaseConfig()) {
     return { sessionId: '', connectUrl: null, liveViewUrl: null, expiresAt: null };
@@ -89,6 +107,11 @@ export async function createBrowserbaseSession(input: {
   const created = await bb.sessions.create({
     projectId: process.env.BROWSERBASE_PROJECT_ID || undefined,
     extensionId: input.extensionId || process.env.BROWSERBASE_EXTENSION_ID || undefined,
+    keepAlive: input.keepAlive ?? true,
+    timeout: input.timeoutSeconds ?? 1800,
+    browserSettings: {
+      viewport: input.viewport ?? { width: 1470, height: 740 },
+    },
   });
   let liveViewUrl: string | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {

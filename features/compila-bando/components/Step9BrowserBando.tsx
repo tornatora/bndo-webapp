@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, ExternalLink, Loader2, RefreshCcw, Send } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { AlertTriangle, Check, Loader2, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
@@ -41,6 +41,13 @@ type AutoFillResponse = {
   providerError?: string | null;
 };
 
+type MirrorFrame = {
+  mimeType: string;
+  data: string;
+  meta: { url: string; width: number; height: number; dpr: number };
+  ts: number;
+};
+
 function buildClientPayload(extracted: ExtractedData) {
   return {
     firstName: extracted.nome_legale_rappresentante?.split(' ')[0] || '',
@@ -67,22 +74,20 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [mirrorFrame, setMirrorFrame] = useState<MirrorFrame | null>(null);
+  const [mirrorError, setMirrorError] = useState<string | null>(null);
+  const [typeBuffer, setTypeBuffer] = useState('');
   const initRef = useRef(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const reconnectAttemptRef = useRef(0);
-  const reconnectTimerRef = useRef<number | null>(null);
+  const mirrorImgRef = useRef<HTMLImageElement>(null);
 
   const initializeSession = useCallback(async () => {
-    reconnectAttemptRef.current = 0;
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
     setIsInitializing(true);
     setPhase('loading');
     setSession(null);
     setDisconnectNotice(null);
     setFlowResult(null);
+    setMirrorFrame(null);
+    setMirrorError(null);
 
     const fieldValues: Record<string, string> = {};
     FORM_FIELDS.forEach((field) => {
@@ -139,37 +144,56 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
     void initializeSession();
   }, [initializeSession]);
 
-  useEffect(() => {
-    function handleIframeMessage(event: MessageEvent) {
-      if (event.data !== 'browserbase-disconnected') return;
+  const fetchMirrorFrame = useCallback(async () => {
+    if (!session) return;
 
-      setIsExecuting(false);
-      const attempt = reconnectAttemptRef.current + 1;
-      reconnectAttemptRef.current = attempt;
+    try {
+      const response = await fetch('/api/compila-bando/remote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'screenshot', sessionId: session.sessionId }),
+      });
+      const data = (await response.json()) as
+        | { ok: true; mimeType: string; data: string; meta: MirrorFrame['meta'] }
+        | { ok?: false; error?: string };
 
-      // If WebSockets are blocked (network / browser policy), reconnecting forever is useless.
-      // We stop after a few attempts and guide the user to open the live view in a new tab.
-      if (attempt > 3) {
-        setDisconnectNotice('Connessione WebSocket bloccata o instabile. Apri il browser in una nuova scheda.');
-        setFlowResult(
-          'La Live View non riesce a mantenere il WebSocket. Tipico di reti aziendali/VPN o policy browser su iframe.'
-        );
-        setPhase('spid-login');
+      if ('ok' in data && data.ok) {
+        setMirrorFrame({
+          mimeType: data.mimeType,
+          data: data.data,
+          meta: data.meta,
+          ts: Date.now(),
+        });
+        setMirrorError(null);
         return;
       }
 
-      setDisconnectNotice(`Connessione al browser cloud interrotta. Riconnessione automatica (${attempt}/3)...`);
-      setFlowResult(null);
-      setPhase('loading');
-
-      const backoffMs = Math.min(8000, 800 * Math.pow(2, attempt - 1));
-      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = window.setTimeout(() => void initializeSession(), backoffMs);
+      setMirrorError('error' in data && data.error ? data.error : 'Screenshot non disponibile');
+    } catch (e) {
+      setMirrorError(e instanceof Error ? e.message : 'Errore screenshot');
     }
+  }, [session]);
 
-    window.addEventListener('message', handleIframeMessage);
-    return () => window.removeEventListener('message', handleIframeMessage);
-  }, [initializeSession]);
+  useEffect(() => {
+    if (!session) return;
+    if (!(phase === 'spid-login' || phase === 'spid-auth-wait')) return;
+
+    let alive = true;
+    let timer: number | null = null;
+
+    const tick = async () => {
+      if (!alive) return;
+      await fetchMirrorFrame();
+      if (!alive) return;
+      timer = window.setTimeout(tick, 1500);
+    };
+
+    void tick();
+    return () => {
+      alive = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [session, phase, fetchMirrorFrame]);
 
   const handleRetrySession = useCallback(() => {
     void initializeSession();
@@ -178,6 +202,70 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const handleSpidClick = useCallback(() => {
     setPhase('spid-auth-wait');
   }, []);
+
+  const remoteAction = useCallback(
+    async (payload: Record<string, unknown>) => {
+      if (!session) return false;
+      try {
+        const response = await fetch('/api/compila-bando/remote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: session.sessionId, ...payload }),
+        });
+        const data = (await response.json()) as { ok?: boolean; error?: string };
+        if (data.ok) return true;
+        setMirrorError(data.error || 'Errore controllo remoto');
+        return false;
+      } catch (e) {
+        setMirrorError(e instanceof Error ? e.message : 'Errore controllo remoto');
+        return false;
+      }
+    },
+    [session]
+  );
+
+  const handleMirrorClick = useCallback(
+    async (event: MouseEvent<HTMLImageElement>) => {
+      if (!mirrorFrame) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      const rx = (event.clientX - rect.left) / rect.width;
+      const ry = (event.clientY - rect.top) / rect.height;
+      const x = Math.max(0, Math.round(rx * mirrorFrame.meta.width));
+      const y = Math.max(0, Math.round(ry * mirrorFrame.meta.height));
+
+      const ok = await remoteAction({ action: 'click', x, y });
+      if (ok) void fetchMirrorFrame();
+    },
+    [mirrorFrame, remoteAction, fetchMirrorFrame]
+  );
+
+  const handleSendType = useCallback(async () => {
+    const text = typeBuffer;
+    if (!text.trim()) return;
+    const ok = await remoteAction({ action: 'type', text });
+    if (ok) {
+      setTypeBuffer('');
+      void fetchMirrorFrame();
+    }
+  }, [typeBuffer, remoteAction, fetchMirrorFrame]);
+
+  const handlePressKey = useCallback(
+    async (key: string) => {
+      const ok = await remoteAction({ action: 'press', key });
+      if (ok) void fetchMirrorFrame();
+    },
+    [remoteAction, fetchMirrorFrame]
+  );
+
+  const handleScroll = useCallback(
+    async (deltaY: number) => {
+      const ok = await remoteAction({ action: 'scroll', deltaY });
+      if (ok) void fetchMirrorFrame();
+    },
+    [remoteAction, fetchMirrorFrame]
+  );
 
   const handleSpidComplete = useCallback(async () => {
     if (!session) return;
@@ -383,12 +471,60 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
           {session && phase !== 'submitted' && (
             <div style={{ position: 'relative', width: '100%', height: '100%' }}>
               {(phase === 'spid-login' || phase === 'spid-auth-wait') && (
-                <iframe
-                  ref={iframeRef}
-                  src={session.liveViewUrl}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  title="Browserbase Live Browser"
-                />
+                <div style={{ width: '100%', height: '100%', background: '#0b1136' }}>
+                  {mirrorFrame ? (
+                    <img
+                      ref={mirrorImgRef}
+                      src={`data:${mirrorFrame.mimeType};base64,${mirrorFrame.data}`}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        cursor: 'crosshair',
+                        background: '#0b1136',
+                        display: 'block',
+                      }}
+                      onClick={handleMirrorClick}
+                      alt="Invitalia Mirror"
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '100%',
+                        flexDirection: 'column',
+                        gap: 10,
+                        color: '#e2e8f0',
+                        fontSize: 13,
+                      }}
+                    >
+                      <Loader2 size={18} className={s.cbSpinner} />
+                      Carico schermata...
+                    </div>
+                  )}
+
+                  {mirrorError && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        left: 12,
+                        right: 12,
+                        background: 'rgba(254, 242, 242, 0.95)',
+                        border: '1px solid #fecaca',
+                        borderRadius: 10,
+                        padding: '8px 12px',
+                        color: '#991b1b',
+                        fontSize: 12,
+                        zIndex: 3,
+                      }}
+                    >
+                      {mirrorError}
+                    </div>
+                  )}
+                </div>
               )}
 
               {phase === 'spid-login' && (
@@ -410,27 +546,60 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                   }}
                 >
                   <p style={{ fontSize: 12, color: '#64748b', margin: 0, textAlign: 'center' }}>
-                    Il browser qui sopra mostra la vera pagina SPID Invitalia ({session.provider}).
-                    Clicca &ldquo;Accedi con SPID&rdquo; e autenticati direttamente nell&apos;iframe.
+                    Clicca direttamente nella schermata sopra per interagire con Invitalia (sessione {session.provider}).
+                    Quando hai finito l&apos;accesso, clicca &ldquo;Ho completato l&apos;accesso&rdquo;.
                   </p>
                   {session.sessionExpiresAt && (
                     <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
                       Sessione valida fino a: {session.sessionExpiresAt}
                     </p>
                   )}
-                  <button className={s.cbBtnGreen} onClick={handleSpidClick} type="button">
-                    Accedi con SPID
-                  </button>
-                  {session?.liveViewUrl && (
-                    <button
-                      className={s.cbBtnMuted}
-                      type="button"
-                      onClick={() => window.open(session.liveViewUrl, '_blank', 'noopener,noreferrer')}
-                    >
-                      <ExternalLink size={14} />
-                      Apri in nuova scheda
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')}>
+                      TAB
                     </button>
-                  )}
+                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')}>
+                      INVIO
+                    </button>
+                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')}>
+                      BACK
+                    </button>
+                    <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)}>
+                      Su
+                    </button>
+                    <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)}>
+                      Giu
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
+                    <input
+                      value={typeBuffer}
+                      onChange={(e) => setTypeBuffer(e.target.value)}
+                      placeholder="Scrivi qui e invia alla sessione..."
+                      style={{
+                        flex: 1,
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 10,
+                        padding: '10px 12px',
+                        fontSize: 13,
+                        outline: 'none',
+                      }}
+                    />
+                    <button className={s.cbBtnGreen} type="button" onClick={handleSendType}>
+                      <Send size={14} />
+                      Invia
+                    </button>
+                  </div>
+                  <button
+                    className={s.cbBtnGreen}
+                    onClick={handleSpidComplete}
+                    type="button"
+                    style={{ whiteSpace: 'nowrap' }}
+                    disabled={isExecuting}
+                  >
+                    {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
+                    Ho completato l&apos;accesso
+                  </button>
                 </div>
               )}
 
