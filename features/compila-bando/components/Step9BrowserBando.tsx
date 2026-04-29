@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { AlertTriangle, Check, Loader2, RefreshCcw, Send } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
@@ -77,6 +77,7 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
   const [mirrorFrame, setMirrorFrame] = useState<MirrorFrame | null>(null);
   const [mirrorError, setMirrorError] = useState<string | null>(null);
   const [typeBuffer, setTypeBuffer] = useState('');
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const initRef = useRef(false);
   const mirrorImgRef = useRef<HTMLImageElement>(null);
 
@@ -534,62 +535,80 @@ export function Step9BrowserBando({ extracted, spidAuthenticated: _spidAuthentic
                     bottom: 0,
                     left: 0,
                     right: 0,
-                    padding: '16px 24px',
-                    background: 'rgba(255,255,255,0.97)',
+                    padding: controlsCollapsed ? '10px 14px' : '12px 16px',
+                    background: 'rgba(255,255,255,0.96)',
                     borderTop: '1px solid #e8ecf4',
                     zIndex: 2,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 12,
+                    gap: 10,
                     flexDirection: 'column',
                   }}
                 >
-                  <p style={{ fontSize: 12, color: '#64748b', margin: 0, textAlign: 'center' }}>
-                    Clicca direttamente nella schermata sopra per interagire con Invitalia (sessione {session.provider}).
-                    Quando hai finito l&apos;accesso, clicca &ldquo;Ho completato l&apos;accesso&rdquo;.
-                  </p>
-                  {session.sessionExpiresAt && (
-                    <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
-                      Sessione valida fino a: {session.sessionExpiresAt}
-                    </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>
+                        Interagisci con la schermata sopra. Poi clicca “Ho completato l’accesso”.
+                      </span>
+                      {session.sessionExpiresAt && (
+                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                          Scade: {session.sessionExpiresAt}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className={s.cbBtnMuted}
+                      type="button"
+                      onClick={() => setControlsCollapsed((v) => !v)}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {controlsCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      {controlsCollapsed ? 'Mostra' : 'Nascondi'} controlli
+                    </button>
+                  </div>
+
+                  {!controlsCollapsed && (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')}>
+                          TAB
+                        </button>
+                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')}>
+                          INVIO
+                        </button>
+                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')}>
+                          BACK
+                        </button>
+                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)}>
+                          Su
+                        </button>
+                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)}>
+                          Giu
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
+                        <input
+                          value={typeBuffer}
+                          onChange={(e) => setTypeBuffer(e.target.value)}
+                          placeholder="Scrivi qui e invia alla sessione..."
+                          style={{
+                            flex: 1,
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 10,
+                            padding: '10px 12px',
+                            fontSize: 13,
+                            outline: 'none',
+                          }}
+                        />
+                        <button className={s.cbBtnGreen} type="button" onClick={handleSendType}>
+                          <Send size={14} />
+                          Invia
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')}>
-                      TAB
-                    </button>
-                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')}>
-                      INVIO
-                    </button>
-                    <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')}>
-                      BACK
-                    </button>
-                    <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)}>
-                      Su
-                    </button>
-                    <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)}>
-                      Giu
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
-                    <input
-                      value={typeBuffer}
-                      onChange={(e) => setTypeBuffer(e.target.value)}
-                      placeholder="Scrivi qui e invia alla sessione..."
-                      style={{
-                        flex: 1,
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 10,
-                        padding: '10px 12px',
-                        fontSize: 13,
-                        outline: 'none',
-                      }}
-                    />
-                    <button className={s.cbBtnGreen} type="button" onClick={handleSendType}>
-                      <Send size={14} />
-                      Invia
-                    </button>
-                  </div>
+
                   <button
                     className={s.cbBtnGreen}
                     onClick={handleSpidComplete}
