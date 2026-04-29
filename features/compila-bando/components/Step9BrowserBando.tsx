@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, OctagonX, RefreshCcw, Send } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Loader2, OctagonX, RefreshCcw, Send } from 'lucide-react';
 import type { FlowExecutionResult } from '@/lib/compila-bando/types';
 import type { CustomField, ExtractedData } from '../lib/types';
 import { FORM_FIELDS } from '../lib/demoData';
@@ -41,13 +41,6 @@ type AutoFillResponse = {
   browserbaseSessionId?: string | null;
   sessionExpiresAt?: string | null;
   providerError?: string | null;
-};
-
-type MirrorFrame = {
-  mimeType: string;
-  data: string;
-  meta: { url: string; width: number; height: number; dpr: number };
-  ts: number;
 };
 
 type SessionStatusResponse =
@@ -100,10 +93,6 @@ export function Step9BrowserBando({
   const [spidTabOpened, setSpidTabOpened] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [statusLastSeenAt, setStatusLastSeenAt] = useState<string | null>(null);
-  const [mirrorFrame, setMirrorFrame] = useState<MirrorFrame | null>(null);
-  const [mirrorError, setMirrorError] = useState<string | null>(null);
-  const [typeBuffer, setTypeBuffer] = useState('');
-  const [controlsCollapsed, setControlsCollapsed] = useState(true);
   const [missingFields, setMissingFields] = useState<Array<{ key: string; label: string }>>([]);
   const [missingDocuments, setMissingDocuments] = useState<Array<{ key: string; label: string }>>([]);
   const [resolvedApplicationId, setResolvedApplicationId] = useState<string | null>(applicationId || null);
@@ -115,7 +104,6 @@ export function Step9BrowserBando({
     clicking: false,
   });
   const initRef = useRef(false);
-  const mirrorImgRef = useRef<HTMLImageElement>(null);
   const hasStartedRef = useRef(false);
   const authRedirectSeenRef = useRef(false);
   const executeAbortRef = useRef<AbortController | null>(null);
@@ -126,8 +114,6 @@ export function Step9BrowserBando({
     setSession(null);
     setDisconnectNotice(null);
     setFlowResult(null);
-    setMirrorFrame(null);
-    setMirrorError(null);
     setSpidTabOpened(false);
     setStatusHint(null);
     setStatusLastSeenAt(null);
@@ -216,57 +202,6 @@ export function Step9BrowserBando({
     void initializeSession();
   }, [initializeSession]);
 
-  const fetchMirrorFrame = useCallback(async () => {
-    if (!session) return;
-
-    try {
-      const response = await fetch('/api/compila-bando/remote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'screenshot', sessionId: session.sessionId }),
-      });
-      const data = (await response.json()) as
-        | { ok: true; mimeType: string; data: string; meta: MirrorFrame['meta'] }
-        | { ok?: false; error?: string };
-
-      if ('ok' in data && data.ok) {
-        setMirrorFrame({
-          mimeType: data.mimeType,
-          data: data.data,
-          meta: data.meta,
-          ts: Date.now(),
-        });
-        setMirrorError(null);
-        return;
-      }
-
-      setMirrorError('error' in data && data.error ? data.error : 'Screenshot non disponibile');
-    } catch (e) {
-      setMirrorError(e instanceof Error ? e.message : 'Errore screenshot');
-    }
-  }, [session]);
-
-  useEffect(() => {
-    if (!session) return;
-    if (!(phase === 'spid-login' || phase === 'spid-auth-wait' || phase === 'auto-filling')) return;
-
-    let alive = true;
-    let timer: number | null = null;
-
-    const tick = async () => {
-      if (!alive) return;
-      await fetchMirrorFrame();
-      if (!alive) return;
-      timer = window.setTimeout(tick, 1500);
-    };
-
-    void tick();
-    return () => {
-      alive = false;
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [session, phase, fetchMirrorFrame]);
-
   const handleRetrySession = useCallback(() => {
     void initializeSession();
   }, [initializeSession]);
@@ -277,7 +212,7 @@ export function Step9BrowserBando({
     const opened = Boolean(spidWindow);
     setSpidTabOpened(opened);
     setPhase('spid-auth-wait');
-    setDisconnectNotice(opened ? null : 'Popup bloccato: usa il mirror nella dashboard oppure abilita i popup per BNDO.');
+    setDisconnectNotice(opened ? null : 'Popup bloccato: abilita i popup per BNDO e riapri la scheda SPID.');
     setFlowResult(
       opened
         ? 'Scheda SPID aperta: torna qui, la dashboard avvia la compilazione appena rileva il login.'
@@ -324,85 +259,6 @@ export function Step9BrowserBando({
 
     void initializeSession();
   }, [session, initializeSession]);
-
-  const remoteAction = useCallback(
-    async (payload: Record<string, unknown>) => {
-      if (!session) return false;
-      try {
-        const response = await fetch('/api/compila-bando/remote', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: session.sessionId, ...payload }),
-        });
-        const data = (await response.json()) as { ok?: boolean; error?: string };
-        if (data.ok) return true;
-        setMirrorError(data.error || 'Errore controllo remoto');
-        return false;
-      } catch (e) {
-        setMirrorError(e instanceof Error ? e.message : 'Errore controllo remoto');
-        return false;
-      }
-    },
-    [session]
-  );
-
-  const handleMirrorClick = useCallback(
-    async (event: MouseEvent<HTMLImageElement>) => {
-      if (!mirrorFrame) return;
-      // Mirror is only interactive as fallback when the new tab could not be opened.
-      if (spidTabOpened) return;
-      const rect = event.currentTarget.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-
-      // Letterbox-aware mapping for objectFit: 'contain'
-      const imgW = rect.width;
-      const imgH = rect.height;
-      const srcW = mirrorFrame.meta.width;
-      const srcH = mirrorFrame.meta.height;
-      const scale = Math.min(imgW / srcW, imgH / srcH);
-      const drawnW = srcW * scale;
-      const drawnH = srcH * scale;
-      const offsetX = (imgW - drawnW) / 2;
-      const offsetY = (imgH - drawnH) / 2;
-
-      const localX = event.clientX - rect.left - offsetX;
-      const localY = event.clientY - rect.top - offsetY;
-      if (localX < 0 || localY < 0 || localX > drawnW || localY > drawnH) return;
-
-      const x = Math.max(0, Math.round((localX / drawnW) * srcW));
-      const y = Math.max(0, Math.round((localY / drawnH) * srcH));
-
-      const ok = await remoteAction({ action: 'click', x, y });
-      if (ok) void fetchMirrorFrame();
-    },
-    [mirrorFrame, remoteAction, fetchMirrorFrame, spidTabOpened]
-  );
-
-  const handleSendType = useCallback(async () => {
-    const text = typeBuffer;
-    if (!text.trim()) return;
-    const ok = await remoteAction({ action: 'type', text });
-    if (ok) {
-      setTypeBuffer('');
-      void fetchMirrorFrame();
-    }
-  }, [typeBuffer, remoteAction, fetchMirrorFrame]);
-
-  const handlePressKey = useCallback(
-    async (key: string) => {
-      const ok = await remoteAction({ action: 'press', key });
-      if (ok) void fetchMirrorFrame();
-    },
-    [remoteAction, fetchMirrorFrame]
-  );
-
-  const handleScroll = useCallback(
-    async (deltaY: number) => {
-      const ok = await remoteAction({ action: 'scroll', deltaY });
-      if (ok) void fetchMirrorFrame();
-    },
-    [remoteAction, fetchMirrorFrame]
-  );
 
   const startExecuteFlow = useCallback(async () => {
     if (!session) return;
@@ -739,203 +595,49 @@ export function Step9BrowserBando({
           {session && phase !== 'submitted' && (
             <div style={{ position: 'relative', width: '100%', height: '100%' }}>
               {(phase === 'spid-login' || phase === 'spid-auth-wait') && (
-                <div style={{ width: '100%', height: '100%', background: '#0b1136' }}>
-                  {mirrorFrame ? (
-                    <img
-                      ref={mirrorImgRef}
-                      src={`data:${mirrorFrame.mimeType};base64,${mirrorFrame.data}`}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'contain',
-                        cursor: spidTabOpened ? 'default' : 'crosshair',
-                        background: '#0b1136',
-                        display: 'block',
-                      }}
-                      onClick={handleMirrorClick}
-                      alt="Invitalia Mirror"
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: '100%',
-                        flexDirection: 'column',
-                        gap: 10,
-                        color: '#e2e8f0',
-                        fontSize: 13,
-                      }}
-                    >
-                      <Loader2 size={18} className={s.cbSpinner} />
-                      Carico schermata...
-                    </div>
-                  )}
-
-                  {mirrorError && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 12,
-                        left: 12,
-                        right: 12,
-                        background: 'rgba(254, 242, 242, 0.95)',
-                        border: '1px solid #fecaca',
-                        borderRadius: 10,
-                        padding: '8px 12px',
-                        color: '#991b1b',
-                        fontSize: 12,
-                        zIndex: 3,
-                      }}
-                    >
-                      {mirrorError}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {phase === 'spid-login' && (
                 <div
                   style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    padding: controlsCollapsed ? '10px 14px' : '12px 16px',
-                    background: 'rgba(255,255,255,0.96)',
-                    borderTop: '1px solid #e8ecf4',
-                    zIndex: 2,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 10,
-                    flexDirection: 'column',
+                    height: '100%',
+                    padding: 24,
                   }}
                 >
-	                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', justifyContent: 'space-between' }}>
-	                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-	                      <span style={{ fontSize: 12, color: '#64748b' }}>
-	                        Apri SPID in nuova scheda. Quando finisci, la compilazione parte automaticamente.
-	                      </span>
-	                      {session.sessionExpiresAt && (
-	                        <span style={{ fontSize: 11, color: '#94a3b8' }}>
-	                          Scade: {session.sessionExpiresAt}
-	                        </span>
-	                      )}
-	                      {statusHint && <span style={{ fontSize: 11, color: '#94a3b8' }}>Stato: {statusHint}</span>}
-                        {statusLastSeenAt && (
-                          <span style={{ fontSize: 11, color: '#94a3b8' }}>Check: {new Date(statusLastSeenAt).toLocaleTimeString('it-IT')}</span>
-                        )}
-	                    </div>
-                    <button
-                      className={s.cbBtnMuted}
-                      type="button"
-                      onClick={() => setControlsCollapsed((v) => !v)}
-                      style={{ whiteSpace: 'nowrap' }}
-                    >
-                      {controlsCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      {controlsCollapsed ? 'Mostra' : 'Nascondi'} controlli
-                    </button>
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: 640,
+                      background: '#ffffff',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 14,
+                      padding: 18,
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0b1136' }}>
+                      SPID solo in nuova scheda (niente fake browser in dashboard)
+                    </p>
+                    <p style={{ margin: '8px 0 0', fontSize: 12, color: '#64748b' }}>
+                      Apri la scheda SPID, completa login, poi torna qui: la compilazione parte automaticamente.
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                      <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
+                        {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
+                        {phase === 'spid-auth-wait' ? 'Riapri SPID' : 'Accedi con SPID (nuova scheda)'}
+                      </button>
+                      <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
+                        <OctagonX size={14} />
+                        Stop
+                      </button>
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8' }}>
+                      {statusHint ? `Stato: ${statusHint}` : 'Stato: in attesa login SPID'}
+                      {statusLastSeenAt ? ` · Check ${new Date(statusLastSeenAt).toLocaleTimeString('it-IT')}` : ''}
+                      {session.sessionExpiresAt ? ` · Scade: ${session.sessionExpiresAt}` : ''}
+                    </div>
                   </div>
-
-	                  {!controlsCollapsed && (
-	                    <>
-	                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-	                        <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
-	                          {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-	                          Accedi con SPID (nuova scheda)
-	                        </button>
-	                        <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
-	                          <OctagonX size={14} />
-	                          Stop
-	                        </button>
-	                        {!spidTabOpened && (
-	                          <span style={{ fontSize: 11, color: '#991b1b', alignSelf: 'center' }}>
-	                            Se la scheda non si apre, puoi usare il mirror cliccando sulla schermata sopra.
-	                          </span>
-	                        )}
-	                      </div>
-	                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Tab')} disabled={spidTabOpened}>
-	                          TAB
-	                        </button>
-	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Enter')} disabled={spidTabOpened}>
-	                          INVIO
-	                        </button>
-	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handlePressKey('Backspace')} disabled={spidTabOpened}>
-	                          BACK
-	                        </button>
-	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(-520)} disabled={spidTabOpened}>
-	                          Su
-	                        </button>
-	                        <button className={s.cbBtnMuted} type="button" onClick={() => void handleScroll(520)} disabled={spidTabOpened}>
-	                          Giu
-	                        </button>
-	                      </div>
-	                      <div style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
-	                        <input
-	                          value={typeBuffer}
-	                          onChange={(e) => setTypeBuffer(e.target.value)}
-	                          placeholder="Scrivi qui e invia alla sessione..."
-	                          disabled={spidTabOpened}
-	                          style={{
-	                            flex: 1,
-	                            border: '1px solid #e2e8f0',
-	                            borderRadius: 10,
-                            padding: '10px 12px',
-                            fontSize: 13,
-	                            outline: 'none',
-	                          }}
-	                        />
-	                        <button className={s.cbBtnGreen} type="button" onClick={handleSendType} disabled={spidTabOpened}>
-	                          <Send size={14} />
-	                          Invia
-	                        </button>
-	                      </div>
-	                    </>
-	                  )}
-	                </div>
-	              )}
-
-	              {phase === 'spid-auth-wait' && (
-	                <div
-	                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    padding: '16px 24px',
-                    background: 'rgba(255,255,255,0.98)',
-                    borderTop: '1px solid #e8ecf4',
-                    zIndex: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    flexWrap: 'wrap',
-                  }}
-                >
-	                  <div>
-	                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0b1136', margin: 0 }}>
-	                      Completa SPID nella scheda aperta. La compilazione parte automaticamente.
-	                    </p>
-	                    <p style={{ fontSize: 11, color: '#64748b', margin: '2px 0 0' }}>
-	                      {statusHint ? `Stato: ${statusHint}` : 'In attesa di login completato...'}
-	                    </p>
-	                  </div>
-	                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-	                    <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
-	                      {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-	                      Riapri SPID
-	                    </button>
-	                    <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
-	                      <OctagonX size={14} />
-	                      Stop
-	                    </button>
-	                  </div>
-	                </div>
-	              )}
+                </div>
+              )}
 
               {phase === 'auto-filling' && (
                 <div

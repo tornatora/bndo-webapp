@@ -1,7 +1,7 @@
 # BNDO Handoff Context (auto-updated)
 
 ## Timestamp
-- 2026-04-29 22:18 Europe/Rome
+- 2026-04-29 22:35 Europe/Rome
 
 ## Git
 - Commit SHA base: `75e63cb2f7864f62e32f7dd0e307681575f9dd5f`
@@ -9,6 +9,9 @@
 
 ## Preview
 - URL branch deploy stabile (consigliata per test): `https://fix-pdf-extraction--cheerful-cobbler-f23efc.netlify.app`
+- Deploy CLI stabile: `69f271e9c2e4c620ed5febf6`
+- URL alias cache-pulita (test consigliato ora): `https://compila-bando-clean-20260429--cheerful-cobbler-f23efc.netlify.app`
+- Deploy alias cache-pulita: `69f27039e2bc551bdd0f29f4`
 - URL ultimo draft (sito dedicato): `https://69f264c5abe40ff6927858ac--bndo-step9-preview-20260429.netlify.app`
 - URL sito dedicato: `https://bndo-step9-preview-20260429.netlify.app`
 - Deploy ID (sito dedicato): `69f264c5abe40ff6927858ac`
@@ -56,6 +59,23 @@
    - `app/reset-password/page.tsx` ora non va in crash a build-time se mancano env Supabase
    - fallback UI: messaggio esplicito in preview non configurata
    - build testato con `.env` assenti: `npm run build:app` OK
+11. Chiarimento stato documenti compilati:
+   - pipeline Step9/SPID/autofill online e testabile
+   - compilazione massiva template DSAN/C2 fino a PDF pronti firma non è ancora chiusa end-to-end su tutti i template reali
+12. Step9 UX allineata alla richiesta “no fake browser”:
+   - rimosso mirror/controlli remoti dalla dashboard
+   - SPID gestito solo con nuova scheda Browserbase
+   - dashboard resta control center con stato + auto-start compilazione
+13. Step7 documenti allineato agli allegati reali:
+   - mostrati 5 template reali (DSAN Antiriciclaggio, DSAN Casellario, DSAN Requisiti iniziativa, DSAN Requisiti soggettivi, C2 Descrizione iniziativa)
+   - aggiunti box compilabili/di conferma in UI (luogo/data firma, residenza, importo programma, descrizione C2)
+   - mostrata lista file utente caricati in Step4 dentro Step7
+   - `generate-docs` manifest esteso con `generatedDocs[]` e `reviewRequired[]` coerenti
+14. Creato handoff `.md` esterno per continuità con altra AI:
+   - `/Users/nataleletteriotornatora/Desktop/bndo_handoff_context.md`
+15. Hotfix deploy:
+   - ridistribuito alias `fix-pdf-extraction` con build `69f271e9c2e4c620ed5febf6`
+   - confermato che alias `compila-bando-clean-20260429` risponde 404
 
 ## File toccati
 - `app/api/compila-bando/readiness-check/route.ts`
@@ -82,6 +102,12 @@
 - Branch deploy Netlify (Git) operativo:
   - `/login` -> `200`
   - `/dashboard/compila-bando` -> `307 /login` (comportamento atteso se non autenticato)
+- Deploy pubblicato via CLI su alias branch:
+  - URL: `https://fix-pdf-extraction--cheerful-cobbler-f23efc.netlify.app`
+  - Deploy ID ultimo: `69f26ec03a245a1361eb9514`
+  - check runtime:
+    - `GET /login` -> `200`
+    - `GET /dashboard/compila-bando` -> `307 /login`
 - Branch deploy successivi (`75e63cb`, `4a84d40`) falliti prima del fix con errore build:
   - `@supabase/ssr: Your project's URL and API key are required...`
   - causa: env Supabase assenti nel contesto branch deploy

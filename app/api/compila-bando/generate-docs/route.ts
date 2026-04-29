@@ -88,6 +88,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const data = body.data as Record<string, string | null>;
+    const overrides = (body.overrides ?? {}) as Record<string, string | null>;
     const mode = typeof body.mode === 'string' ? body.mode : 'binary';
 
     if (!data || Object.keys(data).length === 0) {
@@ -97,8 +98,33 @@ export async function POST(req: Request) {
     const docxBlob = await generateDOCXBlob(data);
     const generatedDocs = [
       {
+        key: 'dsan_antiriciclaggio',
+        fileName: 'DSAN Antiriciclaggio rsud acn.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        key: 'dsan_casellario_liquidatorie',
+        fileName: 'DSAN Casellario e procedure concorsuali liquidatorie.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        key: 'dsan_requisiti_iniziativa',
+        fileName: 'DSAN Possesso requisiti iniziativa economica.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        key: 'dsan_requisiti_soggettivi',
+        fileName: 'DSAN Possesso requisiti soggettivi.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
+        key: 'descrizione_iniziativa_c2',
+        fileName: 'Descrizione iniziativa economica_attività individuali.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
+      {
         key: 'documento_anagrafico',
-        fileName: 'Documento-Anagrafico-BNDO.docx',
+        fileName: 'Allegati-BNDO.docx',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       },
       {
@@ -107,13 +133,22 @@ export async function POST(req: Request) {
         mimeType: 'application/pdf',
       },
     ];
+    const requiredReview: Array<{ key: string; label: string }> = [];
+    if (!data.nome_legale_rappresentante) requiredReview.push({ key: 'nome_legale_rappresentante', label: 'Nome legale rappresentante' });
+    if (!data.codice_fiscale) requiredReview.push({ key: 'codice_fiscale', label: 'Codice fiscale' });
+    if (!data.partita_iva) requiredReview.push({ key: 'partita_iva', label: 'Partita IVA' });
+    if (!data.sede_legale) requiredReview.push({ key: 'sede_legale', label: 'Sede legale' });
+    if (!overrides.luogo_firma) requiredReview.push({ key: 'luogo_firma', label: 'Luogo firma' });
+    if (!overrides.data_firma) requiredReview.push({ key: 'data_firma', label: 'Data firma' });
+    if (!overrides.residenza_legale_rappresentante) requiredReview.push({ key: 'residenza_legale_rappresentante', label: 'Residenza legale rappresentante' });
+    if (!overrides.descrizione_iniziativa) requiredReview.push({ key: 'descrizione_iniziativa', label: 'Descrizione iniziativa (C2)' });
 
     if (mode === 'manifest') {
       return NextResponse.json(
         {
           ok: true,
           generatedDocs,
-          reviewRequired: [],
+          reviewRequired: requiredReview,
         },
         { status: 200 }
       );

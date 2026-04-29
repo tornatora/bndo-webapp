@@ -14,11 +14,16 @@ import { Step8OffertaAI } from '../components/Step8OffertaAI';
 import { Step9BrowserBando } from '../components/Step9BrowserBando';
 import { Step10ConfermaFinale } from '../components/Step10ConfermaFinale';
 import { DEFAULT_EXTRACTED } from '../lib/demoData';
+import type { WizardStep } from '../lib/types';
 import { useRouter } from 'next/navigation';
 
-export function CompilaBandoPage() {
+type Props = {
+  initialStep?: WizardStep;
+};
+
+export function CompilaBandoPage({ initialStep = 1 }: Props) {
   const router = useRouter();
-  const wiz = useCompilaBandoWizard();
+  const wiz = useCompilaBandoWizard(initialStep);
   const { state } = wiz;
 
   const handleSkipUploads = useCallback(() => {
@@ -110,6 +115,7 @@ export function CompilaBandoPage() {
           <Step7CompilazioneDoc
             extracted={state.extracted}
             customFields={state.customFields}
+            otherFiles={state.files.altri}
             onPdfBlob={wiz.setGeneratedPdfBlob}
             onDocxBlob={wiz.setGeneratedDocxBlob}
           />

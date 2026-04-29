@@ -4,14 +4,29 @@ import { useState, useCallback, useRef } from 'react';
 import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase } from '../lib/types';
 import { DEFAULT_EXTRACTED, INITIAL_EXTRACTED } from '../lib/demoData';
 
-function makeInitialState(): WizardState {
+function makeInitialState(initialStep: WizardStep = 1): WizardState {
+  const shouldSeedDemo = initialStep > 1;
   return {
-    currentStep: 1,
+    currentStep: initialStep,
     direction: 'next',
-    useAiAgent: false,
-    files: { visura: null, cartaIdentita: null, altri: [] },
-    extracted: INITIAL_EXTRACTED,
-    customFields: [],
+    useAiAgent: initialStep >= 9,
+    files: shouldSeedDemo
+      ? {
+          visura: { name: 'visura-demo.pdf', size: 128000, type: 'application/pdf' },
+          cartaIdentita: { name: 'carta-identita-demo.jpg', size: 48000, type: 'image/jpeg' },
+          altri: [
+            { name: 'Preventivo arredamento.pdf', size: 98000, type: 'application/pdf' },
+            { name: 'Preventivo attrezzature.pdf', size: 112000, type: 'application/pdf' },
+          ],
+        }
+      : { visura: null, cartaIdentita: null, altri: [] },
+    extracted: shouldSeedDemo ? { ...DEFAULT_EXTRACTED } : INITIAL_EXTRACTED,
+    customFields: shouldSeedDemo
+      ? [
+          { key: 'luogo_firma', value: 'Napoli' },
+          { key: 'importo_programma', value: '75000' },
+        ]
+      : [],
     generatedPdfBlob: null,
     generatedDocxBlob: null,
     spidPhase: 'login',
@@ -19,9 +34,9 @@ function makeInitialState(): WizardState {
   };
 }
 
-export function useCompilaBandoWizard() {
-  const [state, setState] = useState<WizardState>(makeInitialState);
-  const maxReachedRef = useRef<number>(1);
+export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
+  const [state, setState] = useState<WizardState>(() => makeInitialState(initialStep));
+  const maxReachedRef = useRef<number>(initialStep);
   const step9LockRef = useRef(false);
 
   const goToStep = useCallback((step: WizardStep) => {
@@ -133,10 +148,10 @@ export function useCompilaBandoWizard() {
   }, []);
 
   const reset = useCallback(() => {
-    setState(makeInitialState());
+    setState(makeInitialState(initialStep));
     maxReachedRef.current = 1;
     step9LockRef.current = false;
-  }, []);
+  }, [initialStep]);
 
   return {
     state,
