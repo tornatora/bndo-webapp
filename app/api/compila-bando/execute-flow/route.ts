@@ -17,9 +17,11 @@ import type {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_STEP_TIMEOUT_MS = 8_000;
-const DEFAULT_FLOW_BUDGET_MS = 45_000;
+const DEFAULT_STEP_TIMEOUT_MS = 5_500;
+const DEFAULT_FLOW_BUDGET_MS = 58_000;
 const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
+const DEFAULT_DELAY_SCALE = 0.35;
+const DEFAULT_MAX_DELAY_MS = 850;
 
 function getPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -28,15 +30,57 @@ function getPositiveIntEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+function getBoundedFloatEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 function escapeSelectorText(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 async function applyStepDelay(page: Page, step: FlowStep) {
   const delay = step.timing?.preDelayMs ?? 0;
-  if (delay > 0) {
-    await page.waitForTimeout(delay);
+  if (delay <= 0) return;
+
+  const scale = getBoundedFloatEnv('COMPILA_BANDO_DELAY_SCALE', DEFAULT_DELAY_SCALE, 0.05, 1);
+  const maxDelayMs = getPositiveIntEnv('COMPILA_BANDO_MAX_DELAY_MS', DEFAULT_MAX_DELAY_MS);
+  const effectiveDelay = Math.min(Math.round(delay * scale), maxDelayMs);
+  if (effectiveDelay > 0) {
+    await page.waitForTimeout(effectiveDelay);
   }
+}
+
+async function settleAfterAction(page: Page, stepTimeoutMs: number) {
+  const settleMs = Math.min(2200, Math.max(800, Math.floor(stepTimeoutMs * 0.45)));
+  await page.waitForLoadState('domcontentloaded', { timeout: settleMs }).catch(() => undefined);
+  await page.waitForLoadState('networkidle', { timeout: Math.min(1300, settleMs) }).catch(() => undefined);
+  await page
+    .locator('.cdk-overlay-backdrop-showing, .mat-mdc-progress-spinner, .mat-progress-spinner')
+    .first()
+    .waitFor({ state: 'hidden', timeout: 700 })
+    .catch(() => undefined);
+}
+
+async function waitForUrlTransition(page: Page, beforeUrl: string, stepTimeoutMs: number) {
+  const transitionTimeout = Math.min(2600, Math.max(1200, Math.floor(stepTimeoutMs * 0.5)));
+  await page
+    .waitForURL((next) => String(next) !== beforeUrl, { timeout: transitionTimeout })
+    .catch(() => undefined);
+}
+
+function isSubmitLikeAction(step: FlowStep): boolean {
+  const kind = (step.actionKind || '').toLowerCase();
+  const targetText = (step.target?.text || '').toLowerCase();
+  return (
+    kind.includes('submit') ||
+    targetText.includes('avanti') ||
+    targetText.includes('continua') ||
+    targetText.includes('presenta')
+  );
 }
 
 async function findFirstWorkingSelector(
@@ -106,7 +150,8 @@ async function runClickStep(
 ): Promise<FlowStepExecutionResult> {
   const startedAt = Date.now();
   const selectors = getFlowStepSelectorCandidates(step);
-  const selector = await findFirstWorkingSelector(page, selectors, stepTimeoutMs);
+  const selectionTimeout = Math.max(1200, Math.floor(stepTimeoutMs * 0.7));
+  const selector = await findFirstWorkingSelector(page, selectors, selectionTimeout);
 
   if (!selector) {
     return failedResult(
@@ -119,7 +164,12 @@ async function runClickStep(
   }
 
   try {
+    const beforeUrl = page.url();
     await page.click(selector, { timeout: stepTimeoutMs });
+    if (isSubmitLikeAction(step)) {
+      await waitForUrlTransition(page, beforeUrl, stepTimeoutMs);
+    }
+    await settleAfterAction(page, stepTimeoutMs);
     await applyStepDelay(page, step);
     return successResult(step, stepIndex, startedAt, `Click eseguito su ${selector}`, {
       selectorTried: selector,
@@ -146,7 +196,7 @@ async function runTypeStep(
   }
 
   const selectors = getFlowStepSelectorCandidates(step);
-  const selector = await findFirstWorkingSelector(page, selectors, stepTimeoutMs);
+  const selector = await findFirstWorkingSelector(page, selectors, Math.max(1200, Math.floor(stepTimeoutMs * 0.7)));
   if (!selector) {
     return failedResult(
       step,
@@ -162,7 +212,8 @@ async function runTypeStep(
     await page.click(selector, { timeout: stepTimeoutMs });
     await page.keyboard.press('ControlOrMeta+A');
     await page.keyboard.press('Backspace');
-    await page.type(selector, value, { delay: 28 });
+    await page.type(selector, value, { delay: 8 });
+    await settleAfterAction(page, stepTimeoutMs);
     await applyStepDelay(page, step);
     return successResult(step, stepIndex, startedAt, `Type eseguito su ${selector}`, {
       selectorTried: selector,
@@ -191,7 +242,7 @@ async function runSelectStep(
   }
 
   const selectors = getFlowStepSelectorCandidates(step);
-  const selector = await findFirstWorkingSelector(page, selectors, stepTimeoutMs);
+  const selector = await findFirstWorkingSelector(page, selectors, Math.max(1200, Math.floor(stepTimeoutMs * 0.7)));
   if (!selector) {
     return failedResult(
       step,
@@ -249,6 +300,7 @@ async function runSelectStep(
       throw new Error(`Opzione non selezionabile: ${value}`);
     }
 
+    await settleAfterAction(page, stepTimeoutMs);
     await applyStepDelay(page, step);
     return successResult(step, stepIndex, startedAt, `Select eseguito su ${selector}`, {
       selectorTried: selector,
@@ -278,6 +330,7 @@ async function runGotoStep(
       timeout: stepTimeoutMs,
       waitUntil: resolveWaitUntil(step.waitUntil),
     });
+    await settleAfterAction(page, stepTimeoutMs);
     await applyStepDelay(page, step);
     return successResult(step, stepIndex, startedAt, `Goto completato: ${step.url}`, {
       urlUsed: step.url,
@@ -293,6 +346,7 @@ async function runScrollStep(page: Page, step: FlowStep, stepIndex: number): Pro
     const baseAmount = Math.abs(step.amount ?? 320);
     const signedAmount = step.direction === 'up' ? -baseAmount : baseAmount;
     await page.mouse.wheel(0, signedAmount);
+    await settleAfterAction(page, 1800);
     await applyStepDelay(page, step);
     return successResult(step, stepIndex, startedAt, `Scroll eseguito: ${signedAmount}px`, {
       valueUsed: String(signedAmount),
@@ -392,6 +446,62 @@ async function resolvePage(connectUrl: string): Promise<{ browser: Browser; page
   return { browser, page };
 }
 
+async function selectBestPage(browser: Browser, current: Page): Promise<Page> {
+  const context = browser.contexts()[0];
+  if (!context) return current;
+
+  const pages = context.pages().filter((candidate) => !candidate.isClosed());
+  if (pages.length === 0) return current;
+  if (pages.length === 1) return pages[0]!;
+
+  const scored = pages.map((candidate, index) => {
+    const url = candidate.url().toLowerCase();
+    let score = index;
+    if (url && url !== 'about:blank') score += 100;
+    if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+    if (candidate === current) score += 20;
+    return { page: candidate, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.page ?? current;
+}
+
+async function executeStepWithRetry(
+  page: Page,
+  step: FlowStep,
+  stepIndex: number,
+  stepTimeoutMs: number,
+  flowTemplate: ReturnType<typeof loadFlowTemplate>['template'],
+  client: ClientData
+): Promise<FlowStepExecutionResult> {
+  const maxAttempts = 2;
+  let last: FlowStepExecutionResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await executeStep(page, step, stepIndex, stepTimeoutMs, flowTemplate, client);
+    if (result.success) return result;
+    last = result;
+
+    if (attempt < maxAttempts) {
+      await page.waitForTimeout(450);
+      await settleAfterAction(page, stepTimeoutMs);
+    }
+  }
+
+  return {
+    ...(last || {
+      stepIndex,
+      stepType: step.type,
+      actionKind: step.actionKind,
+      success: false,
+      elapsedMs: 0,
+      message: `Step ${step.type} fallito`,
+      error: 'Errore sconosciuto',
+    }),
+    message: `${last?.message || `Step ${step.type} fallito`} (dopo retry)`,
+  };
+}
+
 export async function POST(req: Request) {
   const startedAt = Date.now();
   const stepTimeoutMs = getPositiveIntEnv('COMPILA_BANDO_STEP_TIMEOUT_MS', DEFAULT_STEP_TIMEOUT_MS);
@@ -417,8 +527,11 @@ export async function POST(req: Request) {
 
     try {
       const queue = buildStrictExecutionQueue(flowTemplate);
+      let activePage = page;
       for (let pointer = 0; pointer < queue.length; pointer += 1) {
         const { stepIndex: index, step } = queue[pointer];
+        activePage = await selectBestPage(browser, activePage);
+
         const elapsed = Date.now() - startedAt;
         if (elapsed > flowBudgetMs) {
           const budgetExceeded: FlowStepExecutionResult = {
@@ -435,7 +548,14 @@ export async function POST(req: Request) {
           break;
         }
 
-        const result = await executeStep(page, step, index, stepTimeoutMs, flowTemplate, payload.client);
+        const result = await executeStepWithRetry(
+          activePage,
+          step,
+          index,
+          stepTimeoutMs,
+          flowTemplate,
+          payload.client
+        );
         stepResults.push(result);
         if (!result.success) {
           failedSteps.push(result);
