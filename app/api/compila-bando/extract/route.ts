@@ -136,12 +136,11 @@ function extractNomeLegale(text: string, ragioneSociale: string | null): string 
 function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   const raw = text.replace(/\r/g, '\n');
   // Normalize diacritics and collapse whitespace so regexes behave consistently across pdf extractors.
-  const normalized = normalizeSpaces(
-    raw
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[’‘]/g, "'")
-  );
+  const normalizedRaw = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’‘]/g, "'");
+  const normalized = normalizeSpaces(normalizedRaw);
 
   // Pattern set 1: "classical" visura with explicit labels
   const ragioneSocialeLabeled = extractRegexValue(
@@ -159,8 +158,8 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   })();
 
   const sedeLegale =
-    extractSedeLegale(normalized) ??
-    extractRegexValue(normalized, /Indirizzo\s+Sede\s+([^\n]{6,180}?\bCAP\s*\d{5}\b[^\n]{0,40})/i);
+    extractSedeLegale(normalizedRaw) ??
+    extractRegexValue(normalized, /Indirizzo\s+Sede\s+(.{6,180}?\bCAP\s*\d{5}\b.{0,40}?)(?:\s{2,}|\s+DOMICILIO|\s+Domicilio|$)/i);
 
   const emailPec =
     extractRegexValue(normalized, /(?:domicilio\s+digitale\/pec|domicilio\s+digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i) ??
@@ -168,7 +167,7 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
 
   const rea =
     extractRegexValue(normalized, /Numero\s+REA\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i) ??
-    extractRegexValue(normalized, /(?:numero\s+rea|rea)\s*[:\-]?\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
+    extractRegexValue(normalized, /(?:numero\s+rea|rea)\s*[:\\-]?\\s*([A-Z]{2}\\s*[-–—]?\\s*\\d{3,})/i);
 
   const partitaIva =
     extractRegexValue(normalized, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
