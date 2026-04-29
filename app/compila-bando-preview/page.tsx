@@ -10,8 +10,8 @@ export default function CompilaBandoPreviewRoute({
 }: {
   searchParams?: { step?: string };
 }) {
-  const rawStep = Number(searchParams?.step ?? 7);
-  const initialStep = (ALLOWED_STEPS.has(rawStep) ? rawStep : 7) as WizardStep;
+  const rawStep = Number(searchParams?.step ?? 1);
+  const initialStep = (ALLOWED_STEPS.has(rawStep) ? rawStep : 1) as WizardStep;
 
   return <CompilaBandoPage initialStep={initialStep} />;
 }
