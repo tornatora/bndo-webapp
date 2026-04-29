@@ -162,8 +162,8 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
     /(?:denominazione|ragione\s+sociale)\s*[:\-]?\s*([^\n]{3,180})/i
   );
 
-  // Pattern set 2: InfoCamere "VISURA ORDINARIA DELL'IMPRESA" layout (no explicit ragione_sociale label)
-  // Usually: "VISURA ORDINARIA DELL'IMPRESA" then company name on next lines, then "DATI ANAGRAFICI".
+  // Pattern set 2: InfoCamere "VISURA ORDINARIA DELL'IMPRESA" layout.
+  // The extracted text is often flattened (few/no newlines). Prefer substring-based field blocks.
   const ragioneSocialeFromHeader = (() => {
     const m = normalized.match(/VISURA\s+ORDINARIA\s+DELL[' ]IMPRESA\s+(.{3,220}?)\s+DATI\s+ANAGRAFICI/i);
     if (!m?.[1]) return null;
@@ -201,15 +201,35 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   const telefono = extractRegexValue(normalized, /(?:telefono|tel\.?)\s*[:\-]?\s*([+0-9][0-9\s\-\/]{5,20})/i);
   const nomeLegaleRappresentante = extractNomeLegale(normalized, ragioneSociale);
 
+  // Hard deterministic fallback for common InfoCamere blocks (works even when text is totally flattened).
+  const sedeLegaleHard =
+    sedeLegale ??
+    extractRegexValue(normalized, /Indirizzo\s+Sede\s+(.+?)\s+(?:Domicilio\s+digitale|Numero\s+REA|Partita\s+IVA|Codice\s+fiscale)\b/i);
+  const emailPecHard =
+    emailPec ??
+    extractRegexValue(normalized, /Domicilio\s+digitale\/PEC\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+  const reaHard =
+    rea ??
+    extractRegexValue(normalized, /Numero\s+REA\s+([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
+  const partitaIvaHard =
+    partitaIva ??
+    extractRegexValue(normalized, /Partita\s+IVA\s+(\d{11})\b/i);
+  const codiceFiscaleHard =
+    codiceFiscale ??
+    extractRegexValue(normalized, /Codice\s+fiscale(?:\s+e\s+n\.\s*iscr\.[^A-Z0-9]{0,10}|\s+e\s+n\.iscr\.[^A-Z0-9]{0,10})?\s*([A-Z0-9]{16})\b/i);
+  const formaGiuridicaHard =
+    formaGiuridica ??
+    extractRegexValue(normalized, /Forma\s+giuridica\s+([A-Za-z ]{5,60})\b/i);
+
   return {
     ragione_sociale: ragioneSociale,
-    sede_legale: sedeLegale,
-    codice_fiscale: codiceFiscale,
-    partita_iva: partitaIva,
-    rea,
-    forma_giuridica: formaGiuridica,
+    sede_legale: sedeLegaleHard,
+    codice_fiscale: codiceFiscaleHard,
+    partita_iva: partitaIvaHard,
+    rea: reaHard,
+    forma_giuridica: formaGiuridicaHard,
     nome_legale_rappresentante: nomeLegaleRappresentante,
-    email_pec: emailPec ? emailPec.toLowerCase() : null,
+    email_pec: emailPecHard ? emailPecHard.toLowerCase() : null,
     telefono,
   };
 }
