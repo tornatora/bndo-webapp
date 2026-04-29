@@ -173,29 +173,31 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
 
   const sedeLegale =
     extractSedeLegale(normalizedRaw) ??
-    extractBetween('Indirizzo Sede', ['Domicilio digitale', 'Domicilio digitale/PEC', 'Numero REA', 'Partita IVA', 'Codice fiscale']);
+    extractBetween('Indirizzo Sede', ['Domicilio digitale', 'Domicilio digitale/PEC', 'Numero REA', 'Partita IVA', 'Codice fiscale']) ??
+    extractBetween('IndirizzoSede', ['Domiciliodigitale', 'NumeroREA', 'PartitaIVA', 'Codicefiscale']);
 
   const emailPec =
     extractRegexValue(
       normalized,
-      /(?:domicilio\s+digitale\/pec|domicilio\s+digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i
+      /(?:domicilio\s*digitale\/pec|domicilio\s*digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i
     ) ?? extractRegexValue(normalized, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
 
   const rea =
-    extractRegexValue(normalized, /Numero\s+REA\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i) ??
-    extractBetween('Numero REA', ['Codice fiscale', 'Partita IVA', 'Forma giuridica', 'Telefono', 'Email', 'Domicilio digitale']);
+    extractRegexValue(normalized, /Numero\s*REA\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i) ??
+    extractBetween('Numero REA', ['Codice fiscale', 'Partita IVA', 'Forma giuridica', 'Telefono', 'Email', 'Domicilio digitale']) ??
+    extractBetween('NumeroREA', ['Codicefiscale', 'PartitaIVA', 'Formagiuridica', 'Telefono', 'Email', 'Domiciliodigitale']);
 
   const partitaIva =
     extractRegexValue(normalized, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
     extractRegexValue(normalized, /\b(\d{11})\b/);
 
   const codiceFiscale =
-    extractRegexValue(normalized, /Codice\s+fiscale[^\n]{0,40}\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i) ??
+    extractRegexValue(normalized, /Codice\s*fiscale[^\n]{0,60}\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i) ??
     extractRegexValue(normalized, /\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
 
   const formaGiuridica =
-    extractRegexValue(normalized, /(?:forma\s+giuridica)\s*[:\-]?\s*([^\n]{3,120})/i) ??
-    extractRegexValue(normalized, /Forma\s+giuridica\s+([A-Za-z ][A-Za-z ']{3,80})/i);
+    extractRegexValue(normalized, /(?:forma\s*giuridica)\s*[:\-]?\s*([^\n]{3,120})/i) ??
+    extractRegexValue(normalized, /Forma\s*giuridica\s+([A-Za-z ][A-Za-z ']{3,80})/i);
 
   const ragioneSociale = ragioneSocialeLabeled ?? ragioneSocialeFromHeader;
   const telefono = extractRegexValue(normalized, /(?:telefono|tel\.?)\s*[:\-]?\s*([+0-9][0-9\s\-\/]{5,20})/i);
@@ -204,22 +206,22 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   // Hard deterministic fallback for common InfoCamere blocks (works even when text is totally flattened).
   const sedeLegaleHard =
     sedeLegale ??
-    extractRegexValue(normalized, /Indirizzo\s+Sede\s+(.+?)\s+(?:Domicilio\s+digitale|Numero\s+REA|Partita\s+IVA|Codice\s+fiscale)\b/i);
+    extractRegexValue(normalized, /Indirizzo\s*Sede\s+(.+?)\s+(?:Domicilio\s*digitale|Numero\s*REA|Partita\s*IVA|Codice\s*fiscale)\b/i);
   const emailPecHard =
     emailPec ??
-    extractRegexValue(normalized, /Domicilio\s+digitale\/PEC\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+    extractRegexValue(normalized, /Domicilio\s*digitale\/PEC\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
   const reaHard =
     rea ??
-    extractRegexValue(normalized, /Numero\s+REA\s+([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
+    extractRegexValue(normalized, /Numero\s*REA\s+([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
   const partitaIvaHard =
     partitaIva ??
-    extractRegexValue(normalized, /Partita\s+IVA\s+(\d{11})\b/i);
+    extractRegexValue(normalized, /Partita\s*IVA\s+(\d{11})\b/i);
   const codiceFiscaleHard =
     codiceFiscale ??
-    extractRegexValue(normalized, /Codice\s+fiscale(?:\s+e\s+n\.\s*iscr\.[^A-Z0-9]{0,10}|\s+e\s+n\.iscr\.[^A-Z0-9]{0,10})?\s*([A-Z0-9]{16})\b/i);
+    extractRegexValue(normalized, /Codice\s*fiscale(?:\s+e\s+n\.\s*iscr\.[^A-Z0-9]{0,10}|\s+e\s+n\.iscr\.[^A-Z0-9]{0,10})?\s*([A-Z0-9]{16})\b/i);
   const formaGiuridicaHard =
     formaGiuridica ??
-    extractRegexValue(normalized, /Forma\s+giuridica\s+([A-Za-z ]{5,60})\b/i);
+    extractRegexValue(normalized, /Forma\s*giuridica\s+([A-Za-z ]{5,60})\b/i);
 
   return {
     ragione_sociale: ragioneSociale,
