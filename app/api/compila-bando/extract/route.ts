@@ -135,22 +135,56 @@ function extractNomeLegale(text: string, ragioneSociale: string | null): string 
 
 function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   const raw = text.replace(/\r/g, '\n');
-  const ragioneSociale = extractRegexValue(
-    raw,
+  // Normalize diacritics and collapse whitespace so regexes behave consistently across pdf extractors.
+  const normalized = normalizeSpaces(
+    raw
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[’‘]/g, "'")
+  );
+
+  // Pattern set 1: "classical" visura with explicit labels
+  const ragioneSocialeLabeled = extractRegexValue(
+    normalized,
     /(?:denominazione|ragione\s+sociale)\s*[:\-]?\s*([^\n]{3,180})/i
   );
-  const codiceFiscale = extractRegexValue(raw, /\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
-  const partitaIva =
-    extractRegexValue(raw, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
-    extractRegexValue(raw, /\b(\d{11})\b/);
-  const rea = extractRegexValue(raw, /(?:numero\s+rea|rea)\s*[:\-]?\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
-  const formaGiuridica = extractRegexValue(raw, /(?:forma\s+giuridica)\s*[:\-]?\s*([^\n]{3,120})/i);
+
+  // Pattern set 2: InfoCamere "VISURA ORDINARIA DELL'IMPRESA" layout (no explicit ragione_sociale label)
+  // Usually: "VISURA ORDINARIA DELL'IMPRESA" then company name on next lines, then "DATI ANAGRAFICI".
+  const ragioneSocialeFromHeader = (() => {
+    const m = normalized.match(/VISURA\s+ORDINARIA\s+DELL[' ]IMPRESA\s+(.{3,220}?)\s+DATI\s+ANAGRAFICI/i);
+    if (!m?.[1]) return null;
+    // Take first 1-3 "words/lines" chunk, avoid pulling the whole paragraph.
+    return toCleanNullable(m[1].split(/\s{2,}|\s{1,}\bIl\b/i)[0]);
+  })();
+
+  const sedeLegale =
+    extractSedeLegale(normalized) ??
+    extractRegexValue(normalized, /Indirizzo\s+Sede\s+([^\n]{6,180}?\bCAP\s*\d{5}\b[^\n]{0,40})/i);
+
   const emailPec =
-    extractRegexValue(raw, /(?:domicilio\s+digitale\/pec|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i) ??
-    extractRegexValue(raw, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
-  const telefono = extractRegexValue(raw, /(?:telefono|tel\.?)\s*[:\-]?\s*([+0-9][0-9\s\-\/]{5,20})/i);
-  const sedeLegale = extractSedeLegale(raw);
-  const nomeLegaleRappresentante = extractNomeLegale(raw, ragioneSociale);
+    extractRegexValue(normalized, /(?:domicilio\s+digitale\/pec|domicilio\s+digitale|pec)\s*[:\-]?\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i) ??
+    extractRegexValue(normalized, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
+
+  const rea =
+    extractRegexValue(normalized, /Numero\s+REA\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i) ??
+    extractRegexValue(normalized, /(?:numero\s+rea|rea)\s*[:\-]?\s*([A-Z]{2}\s*[-–—]?\s*\d{3,})/i);
+
+  const partitaIva =
+    extractRegexValue(normalized, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
+    extractRegexValue(normalized, /\b(\d{11})\b/);
+
+  const codiceFiscale =
+    extractRegexValue(normalized, /Codice\s+fiscale[^\n]{0,40}\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i) ??
+    extractRegexValue(normalized, /\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
+
+  const formaGiuridica =
+    extractRegexValue(normalized, /(?:forma\s+giuridica)\s*[:\-]?\s*([^\n]{3,120})/i) ??
+    extractRegexValue(normalized, /Forma\s+giuridica\s+([A-Za-z ][A-Za-z ']{3,80})/i);
+
+  const ragioneSociale = ragioneSocialeLabeled ?? ragioneSocialeFromHeader;
+  const telefono = extractRegexValue(normalized, /(?:telefono|tel\.?)\s*[:\-]?\s*([+0-9][0-9\s\-\/]{5,20})/i);
+  const nomeLegaleRappresentante = extractNomeLegale(normalized, ragioneSociale);
 
   return {
     ragione_sociale: ragioneSociale,
