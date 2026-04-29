@@ -10,9 +10,10 @@ import { Step4AltriDocumenti } from '../components/Step4AltriDocumenti';
 import { Step5Estrazione } from '../components/Step5Estrazione';
 import { Step6RevisioneDati } from '../components/Step6RevisioneDati';
 import { Step7CompilazioneDoc } from '../components/Step7CompilazioneDoc';
-import { Step8OffertaAI } from '../components/Step8OffertaAI';
-import { Step9BrowserBando } from '../components/Step9BrowserBando';
-import { Step10ConfermaFinale } from '../components/Step10ConfermaFinale';
+import { Step8DocumentiDSAN } from '../components/Step8DocumentiDSAN';
+import { Step9OffertaAI } from '../components/Step9OffertaAI';
+import { Step10BrowserBando } from '../components/Step10BrowserBando';
+import { Step11ConfermaFinale } from '../components/Step11ConfermaFinale';
 import { DEFAULT_EXTRACTED } from '../lib/demoData';
 import type { WizardStep } from '../lib/types';
 import { useRouter } from 'next/navigation';
@@ -46,9 +47,9 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
 
   // Special navigation logic for steps that auto-advance
   const handleNext = useCallback(() => {
-    // Step 8: If user chooses "No" for AI agent, skip to step 10
-    if (state.currentStep === 8 && !state.useAiAgent) {
-      wiz.goToStep(10);
+    // Step 9: If user chooses "No" for AI agent, skip to step 11
+    if (state.currentStep === 9 && !state.useAiAgent) {
+      wiz.goToStep(11);
       return;
     }
     wiz.next();
@@ -118,37 +119,56 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
             otherFiles={state.files.altri}
             onPdfBlob={wiz.setGeneratedPdfBlob}
             onDocxBlob={wiz.setGeneratedDocxBlob}
+            onGeneratedDocs={wiz.setGeneratedDocs}
+            onDocxStatus={wiz.setDocxStatus}
+            onDocxError={wiz.setDocxError}
           />
         );
 
       case 8:
         return (
-          <Step8OffertaAI
-            onAccept={() => {
-              wiz.setUseAiAgent(true);
-              wiz.goToStep(9);
-            }}
-            onDecline={() => {
-              wiz.setUseAiAgent(false);
-              wiz.goToStep(10);
-            }}
+          <Step8DocumentiDSAN
+            generatedDocs={state.generatedDocs.length > 0 ? state.generatedDocs : [
+              { key: 'dsan_antiriciclaggio', fileName: 'DSAN Antiriciclaggio rsud acn.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+              { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN Casellario e procedure concorsuali liquidatorie.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+              { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN Possesso requisiti iniziativa economica.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+              { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN Possesso requisiti soggettivi.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+              { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione iniziativa economica_attività individuali.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+            ]}
+            docxBlob={state.generatedDocxBlob}
+            docxStatus={state.docxStatus}
+            docxError={state.docxError}
           />
         );
 
       case 9:
         return (
-          <Step9BrowserBando
-            extracted={state.extracted}
-            customFields={state.customFields}
-            spidAuthenticated={state.spidAuthenticated}
-            onSpidLogin={() => wiz.setSpidAuthenticated(true)}
-            onComplete={() => wiz.goToStep(10)}
+          <Step9OffertaAI
+            onAccept={() => {
+              wiz.setUseAiAgent(true);
+              wiz.goToStep(10);
+            }}
+            onDecline={() => {
+              wiz.setUseAiAgent(false);
+              wiz.goToStep(11);
+            }}
           />
         );
 
       case 10:
         return (
-          <Step10ConfermaFinale
+          <Step10BrowserBando
+            extracted={state.extracted}
+            customFields={state.customFields}
+            spidAuthenticated={state.spidAuthenticated}
+            onSpidLogin={() => wiz.setSpidAuthenticated(true)}
+            onComplete={() => wiz.goToStep(11)}
+          />
+        );
+
+      case 11:
+        return (
+          <Step11ConfermaFinale
             extracted={state.extracted}
             customFields={state.customFields}
             hasPdf={state.generatedPdfBlob !== null}
@@ -166,9 +186,9 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
   // Determine if footer should be hidden
   const hideFooter =
     state.currentStep === 5 ||
-    state.currentStep === 8 ||
     state.currentStep === 9 ||
-    state.currentStep === 10;
+    state.currentStep === 10 ||
+    state.currentStep === 11;
 
   return (
     <CompilaBandoLayout

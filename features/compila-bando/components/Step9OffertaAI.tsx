@@ -10,7 +10,7 @@ type Props = {
   onDecline: () => void;
 };
 
-export function Step8OffertaAI({ onAccept, onDecline }: Props) {
+export function Step9OffertaAI({ onAccept, onDecline }: Props) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 

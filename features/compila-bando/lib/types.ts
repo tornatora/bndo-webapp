@@ -23,13 +23,15 @@ export type UploadedFile = {
   file?: File;
 };
 
-export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 export type StepStatus = 'completed' | 'active' | 'upcoming';
 
 export type WizardDirection = 'next' | 'back';
 
 export type SpidPhase = 'login' | 'authenticating' | 'authenticated' | 'auto-filling' | 'uploading-docs' | 'submitting' | 'done';
+
+export type GeneratedDoc = { key: string; fileName: string; mimeType: string };
 
 export type WizardState = {
   currentStep: WizardStep;
@@ -44,6 +46,9 @@ export type WizardState = {
   customFields: CustomField[];
   generatedPdfBlob: Blob | null;
   generatedDocxBlob: Blob | null;
+  generatedDocs: GeneratedDoc[];
+  docxStatus: 'generating' | 'ready' | 'error';
+  docxError: string;
   spidPhase: SpidPhase;
   spidAuthenticated: boolean;
 };

@@ -15,7 +15,7 @@ type Props = {
   onBackToDashboard: () => void;
 };
 
-export function Step10ConfermaFinale({
+export function Step11ConfermaFinale({
   extracted,
   customFields,
   hasPdf,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase } from '../lib/types';
+import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase, GeneratedDoc } from '../lib/types';
 import { DEFAULT_EXTRACTED, INITIAL_EXTRACTED } from '../lib/demoData';
 
 function makeInitialState(initialStep: WizardStep = 1): WizardState {
@@ -9,7 +9,7 @@ function makeInitialState(initialStep: WizardStep = 1): WizardState {
   return {
     currentStep: initialStep,
     direction: 'next',
-    useAiAgent: initialStep >= 9,
+    useAiAgent: initialStep >= 10,
     files: shouldSeedDemo
       ? {
           visura: { name: 'visura-demo.pdf', size: 128000, type: 'application/pdf' },
@@ -29,6 +29,9 @@ function makeInitialState(initialStep: WizardStep = 1): WizardState {
       : [],
     generatedPdfBlob: null,
     generatedDocxBlob: null,
+    generatedDocs: [],
+    docxStatus: 'generating',
+    docxError: '',
     spidPhase: 'login',
     spidAuthenticated: false,
   };
@@ -41,9 +44,9 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
 
   const goToStep = useCallback((step: WizardStep) => {
     setState((prev) => {
-      if (step9LockRef.current && step < 9) return prev;
+      if (step9LockRef.current && step < 10) return prev;
       const direction: WizardDirection = step > prev.currentStep ? 'next' : 'back';
-      if (step >= 9) step9LockRef.current = true;
+      if (step >= 10) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction };
     });
@@ -51,9 +54,9 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
 
   const next = useCallback(() => {
     setState((prev) => {
-      if (prev.currentStep >= 10) return prev;
+      if (prev.currentStep >= 11) return prev;
       const step = (prev.currentStep + 1) as WizardStep;
-      if (step >= 9) step9LockRef.current = true;
+      if (step >= 10) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction: 'next' };
     });
@@ -63,7 +66,7 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
     setState((prev) => {
       if (prev.currentStep <= 1) return prev;
       const step = (prev.currentStep - 1) as WizardStep;
-      if (step9LockRef.current && step < 9) return prev;
+      if (step9LockRef.current && step < 10) return prev;
       return { ...prev, currentStep: step, direction: 'back' };
     });
   }, []);
@@ -127,6 +130,18 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
     setState((prev) => ({ ...prev, generatedDocxBlob: blob }));
   }, []);
 
+  const setGeneratedDocs = useCallback((docs: GeneratedDoc[]) => {
+    setState((prev) => ({ ...prev, generatedDocs: docs }));
+  }, []);
+
+  const setDocxStatus = useCallback((status: 'generating' | 'ready' | 'error') => {
+    setState((prev) => ({ ...prev, docxStatus: status }));
+  }, []);
+
+  const setDocxError = useCallback((error: string) => {
+    setState((prev) => ({ ...prev, docxError: error }));
+  }, []);
+
   const setSpidPhase = useCallback((phase: SpidPhase) => {
     setState((prev) => ({ ...prev, spidPhase: phase }));
   }, []);
@@ -170,6 +185,9 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
     setUseAiAgent,
     setGeneratedPdfBlob,
     setGeneratedDocxBlob,
+    setGeneratedDocs,
+    setDocxStatus,
+    setDocxError,
     setSpidPhase,
     setSpidAuthenticated,
     skipUploads,

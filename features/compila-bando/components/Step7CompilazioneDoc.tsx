@@ -12,6 +12,9 @@ type Props = {
   otherFiles: UploadedFile[];
   onPdfBlob: (blob: Blob) => void;
   onDocxBlob: (blob: Blob) => void;
+  onGeneratedDocs?: (docs: GeneratedDoc[]) => void;
+  onDocxStatus?: (status: DocStatus) => void;
+  onDocxError?: (error: string) => void;
 };
 
 type DocStatus = 'generating' | 'ready' | 'error';
@@ -32,13 +35,28 @@ export function Step7CompilazioneDoc({
   otherFiles,
   onPdfBlob,
   onDocxBlob,
+  onGeneratedDocs,
+  onDocxStatus,
+  onDocxError,
 }: Props) {
   const [pdfStatus, setPdfStatus] = useState<DocStatus>('generating');
-  const [docxStatus, setDocxStatus] = useState<DocStatus>('generating');
+  const [docxStatus, setDocxStatusState] = useState<DocStatus>('generating');
   const [pdfBlob, setPdfBlobLocal] = useState<Blob | null>(null);
   const [docxBlob, setDocxBlobLocal] = useState<Blob | null>(null);
-  const [docxError, setDocxError] = useState('');
-  const [generatedDocs, setGeneratedDocs] = useState<GeneratedDoc[]>(FALLBACK_DOCS);
+  const [docxError, setDocxErrorState] = useState('');
+  const [generatedDocs, setGeneratedDocsState] = useState<GeneratedDoc[]>(FALLBACK_DOCS);
+  const setGeneratedDocs = useCallback((docs: GeneratedDoc[]) => {
+    setGeneratedDocsState(docs);
+    onGeneratedDocs?.(docs);
+  }, [onGeneratedDocs]);
+  const setDocxStatus = useCallback((status: DocStatus) => {
+    setDocxStatusState(status);
+    onDocxStatus?.(status);
+  }, [onDocxStatus]);
+  const setDocxError = useCallback((error: string) => {
+    setDocxErrorState(error);
+    onDocxError?.(error);
+  }, [onDocxError]);
   const [reviewFields, setReviewFields] = useState<ReviewField[]>([]);
   const [manualFields, setManualFields] = useState<Record<string, string>>({
     luogo_firma: '',
@@ -123,31 +141,6 @@ export function Step7CompilazioneDoc({
       <p className={s.cbCardSubtitle} style={{ marginBottom: 24 }}>
         Generiamo i template allegati (DSAN + C2) e ti mostriamo i campi da confermare.
       </p>
-
-      <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14 }}>
-        <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: '#0b1136' }}>
-          Allegati template inclusi
-        </p>
-        <div style={{ display: 'grid', gap: 8 }}>
-          {generatedDocs.map((doc) => (
-            <div
-              key={doc.key}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '8px 10px',
-                border: '1px solid #e2e8f0',
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-            >
-              <span style={{ color: '#0b1136' }}>{doc.fileName}</span>
-              <span style={{ color: '#15803d', fontWeight: 700 }}>Prefill</span>
-            </div>
-          ))}
-        </div>
-      </div>
 
       <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14 }}>
         <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: '#0b1136' }}>
