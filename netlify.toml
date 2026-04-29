@@ -19,3 +19,6 @@
 
 [functions.scrape-regional-grants]
   schedule = "0 4 * * *"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
