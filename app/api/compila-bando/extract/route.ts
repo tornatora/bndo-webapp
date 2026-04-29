@@ -402,7 +402,9 @@ async function fileToOpenAiContent(file: File, baseUrl?: string): Promise<OpenAI
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (isPdf) {
     const text = await extractPdfText(buf, baseUrl);
-    return { type: 'text', text: `=== DOCUMENTO PDF ===\n${text}\n=== FINE DOCUMENTO ===` };
+    // Keep prompt bounded: long PDF extractions can reduce LLM quality and increase failures.
+    const clipped = text.length > 12_000 ? `${text.slice(0, 12_000)}\n...[TRUNCATED]...` : text;
+    return { type: 'text', text: `=== DOCUMENTO PDF ===\n${clipped}\n=== FINE DOCUMENTO ===` };
   }
   return {
     type: 'image_url',
