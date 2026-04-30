@@ -18,6 +18,8 @@ export type BrowserbaseDebugResult = {
   pages?: Array<{ debuggerUrl?: string; debuggerFullscreenUrl?: string }>;
 };
 
+export type BrowserbaseRegion = 'us-west-2' | 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
+
 type BrowserbaseInstance = {
   sessions: {
     create: (input: {
@@ -25,6 +27,7 @@ type BrowserbaseInstance = {
       extensionId?: string;
       keepAlive?: boolean;
       timeout?: number;
+      region?: BrowserbaseRegion;
       browserSettings?: {
         viewport?: { width: number; height: number };
       };
@@ -55,6 +58,7 @@ export function validateBrowserbaseEnv(): BrowserbaseEnvValidation {
   const apiKey = (process.env.BROWSERBASE_API_KEY || '').trim();
   const projectId = (process.env.BROWSERBASE_PROJECT_ID || '').trim();
   const extensionId = (process.env.BROWSERBASE_EXTENSION_ID || '').trim();
+  const region = (process.env.BROWSERBASE_REGION || '').trim();
 
   if (!apiKey) {
     errors.push('BROWSERBASE_API_KEY mancante.');
@@ -67,6 +71,9 @@ export function validateBrowserbaseEnv(): BrowserbaseEnvValidation {
   }
   if (!extensionId) {
     warnings.push('BROWSERBASE_EXTENSION_ID non impostata: sessione senza estensione custom.');
+  }
+  if (region && !['us-west-2', 'us-east-1', 'eu-central-1', 'ap-southeast-1'].includes(region)) {
+    warnings.push('BROWSERBASE_REGION non valida: usa us-west-2 | us-east-1 | eu-central-1 | ap-southeast-1');
   }
 
   return { ok: errors.length === 0, errors, warnings };
@@ -98,10 +105,17 @@ export async function createBrowserbaseSession(input: {
   keepAlive?: boolean;
   timeoutSeconds?: number;
   viewport?: { width: number; height: number };
+  region?: BrowserbaseRegion;
 }): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null; expiresAt: string | null }> {
   if (!hasBrowserbaseConfig()) {
     return { sessionId: '', connectUrl: null, liveViewUrl: null, expiresAt: null };
   }
+
+  const regionEnv = (process.env.BROWSERBASE_REGION || '').trim() as BrowserbaseRegion;
+  // Default to EU region for Invitalia (Italian portal). Can be overridden via env.
+  const region: BrowserbaseRegion =
+    input.region ||
+    (['us-west-2', 'us-east-1', 'eu-central-1', 'ap-southeast-1'].includes(regionEnv) ? regionEnv : 'eu-central-1');
 
   const bb = await createBrowserbaseClient();
   const created = await bb.sessions.create({
@@ -109,6 +123,7 @@ export async function createBrowserbaseSession(input: {
     extensionId: input.extensionId || process.env.BROWSERBASE_EXTENSION_ID || undefined,
     keepAlive: input.keepAlive ?? true,
     timeout: input.timeoutSeconds ?? 1800,
+    region,
     browserSettings: {
       viewport: input.viewport ?? { width: 1470, height: 740 },
     },
