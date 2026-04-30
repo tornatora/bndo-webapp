@@ -22,6 +22,8 @@ export type FlowStep = {
   timing?: { preDelayMs?: number };
   direction?: 'up' | 'down' | string;
   amount?: number;
+  viewport?: { width?: number; height?: number; scrollX?: number; scrollY?: number };
+  clickPoint?: { xRatio: number; yRatio: number };
 };
 
 export type FlowTemplate = {

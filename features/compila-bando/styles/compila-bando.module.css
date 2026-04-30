@@ -1023,6 +1023,10 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes cbBlink {
+  50% { opacity: 0; }
+}
+
 /* ---- Uploaded file list ---- */
 .cbFileList {
   margin-top: 16px;

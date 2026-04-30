@@ -103,7 +103,8 @@ export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
     pushCandidate(candidates, `label:has-text("${escapedLabel}") + select`);
   }
   if (t.text) pushCandidate(candidates, `text="${escapedText}"`);
-  if (t.tag) pushCandidate(candidates, t.tag);
+  // Intentionally DO NOT push plain tag selectors (e.g. "div", "input"):
+  // they're too broad and can cause random clicks if more specific selectors fail.
 
   const xpath = t.xpath?.trim();
   if (xpath) {

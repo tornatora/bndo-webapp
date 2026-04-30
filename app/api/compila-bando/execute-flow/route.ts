@@ -105,6 +105,50 @@ async function findFirstWorkingSelector(
   return null;
 }
 
+async function getViewportSize(page: Page): Promise<{ width: number; height: number }> {
+  const vs = page.viewportSize();
+  if (vs?.width && vs?.height) return { width: vs.width, height: vs.height };
+  const fromDom = await page
+    .evaluate(() => ({ width: window.innerWidth || 0, height: window.innerHeight || 0 }))
+    .catch(() => ({ width: 0, height: 0 }));
+  return {
+    width: Math.max(1, Number(fromDom.width) || 0),
+    height: Math.max(1, Number(fromDom.height) || 0),
+  };
+}
+
+async function clickByClickPoint(
+  page: Page,
+  step: FlowStep,
+  stepIndex: number,
+  stepTimeoutMs: number,
+  startedAt: number
+): Promise<FlowStepExecutionResult | null> {
+  const cp = step.clickPoint;
+  if (!cp || typeof cp.xRatio !== 'number' || typeof cp.yRatio !== 'number') return null;
+
+  const { width, height } = await getViewportSize(page);
+  const x = Math.round(Math.min(0.99, Math.max(0.01, cp.xRatio)) * width);
+  const y = Math.round(Math.min(0.99, Math.max(0.01, cp.yRatio)) * height);
+
+  try {
+    const beforeUrl = page.url();
+    await page.mouse.click(x, y);
+    if (isSubmitLikeAction(step)) {
+      await waitForUrlTransition(page, beforeUrl, stepTimeoutMs);
+    }
+    await settleAfterAction(page, stepTimeoutMs);
+    await applyStepDelay(page, step);
+    return successResult(step, stepIndex, startedAt, `ClickPoint eseguito @(${x},${y})`, {
+      selectorTried: 'clickPoint',
+    });
+  } catch (error) {
+    return failedResult(step, stepIndex, startedAt, error, 'ClickPoint fallito', {
+      selectorTried: 'clickPoint',
+    });
+  }
+}
+
 function successResult(
   step: FlowStep,
   stepIndex: number,
@@ -156,13 +200,9 @@ async function runClickStep(
   const selector = await findFirstWorkingSelector(page, selectors, selectionTimeout);
 
   if (!selector) {
-    return failedResult(
-      step,
-      stepIndex,
-      startedAt,
-      new Error('Nessun selettore valido trovato'),
-      'Click fallito: target non trovato'
-    );
+    const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
+    if (byPoint) return byPoint;
+    return failedResult(step, stepIndex, startedAt, new Error('Nessun selettore valido trovato'), 'Click fallito: target non trovato');
   }
 
   try {
@@ -177,9 +217,9 @@ async function runClickStep(
       selectorTried: selector,
     });
   } catch (error) {
-    return failedResult(step, stepIndex, startedAt, error, 'Click fallito', {
-      selectorTried: selector,
-    });
+    const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
+    if (byPoint) return byPoint;
+    return failedResult(step, stepIndex, startedAt, error, 'Click fallito', { selectorTried: selector });
   }
 }
 
@@ -246,14 +286,9 @@ async function runSelectStep(
   const selectors = getFlowStepSelectorCandidates(step);
   const selector = await findFirstWorkingSelector(page, selectors, Math.max(1200, Math.floor(stepTimeoutMs * 0.7)));
   if (!selector) {
-    return failedResult(
-      step,
-      stepIndex,
-      startedAt,
-      new Error('Nessun selettore valido trovato'),
-      'Select fallito: campo non trovato',
-      { valueUsed: value }
-    );
+    const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
+    if (byPoint) return { ...byPoint, valueUsed: value };
+    return failedResult(step, stepIndex, startedAt, new Error('Nessun selettore valido trovato'), 'Select fallito: campo non trovato', { valueUsed: value });
   }
 
   const escapedValue = escapeSelectorText(value);
@@ -309,10 +344,9 @@ async function runSelectStep(
       valueUsed: value,
     });
   } catch (error) {
-    return failedResult(step, stepIndex, startedAt, error, 'Select fallito', {
-      selectorTried: selector,
-      valueUsed: value,
-    });
+    const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
+    if (byPoint) return { ...byPoint, valueUsed: value };
+    return failedResult(step, stepIndex, startedAt, error, 'Select fallito', { selectorTried: selector, valueUsed: value });
   }
 }
 

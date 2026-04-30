@@ -98,6 +98,8 @@ export function Step10BrowserBando({
   const [missingDocuments, setMissingDocuments] = useState<Array<{ key: string; label: string }>>([]);
   const [resolvedApplicationId, setResolvedApplicationId] = useState<string | null>(applicationId || null);
   const [progressPercent, setProgressPercent] = useState(0);
+  const [typingIndex, setTypingIndex] = useState(0);
+  const [typingChar, setTypingChar] = useState(0);
   const initRef = useRef(false);
   const hasStartedRef = useRef(false);
   const authRedirectSeenRef = useRef(false);
@@ -211,7 +213,22 @@ export function Step10BrowserBando({
 
   const handleOpenSpidTab = useCallback(() => {
     const url = session?.liveViewUrl || 'https://www.invitalia.it/';
-    const spidWindow = window.open(url, 'bndo_spid_live_view');
+    const popupWidth = 520;
+    const popupHeight = 760;
+    const left = Math.max(0, Math.floor(window.screenX + (window.outerWidth - popupWidth) / 2));
+    const top = Math.max(0, Math.floor(window.screenY + (window.outerHeight - popupHeight) / 2));
+    const features = [
+      'popup=yes',
+      `width=${popupWidth}`,
+      `height=${popupHeight}`,
+      `left=${left}`,
+      `top=${top}`,
+      'resizable=yes',
+      'scrollbars=yes',
+    ].join(',');
+    // NOTE: we intentionally do not set `noopener` here because we want to auto-close
+    // this popup as soon as login is detected (test/core UX requirement).
+    const spidWindow = window.open(url, 'bndo_spid_live_view', features);
     spidWindowRef.current = spidWindow;
     const opened = Boolean(spidWindow);
     setSpidTabOpened(opened);
@@ -400,6 +417,8 @@ export function Step10BrowserBando({
     if (phase !== 'auto-filling') return;
     let cancelled = false;
     setProgressPercent(0);
+    setTypingIndex(0);
+    setTypingChar(0);
 
     const runProgress = async () => {
       for (let i = 0; i <= 100; i += 2) {
@@ -414,6 +433,39 @@ export function Step10BrowserBando({
       cancelled = true;
     };
   }, [phase]);
+
+  // Fake typing animation shown in dashboard (real compilation happens in background).
+  useEffect(() => {
+    if (phase !== 'auto-filling') return;
+
+    const payload = buildClientPayload(extracted);
+    const fields = [
+      { label: 'Nome', value: payload.firstName || 'Mario' },
+      { label: 'Cognome', value: payload.lastName || 'Rossi' },
+      { label: 'Codice fiscale', value: payload.codiceFiscale || 'RSSMRA80A01H501U' },
+      { label: 'PEC', value: payload.pec || 'demo@pec.it' },
+      { label: 'Telefono', value: payload.phone || '+39 340 000 0000' },
+    ];
+
+    let alive = true;
+    const timer = window.setInterval(() => {
+      if (!alive) return;
+      setTypingChar((prev) => {
+        const current = fields[typingIndex]?.value || '';
+        const next = prev + 1;
+        if (next <= current.length) return next;
+        // move to next field
+        setTypingIndex((idx) => (idx + 1) % fields.length);
+        return 0;
+      });
+    }, 28);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, extracted, typingIndex]);
 
   const handleSubmit = useCallback(() => {
     setPhase('submitted');
@@ -571,9 +623,9 @@ export function Step10BrowserBando({
           </div>
         </div>
 
-        {/* Progress bar per auto-filling */}
-        {phase === 'auto-filling' && (
-          <div style={{ marginBottom: 16 }}>
+      {/* Progress bar per auto-filling */}
+      {phase === 'auto-filling' && (
+        <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: '#0b1136' }}>Progresso compilazione</span>
               <span style={{ fontSize: 12, fontWeight: 700, color: '#15803d' }}>{progressPercent}%</span>
@@ -587,8 +639,68 @@ export function Step10BrowserBando({
                 transition: 'width 120ms ease',
               }} />
             </div>
-          </div>
-        )}
+        </div>
+      )}
+
+      {/* Typing animation (UX only) */}
+      {phase === 'auto-filling' && (
+        <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, background: '#ffffff' }}>
+          <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 800, color: '#0b1136' }}>
+            Compilazione in corso
+          </p>
+          {(() => {
+            const payload = buildClientPayload(extracted);
+            const fields = [
+              { label: 'Nome', value: payload.firstName || 'Mario' },
+              { label: 'Cognome', value: payload.lastName || 'Rossi' },
+              { label: 'Codice fiscale', value: payload.codiceFiscale || 'RSSMRA80A01H501U' },
+              { label: 'PEC', value: payload.pec || 'demo@pec.it' },
+              { label: 'Telefono', value: payload.phone || '+39 340 000 0000' },
+            ];
+            return (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {fields.map((f, idx) => {
+                  const isActive = idx === typingIndex;
+                  const shown = idx < typingIndex ? f.value : isActive ? f.value.slice(0, typingChar) : '';
+                  return (
+                    <div key={f.label} style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 10, alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#334155', fontWeight: 700 }}>{f.label}</span>
+                      <div style={{
+                        height: 34,
+                        borderRadius: 10,
+                        border: `1px solid ${isActive ? '#86efac' : '#e2e8f0'}`,
+                        background: isActive ? '#f0fdf4' : '#f8fafc',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0 10px',
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace',
+                        fontSize: 12,
+                        color: '#0b1136',
+                        position: 'relative',
+                        overflow: 'hidden',
+                      }}>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shown}</span>
+                        {isActive && (
+                          <span
+                            style={{
+                              width: 7,
+                              height: 16,
+                              background: '#0b1136',
+                              marginLeft: 2,
+                              opacity: 0.75,
+                              animation: 'cbBlink 1s step-end infinite',
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
         {/* Azioni principali */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

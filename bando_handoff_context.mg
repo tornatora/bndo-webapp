@@ -170,3 +170,10 @@
 
 ### 4) Step 10: readiness-check best-effort (mai blocco)
 - Se `readiness-check` fallisce (500 / timeout / json invalido), Step 10 NON si ferma piu'. Mostra solo un warning e procede a creare la sessione Browserbase e avviare il flow dopo SPID.
+
+### 5) Flow Invitalia: robustezza selector + clickPoint fallback
+- Problema: su Invitalia molti selector (es. `mat-select-value-*`) sono dinamici; se falliscono e si cade su fallback troppo generici, il browser puo' cliccare nel punto sbagliato e bloccare il flusso.
+- Fix:
+  - `lib/compila-bando/flow-runtime.ts`: rimosso candidate selector "tag-only" (es. `div`, `input`) per evitare click random.
+  - `execute-flow`: se un `click`/`select` fallisce o non trova selector, usa `step.clickPoint` (xRatio/yRatio) come fallback per cliccare in modo stabile.
+- Flow canonical aggiornato copiando il file utente `Json finale Invitalia.json` su `data/flows/resto-al-sud-2-0.json`.
