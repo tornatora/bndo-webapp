@@ -242,6 +242,7 @@ export function Step10BrowserBando({
 
     window.setTimeout(() => {
       try {
+        spidWindow?.focus();
         spidWindow?.blur();
         window.focus();
       } catch {
@@ -378,16 +379,29 @@ export function Step10BrowserBando({
           }
 
           if (json.loggedIn && (phase === 'spid-auth-wait' || authRedirectSeenRef.current)) {
-            // Best-effort: close the SPID window and refocus BNDO control center.
-            try {
-              spidWindowRef.current?.close();
-            } catch {
-              // ignore
+            // Best-effort: close the SPID popup and refocus BNDO control center.
+            // Some browsers may ignore a single close() call; retry briefly.
+            const w = spidWindowRef.current;
+            if (w) {
+              for (let i = 0; i < 6; i += 1) {
+                window.setTimeout(() => {
+                  try {
+                    w.close();
+                  } catch {
+                    // ignore
+                  }
+                }, i * 180);
+              }
+              spidWindowRef.current = null;
             }
-            try {
-              window.focus();
-            } catch {
-              // ignore
+            for (let i = 0; i < 4; i += 1) {
+              window.setTimeout(() => {
+                try {
+                  window.focus();
+                } catch {
+                  // ignore
+                }
+              }, i * 250);
             }
             onSpidLogin();
             void startExecuteFlow();
