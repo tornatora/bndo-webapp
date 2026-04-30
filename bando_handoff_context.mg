@@ -184,3 +184,4 @@
 - `scroll` step: se JSON include `viewport.scrollY`, facciamo `window.scrollTo(0, scrollY)` (deterministico) invece di wheel.
 - Fix aggiuntivo: se `viewport.scrollY=0` ma lo step ha `amount`/`direction` (scroll down), non facciamo scrollTo(0) (che non muove): usiamo scrollBy(delta).
 - Popup SPID: dimensioni wide (in base allo schermo) + retry close/focus dopo login.
+- Chiusura popup piu' affidabile: dopo login la dashboard naviga il popup su `/spid-done` (BNDO) che si auto-chiude.
