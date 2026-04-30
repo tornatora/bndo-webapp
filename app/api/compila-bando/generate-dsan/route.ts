@@ -252,10 +252,6 @@ async function fillPdfFromTemplate(docKey: string, templateBuffer: Buffer, paylo
 
 export async function POST(req: Request) {
   try {
-    if (!Docxtemplater || !PizZip) {
-      return NextResponse.json({ error: 'docxtemplater non disponibile' }, { status: 500 });
-    }
-
     const body = await req.json();
     const data = body.data as Record<string, string | null>;
     const overrides = (body.overrides ?? {}) as Record<string, string | null>;
@@ -288,6 +284,9 @@ export async function POST(req: Request) {
       outputMime = 'application/pdf';
       outputFileName = pdfInfo.outputFileName;
     } else {
+      if (!Docxtemplater || !PizZip) {
+        return NextResponse.json({ error: 'docxtemplater non disponibile' }, { status: 500 });
+      }
       const templatePath = path.join(TEMPLATES_DIR, DOC_MAP[docKey]);
       if (!fs.existsSync(templatePath)) {
         return NextResponse.json({ error: 'Template non trovato' }, { status: 404 });

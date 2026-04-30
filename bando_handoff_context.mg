@@ -151,3 +151,14 @@
 
 - Step 8: documenti DSAN mostrati come 5 box + download (template reali in `public/templates` e `public/templates_tagged`, generazione via API `POST /api/compila-bando/generate-dsan`).
 - Step 10: SPID control center (no fake browser), apre Live View Browserbase in nuova scheda e auto-start della compilazione quando login rilevato.
+
+## Fix critici applicati oggi (2026-04-30) in `bndo-live-aligned`
+
+### 1) Visura non estratta in preview (causa + fix)
+- Causa: `netlify.toml` aveva `functions.directory = ".netlify/functions"` (output), quindi Netlify non prendeva i sorgenti in `netlify/functions` e l'endpoint `/.netlify/functions/extract-pdf-text` risultava assente/non affidabile.
+- Fix: `functions.directory = "netlify/functions"` in `bndo-live-aligned/netlify.toml`.
+
+### 2) DSAN/C2 PDF identici ai template originali (no conversione)
+- `POST /api/compila-bando/generate-dsan` ora in `format="pdf"` non richiede piu `docxtemplater` (che su Netlify puo' mancare e causava 500).
+- Template PDF sostituiti con i PDF forniti dall'utente e copiati in `public/templates_pdf` con filename ASCII.
+- Build: aggiunta dependency `jspdf-autotable` per sbloccare `npm run build:app` (mancava e rompeva il build Netlify).
