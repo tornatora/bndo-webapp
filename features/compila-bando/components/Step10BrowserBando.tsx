@@ -101,6 +101,7 @@ export function Step10BrowserBando({
   const hasStartedRef = useRef(false);
   const authRedirectSeenRef = useRef(false);
   const executeAbortRef = useRef<AbortController | null>(null);
+  const spidWindowRef = useRef<Window | null>(null);
 
   const initializeSession = useCallback(async () => {
     setIsInitializing(true);
@@ -144,9 +145,12 @@ export function Step10BrowserBando({
       if (!readiness.ready) {
         setMissingFields(readiness.missingFields || []);
         setMissingDocuments(readiness.missingDocuments || []);
-        setPhase('spid-login');
-        setFlowResult('Completa i dati/documenti mancanti prima di avviare SPID.');
-        return;
+        // IMPORTANT (core test path): do not block SPID/flow execution.
+        // We keep showing what is missing, but we still create the Browserbase session
+        // so the user can authenticate and we can validate end-to-end flow reliability.
+        setFlowResult(
+          'Mancano alcuni dati/documenti. Per ora proseguiamo comunque: fai SPID e avviamo la compilazione automatica per testare il core.'
+        );
       }
 
       const response = await fetch('/api/compila-bando/auto-fill', {
@@ -204,6 +208,7 @@ export function Step10BrowserBando({
   const handleOpenSpidTab = useCallback(() => {
     const url = session?.liveViewUrl || 'https://www.invitalia.it/';
     const spidWindow = window.open(url, 'bndo_spid_live_view');
+    spidWindowRef.current = spidWindow;
     const opened = Boolean(spidWindow);
     setSpidTabOpened(opened);
     setPhase('spid-auth-wait');
@@ -352,6 +357,17 @@ export function Step10BrowserBando({
           }
 
           if (json.loggedIn && (phase === 'spid-auth-wait' || authRedirectSeenRef.current)) {
+            // Best-effort: close the SPID window and refocus BNDO control center.
+            try {
+              spidWindowRef.current?.close();
+            } catch {
+              // ignore
+            }
+            try {
+              window.focus();
+            } catch {
+              // ignore
+            }
             onSpidLogin();
             void startExecuteFlow();
             return;

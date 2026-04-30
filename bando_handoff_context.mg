@@ -162,3 +162,8 @@
 - `POST /api/compila-bando/generate-dsan` ora in `format="pdf"` non richiede piu `docxtemplater` (che su Netlify puo' mancare e causava 500).
 - Template PDF sostituiti con i PDF forniti dall'utente e copiati in `public/templates_pdf` con filename ASCII.
 - Build: aggiunta dependency `jspdf-autotable` per sbloccare `npm run build:app` (mancava e rompeva il build Netlify).
+
+### 3) Step 10: bypass blocco readiness (per test core end-to-end)
+- Problema: se `readiness-check` tornava `ready=false`, la UI faceva `return` prima di chiamare `/api/compila-bando/auto-fill`, quindi non veniva creata alcuna sessione Browserbase: aprivi SPID ma non partivano polling `session-status` e `execute-flow`.
+- Fix: Step 10 ora NON blocca piu' l'avvio SPID/flow quando mancano campi/documenti. Mostra la lista mancanti come warning ma prosegue a creare la sessione.
+- Miglioria UX: quando `session-status` rileva `loggedIn=true`, chiude (best-effort) la finestra/tab SPID aperta e richiama `window.focus()` sulla dashboard BNDO, poi avvia `execute-flow` automaticamente.
