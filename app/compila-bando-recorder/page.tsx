@@ -10,6 +10,10 @@ type RecorderSession = {
 };
 
 type FlowStep = any;
+type RecordingListResponse = { ok: true; recordings: string[] } | { ok: false; error: string };
+type RecordingLoadResponse =
+  | { ok: true; filename: string; flowTemplate: any }
+  | { ok: false; error: string };
 
 function nowId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -52,6 +56,11 @@ export default function CompilaBandoRecorderPage() {
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [replayStatus, setReplayStatus] = useState<string>('');
 
+  const [recordings, setRecordings] = useState<string[]>([]);
+  const [selectedRecording, setSelectedRecording] = useState<string>('');
+  const [loadedRecording, setLoadedRecording] = useState<{ filename: string; flowTemplate: any } | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<string>('');
+
   const installTimerRef = useRef<number | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const lastEventCountRef = useRef<number>(0);
@@ -72,6 +81,30 @@ export default function CompilaBandoRecorderPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch('/api/compila-bando/recordings').catch(() => null);
+      if (!res || !res.ok) return;
+      const json = (await res.json().catch(() => null)) as RecordingListResponse | null;
+      if (cancelled) return;
+      if (!json || !('ok' in json) || !json.ok) return;
+      const files = Array.isArray(json.recordings) ? json.recordings : [];
+      setRecordings(files);
+      if (!selectedRecording) {
+        const preferred =
+          files.find((f) => f.includes('resto-al-sud-2-0-voucher-libero-professionista.devtools.partial.json')) ||
+          files.find((f) => f.endsWith('.devtools.partial.json')) ||
+          files[0] ||
+          '';
+        setSelectedRecording(preferred);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRecording]);
+
   const startSession = useCallback(async () => {
     setStatus('Creo sessione Browserbase...');
     setSession(null);
@@ -80,6 +113,7 @@ export default function CompilaBandoRecorderPage() {
     setSteps([]);
     setFieldMapping({});
     lastEventCountRef.current = 0;
+    setReplayStatus('');
 
     if (installTimerRef.current) window.clearInterval(installTimerRef.current);
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
@@ -336,6 +370,77 @@ export default function CompilaBandoRecorderPage() {
     }
   }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, session, steps, subProceduraKey]);
 
+  const loadRecordingFromFile = useCallback(async () => {
+    const filename = selectedRecording.trim();
+    if (!filename) return;
+    setRecordingStatus('Carico file...');
+    setLoadedRecording(null);
+    try {
+      const res = await fetch('/api/compila-bando/recordings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      });
+      const json = (await res.json().catch(() => null)) as RecordingLoadResponse | null;
+      if (!json || !('ok' in json) || !json.ok) {
+        setRecordingStatus(`Errore: ${(json as any)?.error || 'load recording fallito'}`);
+        return;
+      }
+      setLoadedRecording({ filename: json.filename, flowTemplate: json.flowTemplate });
+      const stepsLen = Array.isArray((json.flowTemplate as any)?.steps) ? (json.flowTemplate as any).steps.length : 0;
+      setRecordingStatus(`Caricato: ${json.filename} (${stepsLen} step)`);
+    } catch (e) {
+      setRecordingStatus(`Errore: ${e instanceof Error ? e.message : 'errore non gestito'}`);
+    }
+  }, [selectedRecording]);
+
+  const runReplayFromFile = useCallback(async () => {
+    if (!session) return;
+    if (!loadedRecording?.flowTemplate) {
+      setReplayStatus('Prima carica un file JSON flow.');
+      return;
+    }
+    setReplayStatus(`Replay da file in corso (${loadedRecording.filename})...`);
+    try {
+      const client = {
+        firstName: 'Mario',
+        lastName: 'Rossi',
+        fullName: 'Mario Rossi',
+        zip: '',
+        province: '',
+        city: '',
+        pec: '',
+        phone: '',
+        ragioneSociale: '',
+        codiceFiscale: '',
+        partitaIva: '00000000000',
+        rea: '',
+        sedeLegale: '',
+        formaGiuridica: '',
+      };
+
+      const res = await fetch('/api/compila-bando/execute-flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          phase: 'form_fill',
+          client,
+          flowTemplateOverride: loadedRecording.flowTemplate,
+        }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (json && json.ok) {
+        setReplayStatus(`Replay OK: ${json.stepsExecuted} step eseguiti (${json.elapsedMs}ms)`);
+      } else {
+        const fail = Array.isArray(json?.failedSteps) ? json.failedSteps[0]?.error || json.failedSteps[0]?.message : json?.error;
+        setReplayStatus(`Replay con errori: ${(fail || 'vedi failedSteps').toString().slice(0, 140)}`);
+      }
+    } catch (e) {
+      setReplayStatus(`Errore replay: ${e instanceof Error ? e.message : 'errore non gestito'}`);
+    }
+  }, [loadedRecording, session]);
+
   return (
     <main style={{ padding: 18, maxWidth: 1280, margin: '0 auto' }}>
       <h1 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 900 }}>Compila Bando Recorder (solo interno)</h1>
@@ -426,6 +531,62 @@ export default function CompilaBandoRecorderPage() {
           <button onClick={exportFlow} type="button" style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.14)', background: '#111827', color: '#fff', fontWeight: 900 }}>
             Scarica JSON
           </button>
+
+          <div style={{ marginTop: 12, fontSize: 12, fontWeight: 900 }}>Replay da file (DevTools convertito)</div>
+          <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+            <select
+              value={selectedRecording}
+              onChange={(e) => setSelectedRecording(e.target.value)}
+              style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10, fontSize: 12 }}
+              title="Seleziona un JSON in data/flows/recordings"
+            >
+              {recordings.length === 0 ? (
+                <option value="">(nessun file)</option>
+              ) : (
+                recordings.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))
+              )}
+            </select>
+            <button
+              onClick={() => void loadRecordingFromFile()}
+              type="button"
+              disabled={!selectedRecording}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: '1px solid rgba(15,23,42,0.14)',
+                background: selectedRecording ? '#111827' : '#94a3b8',
+                color: '#fff',
+                fontWeight: 900,
+                cursor: selectedRecording ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Carica file
+            </button>
+            <button
+              onClick={() => void runReplayFromFile()}
+              type="button"
+              disabled={!session || !loadedRecording}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: '1px solid rgba(15,23,42,0.14)',
+                background: session && loadedRecording ? '#0b1136' : '#94a3b8',
+                color: '#fff',
+                fontWeight: 900,
+                cursor: session && loadedRecording ? 'pointer' : 'not-allowed',
+              }}
+              title="Esegue il JSON caricato sulla sessione corrente (devi essere autenticato nella Live View)."
+            >
+              Replay da file (su questa sessione)
+            </button>
+            {recordingStatus && <div style={{ fontSize: 12, color: '#334155' }}>{recordingStatus}</div>}
+          </div>
 
           <button
             onClick={() => void runReplay()}
