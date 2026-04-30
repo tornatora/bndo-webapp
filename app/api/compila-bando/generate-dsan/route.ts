@@ -21,7 +21,8 @@ const DOC_MAP: Record<string, string> = {
   dsan_casellario_liquidatorie: 'DSAN Casellario e procedure concorsuali liquidatorie.docx',
   dsan_requisiti_iniziativa: 'DSAN Possesso requisiti iniziativa economica.docx',
   dsan_requisiti_soggettivi: 'DSAN Possesso requisiti soggettivi.docx',
-  descrizione_iniziativa_c2: 'Descrizione iniziativa economica_attività individuali.docx',
+  // Keep ASCII filename to avoid Unicode normalization issues on Linux deploys (Netlify).
+  descrizione_iniziativa_c2: 'Descrizione_iniziativa_economica_attivita_individuali.docx',
 };
 
 function buildPayload(data: Record<string, string | null>, overrides: Record<string, string | null>) {

@@ -21,7 +21,7 @@ const DSAN_KEYS = [
   { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN Casellario e procedure concorsuali liquidatorie.docx', label: 'DSAN Casellario' },
   { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN Possesso requisiti iniziativa economica.docx', label: 'DSAN Requisiti Iniziativa' },
   { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN Possesso requisiti soggettivi.docx', label: 'DSAN Requisiti Soggettivi' },
-  { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione iniziativa economica_attività individuali.docx', label: 'Descrizione Iniziativa C2' },
+  { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione_iniziativa_economica_attivita_individuali.docx', label: 'Descrizione Iniziativa C2' },
 ];
 
 export function Step7CompilazioneDoc({
@@ -204,44 +204,6 @@ export function Step7CompilazioneDoc({
           </button>
         </div>
       )}
-
-      <div className={s.cbTwoCol}>
-        {/* PDF Scheda Aziendale */}
-        <div className={`${s.cbDocCard} ${pdfStatus === 'ready' ? s.cbDocCardReady : s.cbDocCardGenerating}`}>
-          <div className={`${s.cbDocCardIcon} ${pdfStatus === 'ready' ? s.cbDocCardIconReady : s.cbDocCardIconGenerating}`}>
-            {pdfStatus === 'ready' ? <Check size={24} /> : <Loader2 size={24} className={s.cbSpinner} />}
-          </div>
-          <h3 className={s.cbDocCardTitle}>Scheda Aziendale</h3>
-          <p className={`${s.cbDocCardStatus} ${pdfStatus === 'ready' ? s.cbDocCardStatusReady : s.cbDocCardStatusGenerating}`}>
-            {pdfStatus === 'ready' ? 'Pronto' : 'In generazione...'}
-          </p>
-          {pdfStatus === 'ready' && (
-            <button className={s.cbBtnPrimary} onClick={() => pdfBlob && downloadBlob(pdfBlob, 'Scheda-Aziendale-BNDO.pdf')} type="button">
-              <FileDown size={14} />
-              Scarica PDF
-            </button>
-          )}
-        </div>
-
-        {/* Stato 5 DSAN */}
-        <div className={`${s.cbDocCard} ${dsanStatus === 'ready' ? s.cbDocCardReady : dsanStatus === 'error' ? s.cbDocCardError : s.cbDocCardGenerating}`}>
-          <div className={`${s.cbDocCardIcon} ${dsanStatus === 'ready' ? s.cbDocCardIconReady : dsanStatus === 'error' ? s.cbDocCardIconError : s.cbDocCardIconGenerating}`}>
-            {dsanStatus === 'ready' ? <Check size={24} /> : dsanStatus === 'error' ? <AlertCircle size={24} /> : <Loader2 size={24} className={s.cbSpinner} />}
-          </div>
-          <h3 className={s.cbDocCardTitle}>5 Documenti DSAN</h3>
-          <p className={`${s.cbDocCardStatus} ${dsanStatus === 'ready' ? s.cbDocCardStatusReady : dsanStatus === 'error' ? s.cbDocCardStatusError : s.cbDocCardStatusGenerating}`}>
-            {dsanStatus === 'ready' ? 'Template originali compilati' : dsanStatus === 'error' ? 'Errore' : 'Compilazione in corso...'}
-          </p>
-          {dsanStatus === 'ready' && (
-            <button className={s.cbBtnMuted} onClick={() => {
-              dsanDocs.forEach((d) => d.blob && downloadBlob(d.blob, d.fileName));
-            }} type="button">
-              <FileDown size={14} />
-              Scarica tutti i DOCX
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

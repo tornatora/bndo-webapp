@@ -294,7 +294,33 @@ async function extractWithLlm(
 }
 
 async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
-  // Tier 1: pdf-parse (preferred). We want this to work in Netlify preview too, so do not
+  // Tier 1: call standalone Netlify function first (most reliable in Netlify runtime).
+  // This avoids pdfjs edge cases inside Next server handler bundles.
+  const bases = [
+    baseUrl,
+    process.env.DEPLOY_PRIME_URL,
+    process.env.URL,
+    process.env.DEPLOY_URL,
+  ].filter((b): b is string => !!b && b.length > 0);
+
+  for (const base of bases) {
+    try {
+      const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
+      const formData = new FormData();
+      formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.text?.length >= 80) return json.text;
+      }
+    } catch {}
+  }
+
+  // Tier 2: pdf-parse (preferred locally). We want this to work in Netlify preview too, so do not
   // silently fall back unless we really must.
   try {
     const mod: any = await import('pdf-parse');
@@ -318,32 +344,6 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
   } catch (e) {
     // If pdf-parse is missing or fails, we keep a fallback, but surface a short hint in logs.
     console.warn('[compila-bando/extract] pdf-parse failed, falling back:', e instanceof Error ? e.message : e);
-  }
-
-  // Tier 2: HTTP call to standalone Netlify function (legacy fallback)
-  // Try multiple sources for the base URL (env vars may not be available in Next.js Lambda).
-  const bases = [
-    baseUrl,
-    process.env.DEPLOY_PRIME_URL,
-    process.env.URL,
-    process.env.DEPLOY_URL,
-  ].filter((b): b is string => !!b && b.length > 0);
-
-  for (const base of bases) {
-    try {
-      const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
-      const formData = new FormData();
-      formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
-      const res = await fetch(fnUrl, {
-        method: 'POST',
-        body: formData,
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.text?.length >= 80) return json.text;
-      }
-    } catch {}
   }
 
   // Tier 3: raw zlib
