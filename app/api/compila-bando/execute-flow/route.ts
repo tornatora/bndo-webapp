@@ -410,6 +410,65 @@ async function runScrollStep(page: Page, step: FlowStep, stepIndex: number): Pro
   try {
     const viewportScrollY =
       step.viewport && typeof step.viewport.scrollY === 'number' ? Math.max(0, Math.floor(step.viewport.scrollY)) : null;
+    const viewportScrollX =
+      step.viewport && typeof step.viewport.scrollX === 'number' ? Math.max(0, Math.floor(step.viewport.scrollX)) : null;
+
+    // If a scroll target is provided, prefer scrolling that container (useful for "presa visione" pages
+    // where the button becomes enabled only after scrolling inside a panel).
+    if (step.target) {
+      const selectors = getFlowStepSelectorCandidates(step);
+      const selector = await findFirstWorkingSelector(page, selectors, 1_200);
+      if (selector) {
+        try {
+          const loc = page.locator(selector).first();
+          if (viewportScrollY !== null && viewportScrollY > 0) {
+            await loc
+              .evaluate(
+                (el: any, pos: { x: number | null; y: number }) => {
+                  try {
+                    if (typeof el.scrollTo === 'function') el.scrollTo(pos.x ?? 0, pos.y);
+                    else {
+                      if (typeof pos.x === 'number') el.scrollLeft = pos.x;
+                      el.scrollTop = pos.y;
+                    }
+                  } catch {
+                    // ignore
+                  }
+                },
+                { x: viewportScrollX, y: viewportScrollY }
+              )
+              .catch(() => undefined);
+            await settleAfterAction(page, 1800);
+            await applyStepDelay(page, step);
+            return successResult(step, stepIndex, startedAt, `ScrollTo (target) eseguito: y=${viewportScrollY}`, {
+              selectorTried: selector,
+              valueUsed: String(viewportScrollY),
+            });
+          }
+
+          const baseAmount = Math.abs(step.amount ?? 320);
+          const signedAmount = step.direction === 'up' ? -baseAmount : baseAmount;
+          await loc
+            .evaluate((el: any, delta: number) => {
+              try {
+                if (typeof el.scrollBy === 'function') el.scrollBy(0, delta);
+                else el.scrollTop = (el.scrollTop || 0) + delta;
+              } catch {
+                // ignore
+              }
+            }, signedAmount)
+            .catch(() => undefined);
+          await settleAfterAction(page, 1800);
+          await applyStepDelay(page, step);
+          return successResult(step, stepIndex, startedAt, `Scroll (target) eseguito: ${signedAmount}px`, {
+            selectorTried: selector,
+            valueUsed: String(signedAmount),
+          });
+        } catch {
+          // Fall through to window scroll below.
+        }
+      }
+    }
 
     // Only use absolute scroll targets when they are meaningful (>0).
     // Some recorded steps include viewport.scrollY=0 even when the intent is "scroll down by amount".

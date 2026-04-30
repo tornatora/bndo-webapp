@@ -15,6 +15,16 @@ function nowId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 }
 
+function slugify(value: string): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
 function downloadJson(obj: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -28,8 +38,10 @@ function downloadJson(obj: unknown, filename: string) {
 }
 
 export default function CompilaBandoRecorderPage() {
-  const [bandoKey, setBandoKey] = useState('resto-al-sud-2-0');
-  const [proceduraKey, setProceduraKey] = useState<'voucher' | 'piano-impresa'>('voucher');
+  const [bandoName, setBandoName] = useState('Resto al Sud 2.0');
+  const bandoKey = useMemo(() => slugify(bandoName) || 'bando', [bandoName]);
+  const [proceduraKey, setProceduraKey] = useState<string>('voucher');
+  const [subProceduraKey, setSubProceduraKey] = useState<string>('');
   const [startUrl, setStartUrl] = useState('https://presentazione-domanda-pia.npi.invitalia.it/info-privacy');
 
   const [session, setSession] = useState<RecorderSession | null>(null);
@@ -46,8 +58,9 @@ export default function CompilaBandoRecorderPage() {
   const flowName = useMemo(() => {
     const dt = new Date();
     const stamp = dt.toISOString().slice(0, 10);
-    return `Invitalia Recorder ${bandoKey}/${proceduraKey} ${stamp}`;
-  }, [bandoKey, proceduraKey]);
+    const sub = subProceduraKey.trim() ? `/${slugify(subProceduraKey)}` : '';
+    return `Invitalia Recorder ${bandoKey}/${slugify(proceduraKey)}${sub} ${stamp}`;
+  }, [bandoKey, proceduraKey, subProceduraKey]);
 
   useEffect(() => {
     return () => {
@@ -179,6 +192,41 @@ export default function CompilaBandoRecorderPage() {
           reviewRequired: true,
           confirmationStatus: 'recorded',
         });
+        continue;
+      }
+
+      if (t === 'scroll') {
+        const scrollTop = typeof ev.scrollTop === 'number' ? ev.scrollTop : null;
+        const scrollLeft = typeof ev.scrollLeft === 'number' ? ev.scrollLeft : null;
+        const scrollHeight = typeof ev.scrollHeight === 'number' ? ev.scrollHeight : null;
+        const clientHeight = typeof ev.clientHeight === 'number' ? ev.clientHeight : null;
+        const isScrollable = scrollHeight !== null && clientHeight !== null ? scrollHeight > clientHeight + 2 : true;
+        if (!isScrollable) continue;
+        if (scrollTop === null || !Number.isFinite(scrollTop) || scrollTop <= 0) continue;
+
+        const selector = String(ev.selector || '').trim();
+        const target = selector
+          ? {
+              css: selector,
+              id: ev.id || '',
+              label: ev.label || '',
+              tag: ev.tag || '',
+            }
+          : undefined;
+
+        newSteps.push({
+          type: 'scroll',
+          actionKind: 'scroll',
+          stepId: nowId('rec_scroll'),
+          pageKey: String(ev.url || ''),
+          ...(target ? { target } : {}),
+          viewport: {
+            scrollY: Math.max(0, Math.floor(scrollTop)),
+            ...(scrollLeft !== null && Number.isFinite(scrollLeft) ? { scrollX: Math.max(0, Math.floor(scrollLeft)) } : {}),
+          },
+          reviewRequired: true,
+          confirmationStatus: 'recorded',
+        });
       }
     }
 
@@ -208,27 +256,31 @@ export default function CompilaBandoRecorderPage() {
   }, [installRecorder, pollEvents, recordingId, session]);
 
   const exportFlow = useCallback(() => {
+    const proceduraSlug = slugify(proceduraKey) || 'procedura';
+    const subSlug = subProceduraKey.trim() ? slugify(subProceduraKey) : '';
     const flow = {
       name: flowName,
       version: 1,
       source: 'recorder',
       updatedAt: new Date().toISOString().slice(0, 10),
       bandoKey,
-      proceduraKey,
+      bandoName,
+      proceduraKey: proceduraSlug,
+      ...(subSlug ? { subProceduraKey: subSlug } : {}),
       // NB: il flow runtime fa selector-resolve robusto; qui registriamo solo target best-effort.
       expectedDurationSeconds: 320,
       fieldMapping,
       steps,
     };
-    downloadJson(flow, `${bandoKey}-${proceduraKey}-flow.json`);
+    downloadJson(flow, `${bandoKey}-${proceduraSlug}${subSlug ? `-${subSlug}` : ''}-flow.json`);
     setStatus('Flow esportato (download).');
-  }, [bandoKey, fieldMapping, flowName, proceduraKey, steps]);
+  }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, steps, subProceduraKey]);
 
   return (
     <main style={{ padding: 18, maxWidth: 1280, margin: '0 auto' }}>
       <h1 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 900 }}>Compila Bando Recorder (solo interno)</h1>
       <p style={{ margin: '0 0 16px', fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
-        Live View reale (fluido) + registrazione automatica click/type/select/goto dentro la sessione Browserbase.
+        Live View reale (fluido) + registrazione automatica click/type/select/scroll/goto dentro la sessione Browserbase.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 14, alignItems: 'start' }}>
@@ -253,15 +305,37 @@ export default function CompilaBandoRecorderPage() {
 
           <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
             <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-              bandoKey
-              <input value={bandoKey} onChange={(e) => setBandoKey(e.target.value)} style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10 }} />
+              Nome Bando
+              <input value={bandoName} onChange={(e) => setBandoName(e.target.value)} style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10 }} />
+              <span style={{ fontSize: 11, color: '#64748b' }}>key: <code>{bandoKey}</code></span>
             </label>
             <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
-              proceduraKey
-              <select value={proceduraKey} onChange={(e) => setProceduraKey(e.target.value as any)} style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10 }}>
-                <option value="voucher">voucher</option>
-                <option value="piano-impresa">piano-impresa</option>
-              </select>
+              Procedura
+              <input
+                list="procedura-options"
+                value={proceduraKey}
+                onChange={(e) => setProceduraKey(e.target.value)}
+                style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10 }}
+              />
+              <datalist id="procedura-options">
+                <option value="voucher" />
+                <option value="piano-impresa" />
+              </datalist>
+              <span style={{ fontSize: 11, color: '#64748b' }}>key: <code>{slugify(proceduraKey) || '—'}</code></span>
+            </label>
+            <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+              Sotto-procedura (opzionale)
+              <input
+                list="subprocedura-options"
+                value={subProceduraKey}
+                onChange={(e) => setSubProceduraKey(e.target.value)}
+                placeholder="es. libero-professionista"
+                style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 10 }}
+              />
+              <datalist id="subprocedura-options">
+                <option value="libero-professionista" />
+                <option value="lavoratore-autonomo" />
+              </datalist>
             </label>
             <label style={{ display: 'grid', gap: 4, fontSize: 12 }}>
               startUrl
@@ -307,4 +381,3 @@ export default function CompilaBandoRecorderPage() {
     </main>
   );
 }
-

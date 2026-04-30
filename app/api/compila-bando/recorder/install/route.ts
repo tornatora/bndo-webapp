@@ -214,6 +214,52 @@ function buildInstallScript(recordingId: string, appOrigin: string) {
     document.addEventListener('change', inputHandler, true);
     document.addEventListener('blur', inputHandler, true);
 
+    // Record scroll (window or scrollable containers). Throttled to avoid event spam.
+    let scrollT = null;
+    const scrollHandler = (e) => {
+      try {
+        const raw = e && e.target ? e.target : null;
+        const isDoc =
+          raw === document ||
+          raw === document.body ||
+          raw === document.documentElement ||
+          raw === (document.scrollingElement || null);
+        const el = isDoc ? (document.scrollingElement || document.documentElement) : raw;
+        if (!el) return;
+
+        const tag = isDoc ? 'window' : (el.tagName ? el.tagName.toLowerCase() : '');
+        const selector = isDoc ? '' : selectorFor(el);
+        const scrollTop = isDoc
+          ? (window.scrollY || (document.scrollingElement ? document.scrollingElement.scrollTop : 0) || 0)
+          : (el.scrollTop || 0);
+        const scrollLeft = isDoc
+          ? (window.scrollX || (document.scrollingElement ? document.scrollingElement.scrollLeft : 0) || 0)
+          : (el.scrollLeft || 0);
+        const scrollHeight = isDoc
+          ? ((document.scrollingElement ? document.scrollingElement.scrollHeight : 0) || 0)
+          : (el.scrollHeight || 0);
+        const clientHeight = isDoc
+          ? ((document.scrollingElement ? document.scrollingElement.clientHeight : 0) || 0)
+          : (el.clientHeight || 0);
+
+        if (scrollT) clearTimeout(scrollT);
+        scrollT = setTimeout(() => {
+          send({
+            type: 'scroll',
+            tag,
+            selector,
+            id: (!isDoc && el.id) ? el.id : '',
+            label: (!isDoc ? labelFor(el) : ''),
+            scrollTop,
+            scrollLeft,
+            scrollHeight,
+            clientHeight,
+          });
+        }, 260);
+      } catch {}
+    };
+    document.addEventListener('scroll', scrollHandler, true);
+
     send({ type: 'recorder_ready' });
   } catch {}
 })();
@@ -276,4 +322,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
