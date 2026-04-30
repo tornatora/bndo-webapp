@@ -15,7 +15,25 @@ function isAuthCookieName(name: string) {
   );
 }
 
+function resolveLegacyCookieDomain(request: NextRequest) {
+  const requestHost = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    request.nextUrl.host
+  )
+    .split(',')[0]
+    .trim()
+    .toLowerCase()
+    .split(':')[0];
+
+  if (requestHost === 'bndo.it' || requestHost.endsWith('.bndo.it')) {
+    return '.bndo.it';
+  }
+  return null;
+}
+
 function clearAuthCookies(response: NextResponse, request: NextRequest) {
+  const legacyDomain = resolveLegacyCookieDomain(request);
   const names = new Set<string>([
     'sb-access-token',
     'sb-refresh-token',
@@ -29,12 +47,17 @@ function clearAuthCookies(response: NextResponse, request: NextRequest) {
   }
 
   for (const name of names) {
-    response.cookies.set(name, '', {
+    const baseOptions = {
       maxAge: 0,
       path: '/',
       expires: new Date(0),
       sameSite: 'lax',
-    });
+    } as const;
+
+    response.cookies.set(name, '', baseOptions);
+    if (legacyDomain) {
+      response.cookies.set(name, '', { ...baseOptions, domain: legacyDomain });
+    }
   }
 }
 

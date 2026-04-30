@@ -18,7 +18,6 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const requestOrigin = request.nextUrl.origin;
   const isNetlifyPreview = host.endsWith('.netlify.app') || hostname.endsWith('.netlify.app');
-  const cookieDomain = host === 'bndo.it' || host.endsWith('.bndo.it') ? '.bndo.it' : undefined;
 
   if (process.env.MOCK_BACKEND === 'true' || host === 'localhost' || host === '127.0.0.1') {
     return NextResponse.next();
@@ -134,8 +133,7 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) => {
-            const nextOptions = cookieDomain ? { ...(options ?? {}), domain: cookieDomain } : options;
-            response.cookies.set(name, value, nextOptions);
+            response.cookies.set(name, value, options);
           });
         }
       }
@@ -145,6 +143,28 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user }
   } = await supabase.auth.getUser();
+
+  let roleCache: string | null | undefined = undefined;
+  const getRole = async () => {
+    if (!user) return null;
+    if (roleCache !== undefined) return roleCache;
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    roleCache = profile?.role ?? null;
+    return roleCache;
+  };
+
+  // Admin sessions must never "stick" to app.bndo.it. If we detect an admin on the app host,
+  // we migrate the legacy domain cookie to an admin-host-only cookie, then send the user back
+  // to app login (so users/consultants can log in normally).
+  if (hasDistinctDomainMapping && !isNetlifyPreview && isAppHost && user) {
+    const role = await getRole();
+    if (role && hasAdminAccess(role)) {
+      const returnUrl = buildAbsoluteUrl(appBase, '/login');
+      const migrateUrl = buildAbsoluteUrl(adminBase, '/api/auth/migrate');
+      migrateUrl.searchParams.set('return', returnUrl.toString());
+      return NextResponse.redirect(migrateUrl, { status: 303 });
+    }
+  }
 
   if (isAdminPath && !user) {
     const loginUrl = buildAbsoluteUrl(adminBase, '/login');
@@ -161,21 +181,21 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAuthPath && user && !hasAuthError) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    const role = await getRole();
 
-    if (profile?.role && hasAdminAccess(profile.role)) {
+    if (role && hasAdminAccess(role)) {
       return NextResponse.redirect(buildAbsoluteUrl(adminBase, '/admin'));
     }
-    if (profile?.role && hasConsultantAccess(profile.role)) {
+    if (role && hasConsultantAccess(role)) {
       return NextResponse.redirect(buildAbsoluteUrl(appBase, '/consultant'));
     }
 
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard/pratiche'));
   }
   if (isAdminPath && user) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-    if (!profile?.role || !hasAdminAccess(profile.role)) {
-      if (profile?.role && hasConsultantAccess(profile.role)) {
+    const role = await getRole();
+    if (!role || !hasAdminAccess(role)) {
+      if (role && hasConsultantAccess(role)) {
         return NextResponse.redirect(buildAbsoluteUrl(appBase, '/consultant'));
       }
       return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard/pratiche'));
@@ -183,8 +203,8 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isConsultantPath && user) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-    if (!profile?.role || !hasOpsAccess(profile.role)) {
+    const role = await getRole();
+    if (!role || !hasOpsAccess(role)) {
       return NextResponse.redirect(buildAbsoluteUrl(appBase, '/dashboard/pratiche'));
     }
   }
