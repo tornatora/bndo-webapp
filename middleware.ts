@@ -18,6 +18,7 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const requestOrigin = request.nextUrl.origin;
   const isNetlifyPreview = host.endsWith('.netlify.app') || hostname.endsWith('.netlify.app');
+  const cookieDomain = host === 'bndo.it' || host.endsWith('.bndo.it') ? '.bndo.it' : undefined;
 
   if (process.env.MOCK_BACKEND === 'true' || host === 'localhost' || host === '127.0.0.1') {
     return NextResponse.next();
@@ -88,6 +89,19 @@ export async function middleware(request: NextRequest) {
       if (path === '/') {
         return NextResponse.redirect(buildAbsoluteUrl(adminBase, '/admin', search));
       }
+      // If the user explicitly goes to admin.bndo.it/login, keep them on the admin host
+      // and force admin mode (otherwise we'd bounce to app.bndo.it and break session cookies).
+      if (path === '/login' && !isAdminMode) {
+        const loginUrl = buildAbsoluteUrl(adminBase, '/login');
+        loginUrl.searchParams.set('mode', 'admin');
+        const next = request.nextUrl.searchParams.get('next');
+        const error = request.nextUrl.searchParams.get('error');
+        const success = request.nextUrl.searchParams.get('success');
+        if (next) loginUrl.searchParams.set('next', next);
+        if (error) loginUrl.searchParams.set('error', error);
+        if (success) loginUrl.searchParams.set('success', success);
+        return NextResponse.redirect(loginUrl);
+      }
       if (isDashboardPath || isConsultantPath || (isAppDomainAuthPath && !isAdminAuthModePath)) {
         return NextResponse.redirect(buildAbsoluteUrl(appBase, path, search));
       }
@@ -119,7 +133,10 @@ export async function middleware(request: NextRequest) {
         setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          cookiesToSet.forEach(({ name, value, options }) => {
+            const nextOptions = cookieDomain ? { ...(options ?? {}), domain: cookieDomain } : options;
+            response.cookies.set(name, value, nextOptions);
+          });
         }
       }
     }
@@ -136,10 +153,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isDashboardPath && !user) {
+  if (isDashboardPath && !user && !isNetlifyPreview) {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
-  if (isConsultantPath && !user) {
+  if (isConsultantPath && !user && !isNetlifyPreview) {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
 
@@ -190,6 +207,7 @@ export const config = {
     '/login',
     '/register',
     '/forgot-password',
-    '/reset-password'
+    '/reset-password',
+    '/compila-bando-preview'
   ]
 };
