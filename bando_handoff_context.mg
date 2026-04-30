@@ -182,4 +182,5 @@
 - `primeBrowserbaseSessionToInvitalia`: rimosse animazioni/scroll di priming (solo goto + wait) per evitare pagina che va su/giu all'avvio.
 - `resolveWaitUntil`: se JSON chiede `load`, usiamo `domcontentloaded` (piu' veloce e stabile su portali terzi).
 - `scroll` step: se JSON include `viewport.scrollY`, facciamo `window.scrollTo(0, scrollY)` (deterministico) invece di wheel.
+- Fix aggiuntivo: se `viewport.scrollY=0` ma lo step ha `amount`/`direction` (scroll down), non facciamo scrollTo(0) (che non muove): usiamo scrollBy(delta).
 - Popup SPID: dimensioni wide (in base allo schermo) + retry close/focus dopo login.
