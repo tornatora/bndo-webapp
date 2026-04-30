@@ -297,12 +297,19 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
   // Tier 1: pdf-parse (preferred). We want this to work in Netlify preview too, so do not
   // silently fall back unless we really must.
   try {
-    const mod = (await import('pdf-parse')) as unknown as {
-      PDFParse?: new (opts: { data: Buffer }) => { getText: () => Promise<any>; destroy: () => Promise<void> };
-    };
-    const PDFParse = mod?.PDFParse;
-    if (PDFParse) {
-      const parser = new PDFParse({ data: buf });
+    const mod: any = await import('pdf-parse');
+    const pdfParseFn = mod?.default ?? mod;
+
+    // pdf-parse can be either a function(buf)->Promise or a class PDFParse. Support both.
+    if (typeof pdfParseFn === 'function') {
+      const data = await pdfParseFn(buf);
+      const text = String(data?.text ?? '').trim();
+      if (text.length >= 80) return text;
+    }
+
+    const PDFParseCtor = mod?.PDFParse;
+    if (PDFParseCtor) {
+      const parser = new PDFParseCtor({ data: buf });
       const data = await parser.getText();
       await parser.destroy();
       const text = String(data?.text ?? '').trim();

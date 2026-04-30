@@ -22,6 +22,36 @@ export function Step8DocumentiDSAN({ generatedDocs, dsanStatus, dsanError }: Pro
     URL.revokeObjectURL(url);
   };
 
+  const downloadAsPdf = async (docxBlob: Blob, filename: string) => {
+    // Client-side DOCX → HTML → PDF.
+    // This avoids Netlify serverless chromium/brotli packaging issues.
+    const [{ default: mammoth }, { default: html2pdf }] = await Promise.all([
+      import('mammoth/mammoth.browser'),
+      import('html2pdf.js'),
+    ]);
+
+    const arrayBuffer = await docxBlob.arrayBuffer();
+    const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
+
+    const container = document.createElement('div');
+    container.style.fontFamily = 'Arial, sans-serif';
+    container.style.fontSize = '11pt';
+    container.style.lineHeight = '1.4';
+    container.innerHTML = htmlResult.value || '';
+
+    // html2pdf returns a promise-like chain.
+    const targetName = filename.replace(/\.docx$/i, '.pdf');
+    await (html2pdf() as any)
+      .set({
+        margin: 10,
+        filename: targetName,
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(container)
+      .save();
+  };
+
   return (
     <div>
       <h2 className={s.cbCardTitle} style={{ marginBottom: 4 }}>
@@ -74,15 +104,27 @@ export function Step8DocumentiDSAN({ generatedDocs, dsanStatus, dsanError }: Pro
               </div>
             </div>
             {dsanStatus === 'ready' && doc.blob && (
-              <button
-                className={s.cbBtnMuted}
-                onClick={() => downloadBlob(doc.blob!, doc.fileName)}
-                type="button"
-                style={{ fontSize: 12, padding: '6px 12px' }}
-              >
-                <FileDown size={14} />
-                Scarica DOCX
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className={s.cbBtnMuted}
+                  onClick={() => downloadBlob(doc.blob!, doc.fileName)}
+                  type="button"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                >
+                  <FileDown size={14} />
+                  Scarica DOCX
+                </button>
+                <button
+                  className={s.cbBtnPrimary}
+                  onClick={() => void downloadAsPdf(doc.blob!, doc.fileName)}
+                  type="button"
+                  style={{ fontSize: 12, padding: '6px 12px' }}
+                  title="Genera PDF in locale (consigliato su Netlify preview)"
+                >
+                  <FileDown size={14} />
+                  Scarica PDF
+                </button>
+              </div>
             )}
           </div>
         ))}

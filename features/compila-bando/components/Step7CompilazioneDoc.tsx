@@ -77,7 +77,7 @@ export function Step7CompilazioneDoc({
             data: extracted,
             overrides: manualFields,
             mode: 'base64',
-            format: 'pdf',
+            format: 'docx',
           }),
         });
 

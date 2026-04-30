@@ -128,3 +128,26 @@
    - recovery su disconnect websocket/liveview
 2. Completare pipeline DSAN template reali (docx -> pdf firmabili) con mapping campi avanzato.
 3. Aggiungere orchestrazione fasi post-firma e upload allegati fino a conferma finale.
+# 2026-04-30 (oggi)
+
+## Stato Netlify preview (fix-pdf-extraction)
+
+- Repo corretto: `/Users/nataleletteriotornatora/Documents/bndo-webapp`
+- Branch: `fix-pdf-extraction`
+- Ultimo commit pushato: `d27381307226fadfbb8ed3660388d3747d6c4832`
+- Netlify branch deploy in corso (al momento della nota): deploy id `69f3240cfc118100081ea0dc` (state: building)
+
+### Link da usare per test
+
+- Preview principale (branch subdomain): `https://fix-pdf-extraction--cheerful-cobbler-f23efc.netlify.app/compila-bando-preview`
+- Se vedi ancora “Pagina non trovata” su quel link mentre il deploy e' in build, usa temporaneamente il permalink dell'ultimo deploy pronto (cambia a ogni deploy) e poi torna al link sopra appena la build finisce.
+
+### Causa del 404 intermittente su /compila-bando-preview
+
+- Il subdomain `fix-pdf-extraction--...` a volte serviva un deploy precedente (build id diverso) e quindi mostrava la pagina `/_not-found`.
+- Fix: deploy da `bndo-webapp` con Netlify config coerente (in particolare `publish = ".next"` in `netlify.toml`) e push su branch per forzare il branch deploy aggiornato.
+
+### Cosa c'e' nel flow (riassunto tecnico, senza segreti)
+
+- Step 8: documenti DSAN mostrati come 5 box + download (template reali in `public/templates` e `public/templates_tagged`, generazione via API `POST /api/compila-bando/generate-dsan`).
+- Step 10: SPID control center (no fake browser), apre Live View Browserbase in nuova scheda e auto-start della compilazione quando login rilevato.
