@@ -19,6 +19,37 @@ type RemoteRequest =
   | { action: 'active-element'; sessionId: string };
 
 const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
+const INVITALIA_FORM_HOST = 'presentazione-domanda-pia.npi.invitalia.it';
+
+type CachedRemote = {
+  sessionId: string;
+  connectUrl: string;
+  browser: any;
+  lastUsedAt: number;
+};
+
+const CACHE_TTL_MS = 70_000;
+
+function getCache(): Map<string, CachedRemote> {
+  const g = globalThis as any;
+  if (!g.__bndo_remote_cache) g.__bndo_remote_cache = new Map<string, CachedRemote>();
+  return g.__bndo_remote_cache as Map<string, CachedRemote>;
+}
+
+async function cleanupCacheBestEffort() {
+  const cache = getCache();
+  const now = Date.now();
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.lastUsedAt < CACHE_TTL_MS) continue;
+    cache.delete(key);
+    try {
+      if (typeof entry.browser?.disconnect === 'function') entry.browser.disconnect();
+      else if (typeof entry.browser?.close === 'function') await entry.browser.close();
+    } catch {
+      // ignore
+    }
+  }
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -55,6 +86,7 @@ async function selectRemotePage(browser: any) {
     let score = index;
     if (url && url !== 'about:blank') score += 100;
     if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+    if (url.includes(INVITALIA_FORM_HOST)) score += 1100;
     if (url.includes('.b2clogin.com')) score += 900;
     if (url.includes('spid')) score += 800;
     return { page, score };
@@ -70,25 +102,45 @@ async function selectRemotePage(browser: any) {
   return page;
 }
 
-async function withRemotePage<T>(sessionId: string, fn: (page: any, browser: any) => Promise<T>): Promise<T> {
-  const connectUrl = await getConnectUrl(sessionId);
+async function getOrCreateBrowser(sessionId: string): Promise<{ browser: any; connectUrl: string }> {
+  const cache = getCache();
+  const existing = cache.get(sessionId);
+  const now = Date.now();
+  if (existing && now - existing.lastUsedAt < CACHE_TTL_MS) {
+    try {
+      // Touch to verify it's still alive.
+      await existing.browser.pages();
+      existing.lastUsedAt = now;
+      return { browser: existing.browser, connectUrl: existing.connectUrl };
+    } catch {
+      cache.delete(sessionId);
+      try {
+        if (typeof existing.browser?.disconnect === 'function') existing.browser.disconnect();
+        else if (typeof existing.browser?.close === 'function') await existing.browser.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const connectUrl = existing?.connectUrl ?? (await getConnectUrl(sessionId));
   const mod = (await import('puppeteer-core')) as any;
   const puppeteer = mod?.default ?? mod;
   if (!puppeteer?.connect) throw new Error('puppeteer-core non disponibile');
 
-  const browser = await puppeteer.connect({
-    browserWSEndpoint: connectUrl,
-    defaultViewport: null,
-  });
+  const browser = await puppeteer.connect({ browserWSEndpoint: connectUrl, defaultViewport: null });
+  cache.set(sessionId, { sessionId, connectUrl, browser, lastUsedAt: now });
+  return { browser, connectUrl };
+}
 
-  try {
-    const page = await selectRemotePage(browser);
-    return await fn(page, browser);
-  } finally {
-    // Detach without ending the remote session (keepAlive=true on Browserbase session).
-    if (typeof browser.disconnect === 'function') browser.disconnect();
-    else if (typeof browser.close === 'function') await browser.close();
-  }
+async function withRemotePage<T>(sessionId: string, fn: (page: any, browser: any) => Promise<T>): Promise<T> {
+  await cleanupCacheBestEffort();
+  const { browser } = await getOrCreateBrowser(sessionId);
+  const page = await selectRemotePage(browser);
+  const cache = getCache();
+  const entry = cache.get(sessionId);
+  if (entry) entry.lastUsedAt = Date.now();
+  return await fn(page, browser);
 }
 
 export async function POST(req: Request) {
@@ -116,7 +168,7 @@ export async function POST(req: Request) {
         await client.send('Page.enable');
         const { data } = await client.send('Page.captureScreenshot', {
           format: 'jpeg',
-          quality: 75,
+          quality: 82,
           captureBeyondViewport: false,
         });
         const meta = await page.evaluate(() => ({

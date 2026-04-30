@@ -163,72 +163,133 @@ export default function SpidLoginPopupPage() {
     void fetchShot();
   }, [fetchShot, sessionId, text]);
 
-  const title = useMemo(() => 'BNDO SPID', []);
+  const title = useMemo(() => 'browser.bndo.it', []);
 
   return (
-    <main style={{ height: '100vh', display: 'grid', gridTemplateRows: 'auto 1fr auto', background: '#0b1136' }}>
-      <header style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 10, height: 10, borderRadius: 999, background: canInteract ? '#22c55e' : '#ef4444' }} />
-          <div style={{ color: '#fff', fontWeight: 900, fontSize: 13 }}>{title}</div>
-          <div style={{ color: 'rgba(226,232,240,0.9)', fontSize: 11 }}>{status}</div>
-        </div>
-        <div style={{ color: 'rgba(226,232,240,0.75)', fontSize: 10, maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {meta?.url || '—'}
-        </div>
-      </header>
-
+    <main style={{ height: '100vh', background: '#f1f5f9', padding: 12, boxSizing: 'border-box' }}>
       <div
-        ref={boxRef}
-        onPointerDown={onPointerDown}
         style={{
-          margin: 10,
-          borderRadius: 12,
-          border: '1px solid rgba(148,163,184,0.28)',
+          height: '100%',
+          borderRadius: 18,
+          background: '#ffffff',
+          border: '1px solid rgba(15, 23, 42, 0.10)',
+          boxShadow: '0 24px 70px rgba(15, 23, 42, 0.22)',
           overflow: 'hidden',
-          background: '#020617',
           display: 'grid',
-          placeItems: 'center',
-          userSelect: 'none',
-          touchAction: 'none',
+          gridTemplateRows: '44px 1fr 54px',
         }}
       >
-        {imgSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imgSrc} alt="spid" style={{ width: '100%', height: '100%', objectFit: 'contain' }} draggable={false} />
-        ) : (
-          <div style={{ color: '#cbd5e1', fontSize: 12, padding: 12 }}>Caricamento...</div>
-        )}
-      </div>
+        {/* Browser chrome */}
+        <header
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr auto',
+            alignItems: 'center',
+            gap: 10,
+            padding: '0 12px',
+            borderBottom: '1px solid rgba(148, 163, 184, 0.35)',
+            background: '#f8fafc',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 99, background: '#ef4444', display: 'block' }} />
+              <span style={{ width: 10, height: 10, borderRadius: 99, background: '#f59e0b', display: 'block' }} />
+              <span style={{ width: 10, height: 10, borderRadius: 99, background: '#22c55e', display: 'block' }} />
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{status}</div>
+          </div>
 
-      <footer style={{ padding: 10, display: 'grid', gap: 8, background: 'rgba(2,6,23,0.45)', borderTop: '1px solid rgba(148,163,184,0.18)' }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={() => void pressKey('Tab')} style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(15,23,42,0.75)', color: '#fff', fontSize: 12 }}>
-            TAB
-          </button>
-          <button onClick={() => void pressKey('Enter')} style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(15,23,42,0.75)', color: '#fff', fontSize: 12 }}>
-            INVIO
-          </button>
-          <button onClick={() => void pressKey('Backspace')} style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(15,23,42,0.75)', color: '#fff', fontSize: 12 }}>
-            BACK
-          </button>
-          <button onClick={() => void fetchShot()} style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid rgba(148,163,184,0.3)', background: 'rgba(15,23,42,0.75)', color: '#fff', fontSize: 12 }}>
-            Aggiorna
-          </button>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', alignItems: 'center' }}>
+            <div
+              style={{
+                height: 28,
+                borderRadius: 12,
+                border: '1px solid rgba(148, 163, 184, 0.55)',
+                background: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 10px',
+                gap: 8,
+                overflow: 'hidden',
+              }}
+              title={meta?.url || ''}
+            >
+              <div style={{ width: 16, height: 16, borderRadius: 4, background: '#0b1136', color: '#fff', fontSize: 10, display: 'grid', placeItems: 'center', fontWeight: 900 }}>
+                B
+              </div>
+              <div style={{ fontSize: 12, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {meta?.url || '—'}
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: '#64748b', fontSize: 11 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 99, background: canInteract ? '#22c55e' : '#ef4444', display: 'inline-block' }} />
+                {title}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#64748b', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {meta?.url ? new URL(meta.url).hostname : ''}
+          </div>
+        </header>
+
+        {/* Remote view */}
+        <div
+          ref={boxRef}
+          onPointerDown={onPointerDown}
+          style={{
+            background: '#111827',
+            display: 'grid',
+            placeItems: 'center',
+            userSelect: 'none',
+            touchAction: 'none',
+          }}
+        >
+          {imgSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imgSrc} alt="spid" style={{ width: '100%', height: '100%', objectFit: 'contain' }} draggable={false} />
+          ) : (
+            <div style={{ color: '#cbd5e1', fontSize: 12, padding: 12 }}>Caricamento...</div>
+          )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        {/* Minimal controls */}
+        <footer
+          style={{
+            padding: '8px 10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderTop: '1px solid rgba(148, 163, 184, 0.35)',
+            background: '#f8fafc',
+          }}
+        >
+          <button onClick={() => void pressKey('Tab')} style={{ padding: '8px 10px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.55)', background: '#fff', color: '#0f172a', fontSize: 12 }}>
+            TAB
+          </button>
+          <button onClick={() => void pressKey('Enter')} style={{ padding: '8px 10px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.55)', background: '#fff', color: '#0f172a', fontSize: 12 }}>
+            INVIO
+          </button>
+          <button onClick={() => void pressKey('Backspace')} style={{ padding: '8px 10px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.55)', background: '#fff', color: '#0f172a', fontSize: 12 }}>
+            BACK
+          </button>
+          <button onClick={() => void fetchShot()} style={{ padding: '8px 10px', borderRadius: 12, border: '1px solid rgba(148,163,184,0.55)', background: '#fff', color: '#0f172a', fontSize: 12 }}>
+            Aggiorna
+          </button>
+
+          <div style={{ flex: 1 }} />
+
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Scrivi qui e invia alla sessione..."
+            placeholder="Scrivi..."
             style={{
-              flex: 1,
-              padding: '10px 12px',
+              width: 220,
+              padding: '9px 10px',
               borderRadius: 12,
-              border: '1px solid rgba(148,163,184,0.25)',
-              background: 'rgba(15,23,42,0.75)',
-              color: '#fff',
+              border: '1px solid rgba(148,163,184,0.55)',
+              background: '#ffffff',
+              color: '#0f172a',
               fontSize: 12,
               outline: 'none',
             }}
@@ -236,22 +297,21 @@ export default function SpidLoginPopupPage() {
           <button
             onClick={() => void sendText()}
             style={{
-              padding: '10px 14px',
+              padding: '9px 12px',
               borderRadius: 12,
-              border: '1px solid rgba(34,197,94,0.45)',
-              background: 'rgba(34,197,94,0.22)',
+              border: '1px solid rgba(11, 17, 54, 0.25)',
+              background: '#0b1136',
               color: '#fff',
               fontSize: 12,
               fontWeight: 900,
               cursor: 'pointer',
-              minWidth: 92,
+              minWidth: 70,
             }}
           >
             Invia
           </button>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </main>
   );
 }
-

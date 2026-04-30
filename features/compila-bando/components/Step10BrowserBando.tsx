@@ -244,7 +244,7 @@ export function Step10BrowserBando({
     setDisconnectNotice(opened ? null : 'Popup bloccato: abilita i popup per BNDO e riapri la scheda SPID.');
     setFlowResult(
       opened
-        ? 'Scheda SPID aperta: torna qui, la compilazione parte automaticamente appena rileva il login.'
+        ? 'Popup SPID aperto: torna qui, la compilazione parte automaticamente appena rileva il login.'
         : null
     );
 
@@ -809,7 +809,7 @@ export function Step10BrowserBando({
             <>
               <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
                 {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-                {phase === 'spid-auth-wait' ? 'Riapri SPID' : session ? 'Accedi con SPID (nuova scheda)' : 'Accedi con SPID su Invitalia'}
+                {phase === 'spid-auth-wait' ? 'Riapri SPID' : session ? 'Accedi con SPID (popup)' : 'Accedi con SPID su Invitalia'}
               </button>
               <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
                 <OctagonX size={14} />

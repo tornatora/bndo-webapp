@@ -23,13 +23,13 @@ export default function SpidDonePage() {
         padding: 18,
         fontFamily:
           'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"',
-        background: '#0b1136',
-        color: '#fff',
+        background: '#0f172a',
+        color: '#e2e8f0',
       }}
     >
       <div style={{ maxWidth: 440, textAlign: 'center' }}>
         <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: 0.08, textTransform: 'uppercase', opacity: 0.85 }}>
-          BNDO
+          browser.bndo.it
         </div>
         <div style={{ marginTop: 10, fontSize: 22, fontWeight: 900 }}>
           Accesso completato
@@ -41,4 +41,3 @@ export default function SpidDonePage() {
     </main>
   );
 }
-
