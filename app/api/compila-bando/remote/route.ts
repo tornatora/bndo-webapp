@@ -116,7 +116,7 @@ export async function POST(req: Request) {
         await client.send('Page.enable');
         const { data } = await client.send('Page.captureScreenshot', {
           format: 'jpeg',
-          quality: 65,
+          quality: 75,
           captureBeyondViewport: false,
         });
         const meta = await page.evaluate(() => ({

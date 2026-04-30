@@ -215,7 +215,9 @@ export function Step10BrowserBando({
   }, [initializeSession]);
 
   const handleOpenSpidTab = useCallback(() => {
-    const url = session?.liveViewUrl || 'https://www.invitalia.it/';
+    const url = session?.sessionId
+      ? `${window.location.origin}/spid-login?sessionId=${encodeURIComponent(session.sessionId)}`
+      : session?.liveViewUrl || 'https://www.invitalia.it/';
     // Prefer a wide popup so the Browserbase live view isn't squashed (Invitalia is a desktop UI).
     const maxW = Math.max(820, Math.floor((window.screen?.availWidth || 1280) * 0.86));
     const maxH = Math.max(680, Math.floor((window.screen?.availHeight || 800) * 0.86));
