@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Check, FileText, ArrowLeft } from 'lucide-react';
+import { Check, ArrowLeft } from 'lucide-react';
 import { useConfetti } from '../hooks/useConfetti';
 import type { ExtractedData, CustomField } from '../lib/types';
 import s from '../styles/compila-bando.module.css';
@@ -10,7 +10,7 @@ type Props = {
   extracted: ExtractedData;
   customFields: CustomField[];
   hasPdf: boolean;
-  hasDocx: boolean;
+  hasDsan: boolean;
   useAiAgent: boolean;
   onBackToDashboard: () => void;
 };
@@ -19,7 +19,7 @@ export function Step11ConfermaFinale({
   extracted,
   customFields,
   hasPdf,
-  hasDocx,
+  hasDsan,
   useAiAgent,
   onBackToDashboard,
 }: Props) {
@@ -32,7 +32,8 @@ export function Step11ConfermaFinale({
 
   const filledFields =
     Object.values(extracted).filter(Boolean).length + customFields.length;
-  const totalDocs = (hasPdf ? 1 : 0) + (hasDocx ? 1 : 0);
+  // 1 PDF scheda + 5 PDF DSAN = max 6 documenti
+  const totalDocs = (hasPdf ? 1 : 0) + (hasDsan ? 5 : 0);
 
   const timestamp = new Date().toLocaleString('it-IT', {
     day: '2-digit',
@@ -68,7 +69,7 @@ export function Step11ConfermaFinale({
         </div>
         <div className={s.cbSuccessSummaryRow}>
           <span className={s.cbSuccessSummaryLabel}>Documenti generati</span>
-          <span className={s.cbSuccessSummaryValue}>{totalDocs}</span>
+          <span className={s.cbSuccessSummaryValue}>{totalDocs} PDF</span>
         </div>
         <div className={s.cbSuccessSummaryRow}>
           <span className={s.cbSuccessSummaryLabel}>Agente AI</span>

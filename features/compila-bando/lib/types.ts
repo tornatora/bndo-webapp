@@ -31,7 +31,9 @@ export type WizardDirection = 'next' | 'back';
 
 export type SpidPhase = 'login' | 'authenticating' | 'authenticated' | 'auto-filling' | 'uploading-docs' | 'submitting' | 'done';
 
-export type GeneratedDoc = { key: string; fileName: string; mimeType: string };
+export type GeneratedDoc = { key: string; fileName: string; mimeType: string; blob?: Blob };
+
+export type DocStatus = 'generating' | 'ready' | 'error';
 
 export type WizardState = {
   currentStep: WizardStep;
@@ -45,10 +47,9 @@ export type WizardState = {
   extracted: ExtractedData;
   customFields: CustomField[];
   generatedPdfBlob: Blob | null;
-  generatedDocxBlob: Blob | null;
   generatedDocs: GeneratedDoc[];
-  docxStatus: 'generating' | 'ready' | 'error';
-  docxError: string;
+  dsanStatus: DocStatus;
+  dsanError: string;
   spidPhase: SpidPhase;
   spidAuthenticated: boolean;
 };

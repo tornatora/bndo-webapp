@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase, GeneratedDoc } from '../lib/types';
+import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase, GeneratedDoc, DocStatus } from '../lib/types';
 import { DEFAULT_EXTRACTED, INITIAL_EXTRACTED } from '../lib/demoData';
 
 function makeInitialState(initialStep: WizardStep = 1): WizardState {
@@ -28,10 +28,9 @@ function makeInitialState(initialStep: WizardStep = 1): WizardState {
         ]
       : [],
     generatedPdfBlob: null,
-    generatedDocxBlob: null,
     generatedDocs: [],
-    docxStatus: 'generating',
-    docxError: '',
+    dsanStatus: 'generating',
+    dsanError: '',
     spidPhase: 'login',
     spidAuthenticated: false,
   };
@@ -126,20 +125,16 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
     setState((prev) => ({ ...prev, generatedPdfBlob: blob }));
   }, []);
 
-  const setGeneratedDocxBlob = useCallback((blob: Blob | null) => {
-    setState((prev) => ({ ...prev, generatedDocxBlob: blob }));
-  }, []);
-
   const setGeneratedDocs = useCallback((docs: GeneratedDoc[]) => {
     setState((prev) => ({ ...prev, generatedDocs: docs }));
   }, []);
 
-  const setDocxStatus = useCallback((status: 'generating' | 'ready' | 'error') => {
-    setState((prev) => ({ ...prev, docxStatus: status }));
+  const setDsanStatus = useCallback((status: DocStatus) => {
+    setState((prev) => ({ ...prev, dsanStatus: status }));
   }, []);
 
-  const setDocxError = useCallback((error: string) => {
-    setState((prev) => ({ ...prev, docxError: error }));
+  const setDsanError = useCallback((error: string) => {
+    setState((prev) => ({ ...prev, dsanError: error }));
   }, []);
 
   const setSpidPhase = useCallback((phase: SpidPhase) => {
@@ -184,10 +179,9 @@ export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
     removeCustomField,
     setUseAiAgent,
     setGeneratedPdfBlob,
-    setGeneratedDocxBlob,
     setGeneratedDocs,
-    setDocxStatus,
-    setDocxError,
+    setDsanStatus,
+    setDsanError,
     setSpidPhase,
     setSpidAuthenticated,
     skipUploads,

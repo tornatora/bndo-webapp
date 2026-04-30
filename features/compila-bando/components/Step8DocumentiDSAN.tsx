@@ -1,18 +1,16 @@
 'use client';
 
-import { FileDown, Check, Loader2 } from 'lucide-react';
+import { FileDown, Check, Loader2, AlertCircle } from 'lucide-react';
+import type { GeneratedDoc, DocStatus } from '../lib/types';
 import s from '../styles/compila-bando.module.css';
 
-type DocItem = { key: string; fileName: string; mimeType: string };
-
 type Props = {
-  generatedDocs: DocItem[];
-  docxBlob: Blob | null;
-  docxStatus: 'generating' | 'ready' | 'error';
-  docxError: string;
+  generatedDocs: GeneratedDoc[];
+  dsanStatus: DocStatus;
+  dsanError: string;
 };
 
-export function Step8DocumentiDSAN({ generatedDocs, docxBlob, docxStatus, docxError }: Props) {
+export function Step8DocumentiDSAN({ generatedDocs, dsanStatus, dsanError }: Props) {
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -30,7 +28,7 @@ export function Step8DocumentiDSAN({ generatedDocs, docxBlob, docxStatus, docxEr
         Documenti DSAN Allegati
       </h2>
       <p className={s.cbCardSubtitle} style={{ marginBottom: 24 }}>
-        Ecco i 5 documenti precompilati pronti per il download.
+        Ecco i 5 documenti DSAN compilati con i template originali Invitalia.
       </p>
 
       <div style={{ display: 'grid', gap: 12 }}>
@@ -53,15 +51,15 @@ export function Step8DocumentiDSAN({ generatedDocs, docxBlob, docxStatus, docxEr
                   width: 32,
                   height: 32,
                   borderRadius: 8,
-                  background: docxStatus === 'ready' ? '#dcfce7' : '#f1f5f9',
+                  background: dsanStatus === 'ready' ? '#dcfce7' : dsanStatus === 'error' ? '#fee2e2' : '#f1f5f9',
                   display: 'grid',
                   placeItems: 'center',
                 }}
               >
-                {docxStatus === 'ready' ? (
+                {dsanStatus === 'ready' ? (
                   <Check size={16} color="#16a34a" />
-                ) : docxStatus === 'error' ? (
-                  <span style={{ color: '#ef4444', fontSize: 12 }}>!</span>
+                ) : dsanStatus === 'error' ? (
+                  <AlertCircle size={16} color="#ef4444" />
                 ) : (
                   <Loader2 size={16} className={s.cbSpinner} color="#64748b" />
                 )}
@@ -71,31 +69,32 @@ export function Step8DocumentiDSAN({ generatedDocs, docxBlob, docxStatus, docxEr
                   {doc.fileName}
                 </p>
                 <p style={{ margin: 0, fontSize: 11, color: '#64748b' }}>
-                  {docxStatus === 'ready' ? 'Pronto per il download' : docxStatus === 'error' ? 'Errore generazione' : 'In generazione...'}
+                  {dsanStatus === 'ready' ? 'DOCX compilato con i tuoi dati' : dsanStatus === 'error' ? 'Errore compilazione' : 'Compilazione template originale...'}
                 </p>
               </div>
             </div>
-            {docxStatus === 'ready' && (
+            {dsanStatus === 'ready' && doc.blob && (
               <button
                 className={s.cbBtnMuted}
-                onClick={() => docxBlob && downloadBlob(docxBlob, doc.fileName)}
+                onClick={() => downloadBlob(doc.blob!, doc.fileName)}
                 type="button"
                 style={{ fontSize: 12, padding: '6px 12px' }}
               >
                 <FileDown size={14} />
-                Scarica
+                Scarica DOCX
               </button>
             )}
           </div>
         ))}
       </div>
 
-      {docxStatus === 'error' && (
+      {dsanStatus === 'error' && (
         <div style={{
           background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
           padding: '12px 16px', marginTop: 16, display: 'flex', alignItems: 'center', gap: 8
         }}>
-          <span style={{ fontSize: 13, color: '#991b1b' }}>Errore: {docxError}</span>
+          <AlertCircle size={16} color="#ef4444" />
+          <span style={{ fontSize: 13, color: '#991b1b' }}>Errore: {dsanError}</span>
         </div>
       )}
     </div>

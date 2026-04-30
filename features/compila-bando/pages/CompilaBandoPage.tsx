@@ -118,10 +118,9 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
             customFields={state.customFields}
             otherFiles={state.files.altri}
             onPdfBlob={wiz.setGeneratedPdfBlob}
-            onDocxBlob={wiz.setGeneratedDocxBlob}
             onGeneratedDocs={wiz.setGeneratedDocs}
-            onDocxStatus={wiz.setDocxStatus}
-            onDocxError={wiz.setDocxError}
+            onDsanStatus={wiz.setDsanStatus}
+            onDsanError={wiz.setDsanError}
           />
         );
 
@@ -129,15 +128,14 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
         return (
           <Step8DocumentiDSAN
             generatedDocs={state.generatedDocs.length > 0 ? state.generatedDocs : [
-              { key: 'dsan_antiriciclaggio', fileName: 'DSAN Antiriciclaggio rsud acn.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-              { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN Casellario e procedure concorsuali liquidatorie.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-              { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN Possesso requisiti iniziativa economica.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-              { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN Possesso requisiti soggettivi.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-              { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione iniziativa economica_attività individuali.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+              { key: 'dsan_antiriciclaggio', fileName: 'DSAN_Antiriciclaggio.pdf', mimeType: 'application/pdf' },
+              { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN_Casellario.pdf', mimeType: 'application/pdf' },
+              { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN_Requisiti_Iniziativa.pdf', mimeType: 'application/pdf' },
+              { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN_Requisiti_Soggettivi.pdf', mimeType: 'application/pdf' },
+              { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione_Iniziativa_C2.pdf', mimeType: 'application/pdf' },
             ]}
-            docxBlob={state.generatedDocxBlob}
-            docxStatus={state.docxStatus}
-            docxError={state.docxError}
+            dsanStatus={state.dsanStatus}
+            dsanError={state.dsanError}
           />
         );
 
@@ -172,7 +170,7 @@ export function CompilaBandoPage({ initialStep = 1 }: Props) {
             extracted={state.extracted}
             customFields={state.customFields}
             hasPdf={state.generatedPdfBlob !== null}
-            hasDocx={state.generatedDocxBlob !== null}
+            hasDsan={state.generatedDocs.length > 0 && state.dsanStatus === 'ready'}
             useAiAgent={state.useAiAgent}
             onBackToDashboard={handleBackToDashboard}
           />

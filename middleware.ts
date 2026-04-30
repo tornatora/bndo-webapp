@@ -190,6 +190,7 @@ export const config = {
     '/login',
     '/register',
     '/forgot-password',
-    '/reset-password'
+    '/reset-password',
+    '/compila-bando-preview'
   ]
 };

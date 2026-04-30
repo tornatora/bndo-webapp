@@ -202,8 +202,8 @@ export function Step10BrowserBando({
   }, [initializeSession]);
 
   const handleOpenSpidTab = useCallback(() => {
-    if (!session?.liveViewUrl) return;
-    const spidWindow = window.open(session.liveViewUrl, 'bndo_spid_live_view');
+    const url = session?.liveViewUrl || 'https://www.invitalia.it/';
+    const spidWindow = window.open(url, 'bndo_spid_live_view');
     const opened = Boolean(spidWindow);
     setSpidTabOpened(opened);
     setPhase('spid-auth-wait');
@@ -574,9 +574,9 @@ export function Step10BrowserBando({
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {phase === 'spid-login' || phase === 'spid-auth-wait' ? (
             <>
-              <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting || !session}>
+              <button className={s.cbBtnGreen} type="button" onClick={handleOpenSpidTab} disabled={isExecuting}>
                 {isExecuting ? <Loader2 size={14} className={s.cbSpinner} /> : <Check size={14} />}
-                {phase === 'spid-auth-wait' ? 'Riapri SPID' : 'Accedi con SPID (nuova scheda)'}
+                {phase === 'spid-auth-wait' ? 'Riapri SPID' : session ? 'Accedi con SPID (nuova scheda)' : 'Accedi con SPID su Invitalia'}
               </button>
               <button className={s.cbBtnMuted} type="button" onClick={handleStop}>
                 <OctagonX size={14} />
