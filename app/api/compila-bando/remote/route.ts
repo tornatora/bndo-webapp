@@ -13,7 +13,10 @@ type RemoteRequest =
   | { action: 'click'; sessionId: string; x: number; y: number; button?: 'left' | 'middle' | 'right' }
   | { action: 'type'; sessionId: string; text: string; delayMs?: number }
   | { action: 'press'; sessionId: string; key: string }
-  | { action: 'scroll'; sessionId: string; deltaY: number; deltaX?: number };
+  | { action: 'scroll'; sessionId: string; deltaY: number; deltaX?: number }
+  | { action: 'goto'; sessionId: string; url: string }
+  | { action: 'inspect'; sessionId: string; x: number; y: number }
+  | { action: 'active-element'; sessionId: string };
 
 const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
 
@@ -184,6 +187,190 @@ export async function POST(req: Request) {
         await page.mouse.wheel({ deltaY, deltaX });
       });
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'goto') {
+      const url = (body as any)?.url;
+      if (typeof url !== 'string' || !url.trim()) {
+        return NextResponse.json({ ok: false, error: 'URL non valido' }, { status: 400 });
+      }
+      await withRemotePage(sessionId, async (page) => {
+        await page.goto(url.trim(), { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'inspect') {
+      const x = (body as any)?.x;
+      const y = (body as any)?.y;
+      if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+        return NextResponse.json({ ok: false, error: 'Coordinate non valide' }, { status: 400 });
+      }
+
+      const result = await withRemotePage(sessionId, async (page) => {
+        const meta = await page.evaluate(() => ({
+          url: location.href,
+          width: window.innerWidth,
+          height: window.innerHeight,
+          dpr: window.devicePixelRatio,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }));
+        const target = await page.evaluate(
+          ({ x, y }: { x: number; y: number }) => {
+            const el = document.elementFromPoint(x, y) as HTMLElement | null;
+            if (!el) return null;
+
+            const tag = (el.tagName || '').toLowerCase();
+            const id = el.id || '';
+            const name = (el.getAttribute('name') || '').trim();
+            const role = (el.getAttribute('role') || '').trim();
+            const inputType = (el.getAttribute('type') || '').trim();
+            const placeholder = (el.getAttribute('placeholder') || '').trim();
+            const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+            const text = (el.innerText || el.textContent || '').trim().slice(0, 140);
+
+            // Try label association.
+            let label = '';
+            if (id) {
+              const l = document.querySelector(`label[for="${CSS.escape(id)}"]`) as HTMLElement | null;
+              if (l) label = (l.innerText || '').trim().slice(0, 160);
+            }
+            if (!label) {
+              const parentLabel = el.closest('label') as HTMLElement | null;
+              if (parentLabel) label = (parentLabel.innerText || '').trim().slice(0, 160);
+            }
+            if (!label && ariaLabel) label = ariaLabel;
+
+            // CSS selector preference: id > name > tag
+            let css = '';
+            if (id) css = `#${CSS.escape(id)}`;
+            else if (name) css = `${tag}[name="${name.replace(/\"/g, '\\"')}"]`;
+            else css = tag;
+
+            // XPath (best-effort)
+            const buildXPath = (el: Element | null): string | null => {
+              if (!el) return null;
+              const parts: string[] = [];
+              let node: Element | null = el;
+              while (node && node.nodeType === 1) {
+                const t = node.tagName.toLowerCase();
+                if ((node as HTMLElement).id) {
+                  parts.unshift(`${t}[@id="${(node as HTMLElement).id}"]`);
+                  break;
+                }
+                let idx = 1;
+                let sib = node.previousElementSibling;
+                while (sib) {
+                  if (sib.tagName === node.tagName) idx += 1;
+                  sib = sib.previousElementSibling;
+                }
+                parts.unshift(`${t}[${idx}]`);
+                node = node.parentElement;
+              }
+              return `/${parts.join('/')}`;
+            };
+
+            const xpath = buildXPath(el);
+            return {
+              tag,
+              id: id || undefined,
+              name: name || undefined,
+              role: role || undefined,
+              inputType: inputType || undefined,
+              placeholder: placeholder || undefined,
+              label: label || undefined,
+              text: text || undefined,
+              css: css || undefined,
+              xpath: xpath || undefined,
+            };
+          },
+          { x, y }
+        );
+        return { meta, target };
+      });
+
+      return NextResponse.json({ ok: true, meta: result.meta, target: result.target });
+    }
+
+    if (action === 'active-element') {
+      const result = await withRemotePage(sessionId, async (page) => {
+        const meta = await page.evaluate(() => ({
+          url: location.href,
+          width: window.innerWidth,
+          height: window.innerHeight,
+          dpr: window.devicePixelRatio,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        }));
+        const target = await page.evaluate(() => {
+          const el = (document.activeElement as HTMLElement | null) || null;
+          if (!el) return null;
+          const tag = (el.tagName || '').toLowerCase();
+          const id = el.id || '';
+          const name = (el.getAttribute('name') || '').trim();
+          const role = (el.getAttribute('role') || '').trim();
+          const inputType = (el.getAttribute('type') || '').trim();
+          const placeholder = (el.getAttribute('placeholder') || '').trim();
+          const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+          const text = (el.innerText || el.textContent || '').trim().slice(0, 140);
+
+          let label = '';
+          if (id) {
+            const l = document.querySelector(`label[for="${CSS.escape(id)}"]`) as HTMLElement | null;
+            if (l) label = (l.innerText || '').trim().slice(0, 160);
+          }
+          if (!label) {
+            const parentLabel = el.closest('label') as HTMLElement | null;
+            if (parentLabel) label = (parentLabel.innerText || '').trim().slice(0, 160);
+          }
+          if (!label && ariaLabel) label = ariaLabel;
+
+          let css = '';
+          if (id) css = `#${CSS.escape(id)}`;
+          else if (name) css = `${tag}[name="${name.replace(/\"/g, '\\"')}"]`;
+          else css = tag;
+
+          const buildXPath = (el: Element | null): string | null => {
+            if (!el) return null;
+            const parts: string[] = [];
+            let node: Element | null = el;
+            while (node && node.nodeType === 1) {
+              const t = node.tagName.toLowerCase();
+              if ((node as HTMLElement).id) {
+                parts.unshift(`${t}[@id="${(node as HTMLElement).id}"]`);
+                break;
+              }
+              let idx = 1;
+              let sib = node.previousElementSibling;
+              while (sib) {
+                if (sib.tagName === node.tagName) idx += 1;
+                sib = sib.previousElementSibling;
+              }
+              parts.unshift(`${t}[${idx}]`);
+              node = node.parentElement;
+            }
+            return `/${parts.join('/')}`;
+          };
+
+          const xpath = buildXPath(el);
+          return {
+            tag,
+            id: id || undefined,
+            name: name || undefined,
+            role: role || undefined,
+            inputType: inputType || undefined,
+            placeholder: placeholder || undefined,
+            label: label || undefined,
+            text: text || undefined,
+            css: css || undefined,
+            xpath: xpath || undefined,
+          };
+        });
+        return { meta, target };
+      });
+
+      return NextResponse.json({ ok: true, meta: result.meta, target: result.target });
     }
 
     return NextResponse.json({ ok: false, error: 'Azione non supportata' }, { status: 400 });
