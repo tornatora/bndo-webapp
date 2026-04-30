@@ -399,7 +399,9 @@ async function runScrollStep(page: Page, step: FlowStep, stepIndex: number): Pro
     const viewportScrollY =
       step.viewport && typeof step.viewport.scrollY === 'number' ? Math.max(0, Math.floor(step.viewport.scrollY)) : null;
 
-    if (viewportScrollY !== null) {
+    // Only use absolute scroll targets when they are meaningful (>0).
+    // Some recorded steps include viewport.scrollY=0 even when the intent is "scroll down by amount".
+    if (viewportScrollY !== null && viewportScrollY > 0) {
       await page
         .evaluate((y) => {
           window.scrollTo(0, y);
