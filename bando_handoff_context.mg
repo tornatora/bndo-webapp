@@ -11,6 +11,9 @@
 - Commit SHA base: `75e63cb2f7864f62e32f7dd0e307681575f9dd5f`
 - Working tree: modified (non committed)
 
+## Latest Commit (CloudConvert)
+- 2026-04-30: `25f07791e35ae11e95bf7c55a019c3b597c68c0a` on branch `fix/cloudconvert-pdf`
+
 ## Preview
 - URL branch deploy stabile (consigliata per test): `https://fix-pdf-extraction--cheerful-cobbler-f23efc.netlify.app`
 - Deploy CLI stabile: `69f271e9c2e4c620ed5febf6`
