@@ -303,9 +303,26 @@ async function runSelectStep(
     await page.waitForSelector(selector, { timeout: stepTimeoutMs });
 
     let selected = false;
+    const targetRole = (step.target?.role || '').toLowerCase();
+    const targetTag = (step.target?.tag || '').toLowerCase();
+    const selectorLower = selector.toLowerCase();
+    const looksLikeOptionTarget =
+      targetRole === 'option' ||
+      targetTag.includes('option') ||
+      selectorLower.includes('mat-option') ||
+      selectorLower.includes('typeahead');
+
+    // If the selector already points to an option element, a single click is the selection.
+    if (looksLikeOptionTarget) {
+      await page.click(selector, { timeout: stepTimeoutMs });
+      selected = true;
+    }
+
     try {
-      const byLabel = await page.selectOption(selector, { label: value });
-      selected = byLabel.length > 0;
+      if (!selected) {
+        const byLabel = await page.selectOption(selector, { label: value });
+        selected = byLabel.length > 0;
+      }
     } catch {
       // Try other mechanisms below.
     }
