@@ -14,6 +14,7 @@ import type {
   FlowExecutionResult,
   FlowStep,
   FlowStepExecutionResult,
+  FlowTemplate,
 } from '@/lib/compila-bando/types';
 
 export const runtime = 'nodejs';
@@ -538,6 +539,7 @@ function parseRequestBody(raw: unknown): {
   phase: FlowExecutionPhase;
   applicationId: string | null;
   sessionId: string | null;
+  flowTemplateOverride: FlowTemplate | null;
 } | null {
   if (!raw || typeof raw !== 'object') return null;
   const maybe = raw as {
@@ -546,18 +548,37 @@ function parseRequestBody(raw: unknown): {
     phase?: unknown;
     applicationId?: unknown;
     sessionId?: unknown;
+    flowTemplateOverride?: unknown;
   };
   if (typeof maybe.connectUrl !== 'string' && typeof maybe.sessionId !== 'string') return null;
   if (!maybe.client || typeof maybe.client !== 'object') return null;
   const phase = typeof maybe.phase === 'string' && maybe.phase.trim() ? maybe.phase.trim() : 'form_fill';
   const applicationId = typeof maybe.applicationId === 'string' && maybe.applicationId.trim() ? maybe.applicationId.trim() : null;
   const sessionId = typeof maybe.sessionId === 'string' && maybe.sessionId.trim() ? maybe.sessionId.trim() : null;
+
+  let flowTemplateOverride: FlowTemplate | null = null;
+  if (maybe.flowTemplateOverride && typeof maybe.flowTemplateOverride === 'object') {
+    const ft = maybe.flowTemplateOverride as any;
+    if (Array.isArray(ft.steps) && ft.steps.length > 0 && ft.fieldMapping && typeof ft.fieldMapping === 'object') {
+      flowTemplateOverride = {
+        name: typeof ft.name === 'string' && ft.name.trim() ? ft.name.trim() : 'Recorder Override',
+        bandoKey: typeof ft.bandoKey === 'string' && ft.bandoKey.trim() ? ft.bandoKey.trim() : 'override',
+        steps: ft.steps as FlowStep[],
+        fieldMapping: ft.fieldMapping as Record<string, string>,
+        expectedDurationSeconds: typeof ft.expectedDurationSeconds === 'number' ? ft.expectedDurationSeconds : undefined,
+        version: typeof ft.version === 'number' ? ft.version : undefined,
+        source: typeof ft.source === 'string' ? ft.source : 'recorder_override',
+        updatedAt: typeof ft.updatedAt === 'string' ? ft.updatedAt : undefined,
+      };
+    }
+  }
   return {
     connectUrl: typeof maybe.connectUrl === 'string' ? maybe.connectUrl : '',
     client: maybe.client as ClientData,
     phase,
     applicationId,
     sessionId,
+    flowTemplateOverride,
   };
 }
 
@@ -690,12 +711,15 @@ export async function POST(req: Request) {
     }
     const connectUrl = await resolveConnectUrl(payload);
 
-    const { template: flowTemplate, checksumSha256 } = loadFlowTemplate();
+    const loaded = loadFlowTemplate();
+    const flowTemplate = payload.flowTemplateOverride ?? loaded.template;
+    const checksumSha256 = payload.flowTemplateOverride ? 'override' : loaded.checksumSha256;
     console.info('[compila-bando][execute-flow] flow_template_loaded', {
       name: flowTemplate.name,
       version: flowTemplate.version ?? null,
       steps: flowTemplate.steps.length,
       checksumSha256,
+      source: payload.flowTemplateOverride ? 'override' : 'file',
     });
 
     const { browser, page } = await resolvePage(connectUrl);

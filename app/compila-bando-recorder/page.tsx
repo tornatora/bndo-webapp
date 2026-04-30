@@ -50,6 +50,7 @@ export default function CompilaBandoRecorderPage() {
   const [eventsCount, setEventsCount] = useState<number>(0);
   const [steps, setSteps] = useState<FlowStep[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+  const [replayStatus, setReplayStatus] = useState<string>('');
 
   const installTimerRef = useRef<number | null>(null);
   const pollTimerRef = useRef<number | null>(null);
@@ -276,6 +277,65 @@ export default function CompilaBandoRecorderPage() {
     setStatus('Flow esportato (download).');
   }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, steps, subProceduraKey]);
 
+  const runReplay = useCallback(async () => {
+    if (!session) return;
+    setReplayStatus('Esecuzione in corso...');
+    try {
+      const proceduraSlug = slugify(proceduraKey) || 'procedura';
+      const subSlug = subProceduraKey.trim() ? slugify(subProceduraKey) : '';
+      const flowTemplateOverride = {
+        name: flowName,
+        bandoKey,
+        version: 1,
+        source: 'recorder_replay',
+        updatedAt: new Date().toISOString().slice(0, 10),
+        expectedDurationSeconds: 320,
+        fieldMapping,
+        steps,
+        proceduraKey: proceduraSlug,
+        ...(subSlug ? { subProceduraKey: subSlug } : {}),
+      };
+
+      // Minimal demo client; runtime will derive tipologia/linea defaults anyway.
+      const client = {
+        firstName: 'Mario',
+        lastName: 'Rossi',
+        fullName: 'Mario Rossi',
+        zip: '',
+        province: '',
+        city: '',
+        pec: '',
+        phone: '',
+        ragioneSociale: '',
+        codiceFiscale: '',
+        partitaIva: '00000000000',
+        rea: '',
+        sedeLegale: '',
+        formaGiuridica: '',
+      };
+
+      const res = await fetch('/api/compila-bando/execute-flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          phase: 'form_fill',
+          client,
+          flowTemplateOverride,
+        }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (json && json.ok) {
+        setReplayStatus(`Replay OK: ${json.stepsExecuted} step eseguiti (${json.elapsedMs}ms)`);
+      } else {
+        const fail = Array.isArray(json?.failedSteps) ? json.failedSteps[0]?.error || json.failedSteps[0]?.message : json?.error;
+        setReplayStatus(`Replay con errori: ${(fail || 'vedi failedSteps').toString().slice(0, 140)}`);
+      }
+    } catch (e) {
+      setReplayStatus(`Errore replay: ${e instanceof Error ? e.message : 'errore non gestito'}`);
+    }
+  }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, session, steps, subProceduraKey]);
+
   return (
     <main style={{ padding: 18, maxWidth: 1280, margin: '0 auto' }}>
       <h1 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 900 }}>Compila Bando Recorder (solo interno)</h1>
@@ -366,6 +426,31 @@ export default function CompilaBandoRecorderPage() {
           <button onClick={exportFlow} type="button" style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.14)', background: '#111827', color: '#fff', fontWeight: 900 }}>
             Scarica JSON
           </button>
+
+          <button
+            onClick={() => void runReplay()}
+            type="button"
+            disabled={!session || steps.length === 0}
+            style={{
+              width: '100%',
+              marginTop: 8,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid rgba(15,23,42,0.14)',
+              background: session && steps.length > 0 ? '#0b1136' : '#94a3b8',
+              color: '#fff',
+              fontWeight: 900,
+              cursor: session && steps.length > 0 ? 'pointer' : 'not-allowed',
+            }}
+            title="Esegue gli step registrati sulla sessione corrente (devi essere autenticato nella Live View)."
+          >
+            Esegui Replay (su questa sessione)
+          </button>
+          {replayStatus && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#334155' }}>
+              {replayStatus}
+            </div>
+          )}
 
           <div style={{ marginTop: 12, fontSize: 12, fontWeight: 800 }}>Ultimi step</div>
           <div style={{ marginTop: 6, maxHeight: 300, overflow: 'auto', fontSize: 11, color: '#334155', lineHeight: 1.45 }}>
