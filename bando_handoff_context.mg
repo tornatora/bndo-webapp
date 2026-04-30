@@ -78,6 +78,19 @@
    - confermato che alias `compila-bando-clean-20260429` risponde 404
 
 ## File toccati
+
+## Update (2026-05-01) - Recorder: replay da file JSON (DevTools convertito)
+- Aggiunta API:
+  - `GET /api/compila-bando/recordings` (lista `data/flows/recordings/*.json`)
+  - `POST /api/compila-bando/recordings { filename }` (carica flowTemplate)
+- Pagina `/compila-bando-recorder`:
+  - dropdown file + `Carica file`
+  - `Replay da file` che invoca `execute-flow` con `flowTemplateOverride`
+- File flow aggiunto:
+  - `data/flows/recordings/resto-al-sud-2-0-voucher-libero-professionista.devtools.partial.json`
+
+Git:
+- Commit: `e8f9e15` (branch `fix-pdf-extraction-replay`)
 - `app/api/compila-bando/readiness-check/route.ts`
 - `app/api/compila-bando/upload-signed/route.ts`
 - `app/api/compila-bando/execute-flow/route.ts`
