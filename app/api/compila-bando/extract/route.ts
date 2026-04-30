@@ -28,12 +28,42 @@ export const dynamic = 'force-dynamic';
 const require = createRequire(import.meta.url);
 let PDFJS_STANDARD_FONT_URL: string | null = null;
 let PDFJS_CMAP_URL: string | null = null;
+let PDFJS_WORKER_URL: string | null = null;
 try {
-  const pdfjsRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
+  // Avoid require.resolve() here: Next can rewrite node_modules paths with "(rsc)" which breaks runtime imports.
+  // Using process.cwd() keeps the path stable in local dev and Netlify functions.
+  const pdfjsRoot = path.join(process.cwd(), 'node_modules/pdfjs-dist');
   PDFJS_STANDARD_FONT_URL = pathToFileURL(path.join(pdfjsRoot, 'standard_fonts/')).toString();
   PDFJS_CMAP_URL = pathToFileURL(path.join(pdfjsRoot, 'cmaps/')).toString();
+  PDFJS_WORKER_URL = pathToFileURL(path.join(pdfjsRoot, 'legacy/build/pdf.worker.mjs')).toString();
 } catch {
   // If resolution fails in a particular bundle/runtime, we fall back to pdf-parse/zlib.
+}
+
+let PDFJS_WORKER_READY: Promise<void> | null = null;
+async function ensurePdfJsWorkerLoaded() {
+  const anyGlobal = globalThis as any;
+  if (anyGlobal.pdfjsWorker?.WorkerMessageHandler) return;
+
+  if (!PDFJS_WORKER_READY) {
+    PDFJS_WORKER_READY = (async () => {
+      // 1) Try normal Node resolution (works in most runtimes).
+      try {
+        const mod: any = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+        anyGlobal.pdfjsWorker = mod;
+        return;
+      } catch {}
+
+      // 2) Fallback: explicit file:// URL from our computed path.
+      try {
+        if (!PDFJS_WORKER_URL) return;
+        const mod: any = await import(/* webpackIgnore: true */ PDFJS_WORKER_URL);
+        anyGlobal.pdfjsWorker = mod;
+      } catch {}
+    })();
+  }
+
+  await PDFJS_WORKER_READY;
 }
 
 type ExtractedPayload = {
@@ -47,6 +77,8 @@ type ExtractedPayload = {
   email_pec: string | null;
   telefono: string | null;
 };
+
+type PdfTextSource = 'netlify-function' | 'pdf-parse' | 'pdfjs-dist' | 'zlib' | 'none';
 
 const EMPTY_EXTRACTION: ExtractedPayload = {
   ragione_sociale: null,
@@ -172,18 +204,35 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   }
 
   // Pattern set 1: "classical" visura with explicit labels
-  const ragioneSocialeLabeled = extractRegexValue(
-    normalized,
-    /(?:denominazione|ragione\s+sociale)\s*[:\-]?\s*([^\n]{3,180})/i
-  );
+  const ragioneSocialeLabeled =
+    // Prefer newline-bounded match to avoid swallowing the whole paragraph after "Denominazione:".
+    extractRegexValue(normalizedRaw, /(?:denominazione|ragione\s+sociale)\s*[:\-]?\s*([^\n]{3,180})/i) ??
+    // Fallback for extractors that lose line breaks.
+    extractRegexValue(
+      normalized,
+      /(?:denominazione|ragione\s+sociale)\s*[:\-]?\s*(.+?)(?=\s+(?:indirizzo\s+sede|sede\s+legale|codice\s+fiscale|partita\s+iva|numero\s+rea|forma\s+giuridica|domicilio\s+digitale|pec|data\s+iscrizione)\b|$)/i
+    );
 
   // Pattern set 2: InfoCamere "VISURA ORDINARIA DELL'IMPRESA" layout.
   // The extracted text is often flattened (few/no newlines). Prefer substring-based field blocks.
   const ragioneSocialeFromHeader = (() => {
-    const m = normalized.match(/VISURA\s+ORDINARIA\s+DELL[' ]IMPRESA\s+(.{3,220}?)\s+DATI\s+ANAGRAFICI/i);
+    // Prefer the raw (newline-preserving) header: name usually spans 1-3 lines right after the title.
+    const m = normalizedRaw.match(
+      /VISURA\s+ORDINARIA\s+DELL[' ]IMPRESA\s*\n([\s\S]{3,300}?)(?:\nIl\s+QR\s+Code|\nDATI\s+ANAGRAFICI|\nIndice|$)/i
+    );
     if (!m?.[1]) return null;
-    // Take first 1-3 "words/lines" chunk, avoid pulling the whole paragraph.
-    return toCleanNullable(m[1].split(/\s{2,}|\s{1,}\bIl\b/i)[0]);
+
+    const lines = m[1]
+      .split('\n')
+      .map((l) => normalizeSpaces(l))
+      .filter(Boolean)
+      // Drop short "verification code" lines like "LGECGM"
+      .filter((l) => !(l.length <= 8 && /^[A-Z0-9]+$/.test(l) && !l.includes(' ')));
+
+    if (lines.length === 0) return null;
+
+    // Join the first 1-3 meaningful lines (company/person name).
+    return toCleanNullable(lines.slice(0, 3).join(' '));
   })();
 
   const sedeLegale =
@@ -217,10 +266,12 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
   const codiceFiscale = codiceFiscale16 ?? codiceFiscale11;
 
   const formaGiuridica =
-    extractRegexValue(normalized, /(?:forma\s*giuridica)\s*[:\-]?\s*([^\n]{3,120})/i) ??
+    extractRegexValue(normalizedRaw, /Forma\s+giuridica\s+([^\n]{3,80})/i) ??
+    extractRegexValue(normalized, /(?:forma\s*giuridica)\s*[:\-]?\s*(.+?)(?=\s+(?:data\s+iscrizione|numero\s+rea|partita\s+iva|codice\s+fiscale|titolare|attivita)\b|$)/i) ??
     extractRegexValue(normalized, /Forma\s*giuridica\s+([A-Za-z ][A-Za-z ']{3,80})/i);
 
-  const ragioneSociale = ragioneSocialeLabeled ?? ragioneSocialeFromHeader;
+  // Prefer header name (usually clean) over "Denominazione:" blocks (often followed by extra text).
+  const ragioneSociale = ragioneSocialeFromHeader ?? ragioneSocialeLabeled;
   const telefono = extractRegexValue(normalized, /(?:telefono|tel\.?)\s*[:\-]?\s*([+0-9][0-9\s\-\/]{5,20})/i);
   const nomeLegaleRappresentante = extractNomeLegale(normalized, ragioneSociale);
 
@@ -318,9 +369,16 @@ async function extractWithLlm(
   }
 }
 
-async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
+async function extractPdfText(
+  buf: Buffer,
+  baseUrl?: string
+): Promise<{ text: string; source: PdfTextSource }> {
   // Tier 1: call standalone Netlify function first (most reliable in Netlify runtime).
   // This avoids pdfjs edge cases inside Next server handler bundles.
+  // In local dev, that function route doesn't exist, so skip.
+  const isLocalDevHost =
+    !!baseUrl &&
+    (baseUrl.includes('://localhost') || baseUrl.includes('://127.0.0.1') || baseUrl.includes('://192.168.'));
   const bases = [
     baseUrl,
     process.env.DEPLOY_PRIME_URL,
@@ -328,51 +386,57 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
     process.env.DEPLOY_URL,
   ].filter((b): b is string => !!b && b.length > 0);
 
-  for (const base of bases) {
-    try {
-      const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
-      const formData = new FormData();
-      formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
-      const res = await fetch(fnUrl, {
-        method: 'POST',
-        body: formData,
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.text?.length >= 80) return json.text;
-      }
-    } catch {}
+  if (!isLocalDevHost) {
+    for (const base of bases) {
+      try {
+        const fnUrl = `${base.replace(/\/+$/, '')}/.netlify/functions/extract-pdf-text`;
+        const formData = new FormData();
+        formData.append('pdf', new Blob([new Uint8Array(buf)], { type: 'application/pdf' }), 'doc.pdf');
+        const res = await fetch(fnUrl, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(12_000),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.text?.length >= 80) {
+            return { text: json.text, source: 'netlify-function' };
+          }
+        }
+      } catch {}
+    }
   }
 
   // Tier 2: pdf-parse (preferred). In Netlify, prefer the PDFParse class API (more stable) and avoid
   // falling back to raw zlib streams (can produce garbage for many PDFs).
   let bestText = '';
+  let bestSource: PdfTextSource = 'none';
   try {
-    const mod: any = await import('pdf-parse');
-    const pkg: any = mod?.default ?? mod; // CJS export is exposed as default in ESM import
-    const PDFParseCtor = pkg?.PDFParse ?? mod?.PDFParse ?? pkg?.default?.PDFParse;
-
+    await ensurePdfJsWorkerLoaded();
+    // Use CJS require to avoid bundler edge cases.
+    const pdfParse: any = require('pdf-parse');
+    const PDFParseCtor = pdfParse?.PDFParse ?? pdfParse?.default ?? null;
     if (typeof PDFParseCtor === 'function') {
-      const parser = new PDFParseCtor({ data: buf });
+      const parser = new PDFParseCtor({
+        data: buf,
+        standardFontDataUrl: PDFJS_STANDARD_FONT_URL ?? undefined,
+        cMapUrl: PDFJS_CMAP_URL ?? undefined,
+        cMapPacked: true,
+      });
       const data = await parser.getText();
       await parser.destroy?.();
       const text = String(data?.text ?? '').trim();
-      bestText = text;
-    }
-
-    // Fallback: function API
-    if (typeof pkg === 'function') {
-      const data = await pkg(buf);
-      const text = String(data?.text ?? '').trim();
-      if (text.length > bestText.length) bestText = text;
+      if (text.length > bestText.length) {
+        bestText = text;
+        bestSource = 'pdf-parse';
+      }
     }
   } catch (e) {
     // If pdf-parse is missing or fails, we keep a fallback, but surface a short hint in logs.
     console.warn('[compila-bando/extract] pdf-parse failed:', e instanceof Error ? e.message : e);
   }
 
-  if (bestText.length >= 80) return bestText;
+  if (bestText.length >= 80) return { text: bestText, source: bestSource };
 
   // Tier 3: pdfjs-dist direct extraction with standard font data (helps Netlify/serverless).
   try {
@@ -398,22 +462,25 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
       }
       await doc.destroy?.();
       const text = parts.join('\n').trim();
-      if (text.length > bestText.length) bestText = text;
+      if (text.length > bestText.length) {
+        bestText = text;
+        bestSource = 'pdfjs-dist';
+      }
     }
   } catch (e) {
     console.warn('[compila-bando/extract] pdfjs-dist failed:', e instanceof Error ? e.message : e);
   }
 
-  if (bestText.length > 0) return bestText;
+  if (bestText.length > 0) return { text: bestText, source: bestSource };
 
   // Tier 4: last-resort zlib stream scraping (very noisy but better than empty on some PDFs).
   try {
     const z = extractPdfTextZlib(buf);
     const t = String(z || '').trim();
-    if (t.length > 0) return t;
+    if (t.length > 0) return { text: t, source: 'zlib' };
   } catch {}
 
-  return '';
+  return { text: '', source: 'none' };
 }
 
 function extractPdfTextZlib(buf: Buffer): string {
@@ -474,7 +541,7 @@ async function fileToOpenAiContent(file: File, baseUrl?: string): Promise<OpenAI
   const buf = Buffer.from(await file.arrayBuffer());
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (isPdf) {
-    const text = await extractPdfText(buf, baseUrl);
+    const { text } = await extractPdfText(buf, baseUrl);
     // Keep prompt bounded: long PDF extractions can reduce LLM quality and increase failures.
     const clipped = text.length > 12_000 ? `${text.slice(0, 12_000)}\n...[TRUNCATED]...` : text;
     return { type: 'text', text: `=== DOCUMENTO PDF ===\n${clipped}\n=== FINE DOCUMENTO ===` };
@@ -536,6 +603,7 @@ export async function POST(req: Request) {
     const contents: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{ type: 'text', text: 'Estrai i dati da questi documenti.' }];
     let deterministic: Partial<ExtractedPayload> = {};
     let visuraTextChars = 0;
+    let visuraTextSource: PdfTextSource | null = null;
     const warnings: string[] = [];
 
     if (visuraFile) {
@@ -543,7 +611,9 @@ export async function POST(req: Request) {
       const isVisuraPdf =
         visuraFile.type === 'application/pdf' || visuraFile.name.toLowerCase().endsWith('.pdf');
       if (isVisuraPdf) {
-        const visuraText = await extractPdfText(visuraBuffer, baseUrl);
+        const visuraExtract = await extractPdfText(visuraBuffer, baseUrl);
+        const visuraText = visuraExtract.text;
+        visuraTextSource = visuraExtract.source;
         visuraTextChars = visuraText.length;
         deterministic = extractFromVisuraText(visuraText);
         if (visuraTextChars < 120) {
@@ -572,6 +642,7 @@ export async function POST(req: Request) {
       warnings,
       meta: {
         visuraTextChars,
+        visuraTextSource,
       },
     });
   } catch (e) {
