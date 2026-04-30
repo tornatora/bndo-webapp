@@ -185,16 +185,8 @@ export async function primeBrowserbaseSessionToInvitalia(
         waitUntil: 'domcontentloaded',
         timeout: 45_000,
       });
-      // Delay a bit so the embedded live view has time to connect before the scripted motion starts.
-      await page.waitForTimeout(3500);
-      await page.evaluate(() => window.scrollTo({ top: 500, behavior: 'smooth' }));
-      await page.waitForTimeout(1300);
-      await page.evaluate(() => window.scrollTo({ top: 1200, behavior: 'smooth' }));
-      await page.waitForTimeout(1400);
-      await page.evaluate(() => window.scrollTo({ top: 300, behavior: 'smooth' }));
-      await page.waitForTimeout(1300);
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-      await page.waitForTimeout(900);
+      // Keep priming deterministic: no extra scrolling. Just a short delay so the page settles.
+      await page.waitForTimeout(1200);
     } finally {
       await browser.close();
     }

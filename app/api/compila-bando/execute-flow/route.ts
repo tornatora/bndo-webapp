@@ -379,14 +379,32 @@ async function runGotoStep(
 async function runScrollStep(page: Page, step: FlowStep, stepIndex: number): Promise<FlowStepExecutionResult> {
   const startedAt = Date.now();
   try {
+    const viewportScrollY =
+      step.viewport && typeof step.viewport.scrollY === 'number' ? Math.max(0, Math.floor(step.viewport.scrollY)) : null;
+
+    if (viewportScrollY !== null) {
+      await page
+        .evaluate((y) => {
+          window.scrollTo(0, y);
+        }, viewportScrollY)
+        .catch(() => undefined);
+      await settleAfterAction(page, 1800);
+      await applyStepDelay(page, step);
+      return successResult(step, stepIndex, startedAt, `ScrollTo eseguito: y=${viewportScrollY}`, {
+        valueUsed: String(viewportScrollY),
+      });
+    }
+
     const baseAmount = Math.abs(step.amount ?? 320);
     const signedAmount = step.direction === 'up' ? -baseAmount : baseAmount;
-    await page.mouse.wheel(0, signedAmount);
+    await page
+      .evaluate((delta) => {
+        window.scrollBy(0, delta);
+      }, signedAmount)
+      .catch(() => undefined);
     await settleAfterAction(page, 1800);
     await applyStepDelay(page, step);
-    return successResult(step, stepIndex, startedAt, `Scroll eseguito: ${signedAmount}px`, {
-      valueUsed: String(signedAmount),
-    });
+    return successResult(step, stepIndex, startedAt, `Scroll eseguito: ${signedAmount}px`, { valueUsed: String(signedAmount) });
   } catch (error) {
     return failedResult(step, stepIndex, startedAt, error, 'Scroll fallito');
   }

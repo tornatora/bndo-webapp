@@ -120,9 +120,10 @@ export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
 
 export function resolveWaitUntil(raw: string | undefined): 'load' | 'domcontentloaded' | 'networkidle' | 'commit' {
   const normalized = (raw || 'domcontentloaded').toLowerCase();
-  if (WAIT_UNTIL_ALLOWED.has(normalized)) {
-    return normalized as 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
-  }
+  // For third-party portals, "load" can be very slow and not necessary.
+  // We settle after action anyway, so prefer domcontentloaded.
+  if (normalized === 'load') return 'domcontentloaded';
+  if (WAIT_UNTIL_ALLOWED.has(normalized)) return normalized as 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
   return 'domcontentloaded';
 }
 

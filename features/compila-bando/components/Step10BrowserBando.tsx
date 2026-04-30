@@ -213,8 +213,11 @@ export function Step10BrowserBando({
 
   const handleOpenSpidTab = useCallback(() => {
     const url = session?.liveViewUrl || 'https://www.invitalia.it/';
-    const popupWidth = 520;
-    const popupHeight = 760;
+    // Prefer a wide popup so the Browserbase live view isn't squashed (Invitalia is a desktop UI).
+    const maxW = Math.max(820, Math.floor((window.screen?.availWidth || 1280) * 0.86));
+    const maxH = Math.max(680, Math.floor((window.screen?.availHeight || 800) * 0.86));
+    const popupWidth = Math.min(1280, maxW);
+    const popupHeight = Math.min(860, maxH);
     const left = Math.max(0, Math.floor(window.screenX + (window.outerWidth - popupWidth) / 2));
     const top = Math.max(0, Math.floor(window.screenY + (window.outerHeight - popupHeight) / 2));
     const features = [
