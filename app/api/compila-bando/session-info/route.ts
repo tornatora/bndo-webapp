@@ -28,12 +28,31 @@ export async function POST(req: Request) {
     }
 
     const bb = await createBrowserbaseClient();
-    const session = await bb.sessions.retrieve(sessionId);
-    const liveViewUrl = (session as any).liveViewUrl ?? null;
-    const expiresAt = (session as any).expiresAt ?? null;
+
+    // The Browserbase retrieve() response does not include a live view URL.
+    // We must call sessions.debug() and pick the best debugger URL.
+    let liveViewUrl: string | null = null;
+    let expiresAt: string | null = null;
+
+    try {
+      const session = await bb.sessions.retrieve(sessionId);
+      expiresAt = (session as any).expiresAt ?? null;
+    } catch {
+      // ignore
+    }
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const debug = await bb.sessions.debug(sessionId).catch(() => null as any);
+      const fromPages = Array.isArray(debug?.pages)
+        ? (debug.pages[0]?.debuggerFullscreenUrl ?? debug.pages[0]?.debuggerUrl ?? null)
+        : null;
+      liveViewUrl = debug?.debuggerFullscreenUrl ?? debug?.debuggerUrl ?? fromPages ?? null;
+      if (liveViewUrl) break;
+      await new Promise((r) => setTimeout(r, 650));
+    }
 
     if (!liveViewUrl) {
-      return NextResponse.json({ ok: false, error: 'liveViewUrl mancante per sessionId' }, { status: 404 });
+      return NextResponse.json({ ok: false, error: 'Live View non disponibile per sessionId (debuggerUrl mancante)' }, { status: 404 });
     }
 
     return NextResponse.json({ ok: true, liveViewUrl, expiresAt });
