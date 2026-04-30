@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import path from 'path';
+import { createRequire } from 'module';
+import { pathToFileURL } from 'url';
 import zlib from 'zlib';
 
 // Polyfill DOM APIs needed by pdf-parse/pdfjs-dist on Netlify Lambda
@@ -20,6 +23,18 @@ if (typeof globalThis.Path2D === 'undefined') {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// Resolve pdfjs-dist assets for Node/serverless (Netlify) runtime.
+const require = createRequire(import.meta.url);
+let PDFJS_STANDARD_FONT_URL: string | null = null;
+let PDFJS_CMAP_URL: string | null = null;
+try {
+  const pdfjsRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
+  PDFJS_STANDARD_FONT_URL = pathToFileURL(path.join(pdfjsRoot, 'standard_fonts/')).toString();
+  PDFJS_CMAP_URL = pathToFileURL(path.join(pdfjsRoot, 'cmaps/')).toString();
+} catch {
+  // If resolution fails in a particular bundle/runtime, we fall back to pdf-parse/zlib.
+}
 
 type ExtractedPayload = {
   ragione_sociale: string | null;
@@ -332,6 +347,7 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
 
   // Tier 2: pdf-parse (preferred). In Netlify, prefer the PDFParse class API (more stable) and avoid
   // falling back to raw zlib streams (can produce garbage for many PDFs).
+  let bestText = '';
   try {
     const mod: any = await import('pdf-parse');
     const pkg: any = mod?.default ?? mod; // CJS export is exposed as default in ESM import
@@ -342,21 +358,60 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
       const data = await parser.getText();
       await parser.destroy?.();
       const text = String(data?.text ?? '').trim();
-      if (text.length >= 80) return text;
-      if (text.length > 0) return text;
+      bestText = text;
     }
 
     // Fallback: function API
     if (typeof pkg === 'function') {
       const data = await pkg(buf);
       const text = String(data?.text ?? '').trim();
-      if (text.length >= 80) return text;
-      if (text.length > 0) return text;
+      if (text.length > bestText.length) bestText = text;
     }
   } catch (e) {
     // If pdf-parse is missing or fails, we keep a fallback, but surface a short hint in logs.
     console.warn('[compila-bando/extract] pdf-parse failed:', e instanceof Error ? e.message : e);
   }
+
+  if (bestText.length >= 80) return bestText;
+
+  // Tier 3: pdfjs-dist direct extraction with standard font data (helps Netlify/serverless).
+  try {
+    if (PDFJS_STANDARD_FONT_URL && PDFJS_CMAP_URL) {
+      const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(buf),
+        standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
+        cMapUrl: PDFJS_CMAP_URL,
+        cMapPacked: true,
+      });
+      const doc = await loadingTask.promise;
+      const maxPages = Math.min(Number(doc.numPages) || 0, 12);
+      const parts: string[] = [];
+      for (let i = 1; i <= maxPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = (content.items || [])
+          .map((it: any) => String(it?.str ?? '').trim())
+          .filter(Boolean)
+          .join(' ');
+        if (pageText) parts.push(pageText);
+      }
+      await doc.destroy?.();
+      const text = parts.join('\n').trim();
+      if (text.length > bestText.length) bestText = text;
+    }
+  } catch (e) {
+    console.warn('[compila-bando/extract] pdfjs-dist failed:', e instanceof Error ? e.message : e);
+  }
+
+  if (bestText.length > 0) return bestText;
+
+  // Tier 4: last-resort zlib stream scraping (very noisy but better than empty on some PDFs).
+  try {
+    const z = extractPdfTextZlib(buf);
+    const t = String(z || '').trim();
+    if (t.length > 0) return t;
+  } catch {}
 
   return '';
 }
