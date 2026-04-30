@@ -167,3 +167,6 @@
 - Problema: se `readiness-check` tornava `ready=false`, la UI faceva `return` prima di chiamare `/api/compila-bando/auto-fill`, quindi non veniva creata alcuna sessione Browserbase: aprivi SPID ma non partivano polling `session-status` e `execute-flow`.
 - Fix: Step 10 ora NON blocca piu' l'avvio SPID/flow quando mancano campi/documenti. Mostra la lista mancanti come warning ma prosegue a creare la sessione.
 - Miglioria UX: quando `session-status` rileva `loggedIn=true`, chiude (best-effort) la finestra/tab SPID aperta e richiama `window.focus()` sulla dashboard BNDO, poi avvia `execute-flow` automaticamente.
+
+### 4) Step 10: readiness-check best-effort (mai blocco)
+- Se `readiness-check` fallisce (500 / timeout / json invalido), Step 10 NON si ferma piu'. Mostra solo un warning e procede a creare la sessione Browserbase e avviare il flow dopo SPID.
