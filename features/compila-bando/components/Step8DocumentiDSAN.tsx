@@ -23,23 +23,45 @@ export function Step8DocumentiDSAN({ generatedDocs, dsanStatus, dsanError }: Pro
   };
 
   const downloadAsPdf = async (docxBlob: Blob, filename: string) => {
-    // Client-side DOCX → HTML → PDF.
-    // This avoids Netlify serverless chromium/brotli packaging issues.
+    // Prefer server-side DOCX→PDF (CloudConvert) to preserve WYSIWYG templates.
+    // Falls back to client-side conversion only if the API is not configured.
+    const arrayBuffer = await docxBlob.arrayBuffer();
+    const base64 = btoa(
+      Array.from(new Uint8Array(arrayBuffer))
+        .map((b) => String.fromCharCode(b))
+        .join('')
+    );
+
+    const res = await fetch('/api/compila-bando/convert-docx-to-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileBase64: base64, fileName: filename }),
+    });
+
+    if (res.ok) {
+      const pdfBlob = await res.blob();
+      downloadBlob(pdfBlob, filename.replace(/\.docx$/i, '.pdf'));
+      return;
+    }
+
+    // Fallback (preview/local) if CloudConvert is not configured.
+    const errJson = await res.json().catch(() => null);
+    const msg = errJson?.error ? String(errJson.error) : `HTTP ${res.status}`;
+    // eslint-disable-next-line no-console
+    console.warn('PDF conversion via API failed, fallback to client-side:', msg);
+
     const [{ default: mammoth }, { default: html2pdf }] = await Promise.all([
       import('mammoth/mammoth.browser'),
       import('html2pdf.js'),
     ]);
 
-    const arrayBuffer = await docxBlob.arrayBuffer();
     const htmlResult = await mammoth.convertToHtml({ arrayBuffer });
-
     const container = document.createElement('div');
     container.style.fontFamily = 'Arial, sans-serif';
     container.style.fontSize = '11pt';
     container.style.lineHeight = '1.4';
     container.innerHTML = htmlResult.value || '';
 
-    // html2pdf returns a promise-like chain.
     const targetName = filename.replace(/\.docx$/i, '.pdf');
     await (html2pdf() as any)
       .set({

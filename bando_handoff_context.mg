@@ -3,6 +3,10 @@
 ## Timestamp
 - 2026-04-29 22:35 Europe/Rome
 
+## Update
+- 2026-04-30: aggiunta conversione DOCX→PDF server-side via CloudConvert per ottenere PDF WYSIWYG dei template DSAN/C2 in preview Netlify.
+- Env richiesto su Netlify: `CLOUDCONVERT_API_KEY` (non committare chiavi).
+
 ## Git
 - Commit SHA base: `75e63cb2f7864f62e32f7dd0e307681575f9dd5f`
 - Working tree: modified (non committed)
@@ -93,6 +97,9 @@
 - `package-lock.json`
 - `package.json`
 - `features/compila-bando/components/Step9BrowserBando.tsx` (typing animation)
+- `app/api/compila-bando/convert-docx-to-pdf/route.ts` (CloudConvert DOCX→PDF)
+- `features/compila-bando/components/Step8DocumentiDSAN.tsx` (download PDF via API + fallback)
+- `.env.example` (aggiunta `CLOUDCONVERT_API_KEY`)
 
 ## Stato build locale
 - `npm run build:app` OK
@@ -134,7 +141,7 @@
 
 - Repo corretto: `/Users/nataleletteriotornatora/Documents/bndo-webapp`
 - Branch: `fix-pdf-extraction`
-- Ultimo commit pushato: `d27381307226fadfbb8ed3660388d3747d6c4832`
+- Ultimo commit pushato: `c131209cda3d0b1f4d2e4f8a6d1f6ad9b8a0a3c2`
 - Netlify branch deploy in corso (al momento della nota): deploy id `69f3240cfc118100081ea0dc` (state: building)
 
 ### Link da usare per test
@@ -151,3 +158,9 @@
 
 - Step 8: documenti DSAN mostrati come 5 box + download (template reali in `public/templates` e `public/templates_tagged`, generazione via API `POST /api/compila-bando/generate-dsan`).
 - Step 10: SPID control center (no fake browser), apre Live View Browserbase in nuova scheda e auto-start della compilazione quando login rilevato.
+
+### Fix 2026-04-30 (regressioni riportate)
+
+- Visura: migliorato `pdf-parse` + priorita' alla function Netlify `/.netlify/functions/extract-pdf-text` per estrarre testo in modo stabile (`app/api/compila-bando/extract/route.ts`).
+- Step 7: rimossi i 2 box "Scheda Aziendale" e "5 Documenti DSAN" (restano solo i campi manuali).
+- Step 8: rinominato template C2 con filename ASCII per evitare mismatch Unicode su Linux (Netlify): `Descrizione_iniziativa_economica_attivita_individuali.docx`.
