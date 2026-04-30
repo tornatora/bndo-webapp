@@ -184,7 +184,13 @@ export async function POST(req: Request) {
 
     if (!providerError) {
       try {
-        const session = await withTimeout(createBrowserbaseSession({}), 10_000);
+        const session = await withTimeout(
+          createBrowserbaseSession({
+            // Better UX inside popup: slightly taller viewport so Invitalia pages are less "letterboxed".
+            viewport: { width: 1280, height: 860 },
+          }),
+          10_000
+        );
         sessionId = session.sessionId;
         liveViewUrl = session.liveViewUrl;
         connectUrl = session.connectUrl;

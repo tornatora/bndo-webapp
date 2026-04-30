@@ -100,6 +100,9 @@ export function Step10BrowserBando({
   const [progressPercent, setProgressPercent] = useState(0);
   const [typingIndex, setTypingIndex] = useState(0);
   const [typingChar, setTypingChar] = useState(0);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({ x: 0, y: 0, visible: false });
+  const formPreviewRef = useRef<HTMLDivElement | null>(null);
+  const fieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const initRef = useRef(false);
   const hasStartedRef = useRef(false);
   const authRedirectSeenRef = useRef(false);
@@ -457,6 +460,7 @@ export function Step10BrowserBando({
 
     const payload = buildClientPayload(extracted);
     const fields = [
+      { key: 'tipologiaProponente', label: 'Tipologia proponente', value: 'Voucher Lavoratore autonomo-libero professionista' },
       { label: 'Nome', value: payload.firstName || 'Mario' },
       { label: 'Cognome', value: payload.lastName || 'Rossi' },
       { label: 'Codice fiscale', value: payload.codiceFiscale || 'RSSMRA80A01H501U' },
@@ -482,6 +486,34 @@ export function Step10BrowserBando({
       window.clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, extracted, typingIndex]);
+
+  useEffect(() => {
+    if (phase !== 'auto-filling') {
+      setCursorPos((p) => ({ ...p, visible: false }));
+      return;
+    }
+
+    // Move fake cursor to the active field in the BNDO form preview.
+    const payload = buildClientPayload(extracted);
+    const keys = [
+      'tipologiaProponente',
+      'Nome',
+      'Cognome',
+      'CodiceFiscale',
+      'PEC',
+      'Telefono',
+    ];
+    const currentKey = keys[Math.min(keys.length - 1, typingIndex)] || 'Nome';
+    const el = fieldRefs.current[currentKey];
+    const root = formPreviewRef.current;
+    if (!el || !root) return;
+
+    const er = el.getBoundingClientRect();
+    const rr = root.getBoundingClientRect();
+    const x = Math.max(6, Math.floor(er.left - rr.left + 12));
+    const y = Math.max(6, Math.floor(er.top - rr.top + er.height / 2));
+    setCursorPos({ x, y, visible: true });
   }, [phase, extracted, typingIndex]);
 
   const handleSubmit = useCallback(() => {
@@ -661,18 +693,56 @@ export function Step10BrowserBando({
 
       {/* Typing animation (UX only) */}
       {phase === 'auto-filling' && (
-        <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, background: '#ffffff' }}>
+        <div
+          ref={formPreviewRef}
+          style={{
+            marginBottom: 16,
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            padding: 16,
+            background: '#ffffff',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
           <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 800, color: '#0b1136' }}>
             Compilazione in corso
           </p>
+          {cursorPos.visible && (
+            <div
+              style={{
+                position: 'absolute',
+                left: cursorPos.x,
+                top: cursorPos.y,
+                width: 16,
+                height: 16,
+                transform: 'translate(-6px, -50%)',
+                pointerEvents: 'none',
+                transition: 'left 220ms ease, top 220ms ease',
+                zIndex: 5,
+              }}
+            >
+              <div
+                style={{
+                  width: 0,
+                  height: 0,
+                  borderLeft: '8px solid #0b1136',
+                  borderTop: '6px solid transparent',
+                  borderBottom: '6px solid transparent',
+                  filter: 'drop-shadow(0 4px 10px rgba(11,17,54,0.25))',
+                }}
+              />
+            </div>
+          )}
           {(() => {
             const payload = buildClientPayload(extracted);
             const fields = [
-              { label: 'Nome', value: payload.firstName || 'Mario' },
-              { label: 'Cognome', value: payload.lastName || 'Rossi' },
-              { label: 'Codice fiscale', value: payload.codiceFiscale || 'RSSMRA80A01H501U' },
-              { label: 'PEC', value: payload.pec || 'demo@pec.it' },
-              { label: 'Telefono', value: payload.phone || '+39 340 000 0000' },
+              { key: 'tipologiaProponente', label: 'Tipologia proponente', value: 'Voucher Lavoratore autonomo-libero professionista' },
+              { key: 'Nome', label: 'Nome', value: payload.firstName || 'Mario' },
+              { key: 'Cognome', label: 'Cognome', value: payload.lastName || 'Rossi' },
+              { key: 'CodiceFiscale', label: 'Codice fiscale', value: payload.codiceFiscale || 'RSSMRA80A01H501U' },
+              { key: 'PEC', label: 'PEC', value: payload.pec || 'demo@pec.it' },
+              { key: 'Telefono', label: 'Telefono', value: payload.phone || '+39 340 000 0000' },
             ];
             return (
               <div style={{ display: 'grid', gap: 8 }}>
@@ -680,7 +750,7 @@ export function Step10BrowserBando({
                   const isActive = idx === typingIndex;
                   const shown = idx < typingIndex ? f.value : isActive ? f.value.slice(0, typingChar) : '';
                   return (
-                    <div key={f.label} style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 10, alignItems: 'center' }}>
+                    <div key={f.label} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10, alignItems: 'center' }}>
                       <span style={{ fontSize: 12, color: '#334155', fontWeight: 700 }}>{f.label}</span>
                       <div style={{
                         height: 34,
@@ -696,6 +766,12 @@ export function Step10BrowserBando({
                         position: 'relative',
                         overflow: 'hidden',
                       }}>
+                        <div
+                          ref={(node) => {
+                            fieldRefs.current[f.key as string] = node;
+                          }}
+                          style={{ position: 'absolute', inset: 0 }}
+                        />
                         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shown}</span>
                         {isActive && (
                           <span
