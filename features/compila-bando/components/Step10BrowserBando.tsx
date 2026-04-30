@@ -389,6 +389,12 @@ export function Step10BrowserBando({
             // Some browsers may ignore a single close() call; retry briefly.
             const w = spidWindowRef.current;
             if (w) {
+              try {
+                // Navigate the popup back to BNDO so it can self-close reliably.
+                w.location.replace(`${window.location.origin}/spid-done`);
+              } catch {
+                // ignore
+              }
               for (let i = 0; i < 6; i += 1) {
                 window.setTimeout(() => {
                   try {

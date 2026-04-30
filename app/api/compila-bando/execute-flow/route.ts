@@ -195,6 +195,18 @@ async function runClickStep(
   stepTimeoutMs: number
 ): Promise<FlowStepExecutionResult> {
   const startedAt = Date.now();
+  const hasStrongSelector =
+    Boolean(step.target?.css) ||
+    Boolean(step.target?.id) ||
+    Boolean(step.target?.name) ||
+    Boolean(step.target?.testId) ||
+    Boolean(step.target?.xpath);
+
+  // If the recorder provided a clickPoint but no strong selector, prefer point-clicking first.
+  if (!hasStrongSelector && step.clickPoint) {
+    const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
+    if (byPoint) return byPoint;
+  }
   const selectors = getFlowStepSelectorCandidates(step);
   const selectionTimeout = Math.max(1200, Math.floor(stepTimeoutMs * 0.7));
   const selector = await findFirstWorkingSelector(page, selectors, selectionTimeout);
