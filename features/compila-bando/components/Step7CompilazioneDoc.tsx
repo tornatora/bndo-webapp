@@ -17,11 +17,11 @@ type Props = {
 };
 
 const DSAN_KEYS = [
-  { key: 'dsan_antiriciclaggio', fileName: 'DSAN Antiriciclaggio rsud acn.docx', label: 'DSAN Antiriciclaggio' },
-  { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN Casellario e procedure concorsuali liquidatorie.docx', label: 'DSAN Casellario' },
-  { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN Possesso requisiti iniziativa economica.docx', label: 'DSAN Requisiti Iniziativa' },
-  { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN Possesso requisiti soggettivi.docx', label: 'DSAN Requisiti Soggettivi' },
-  { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione_iniziativa_economica_attivita_individuali.docx', label: 'Descrizione Iniziativa C2' },
+  { key: 'dsan_antiriciclaggio', fileName: 'DSAN_Antiriciclaggio.pdf', label: 'DSAN Antiriciclaggio' },
+  { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN_Casellario.pdf', label: 'DSAN Casellario' },
+  { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN_Requisiti_Iniziativa.pdf', label: 'DSAN Requisiti Iniziativa' },
+  { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN_Requisiti_Soggettivi.pdf', label: 'DSAN Requisiti Soggettivi' },
+  { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione_Iniziativa_C2.pdf', label: 'Descrizione Iniziativa C2' },
 ];
 
 export function Step7CompilazioneDoc({
@@ -77,7 +77,7 @@ export function Step7CompilazioneDoc({
             data: extracted,
             overrides: manualFields,
             mode: 'base64',
-            format: 'docx',
+            format: 'pdf',
           }),
         });
 

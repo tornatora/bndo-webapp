@@ -188,12 +188,18 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
     extractBetween('NumeroREA', ['Codicefiscale', 'PartitaIVA', 'Formagiuridica', 'Telefono', 'Email', 'Domiciliodigitale']);
 
   const partitaIva =
-    extractRegexValue(normalized, /(?:partita\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i) ??
-    extractRegexValue(normalized, /\b(\d{11})\b/);
+    extractRegexValue(normalized, /(?:partita\s*iva|p\.?\s*iva)\s*[:\-]?\s*(?:IT\s*)?(\d{11})\b/i);
 
-  const codiceFiscale =
+  // Codice fiscale in visura può essere:
+  // - 11 cifre (società/impresa, spesso coincide con P.IVA)
+  // - 16 caratteri alfanumerici (impresa individuale / persona fisica)
+  const codiceFiscale16 =
     extractRegexValue(normalized, /Codice\s*fiscale[^\n]{0,60}\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i) ??
     extractRegexValue(normalized, /\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b/i);
+  const codiceFiscale11 =
+    extractRegexValue(normalized, /Codice\s*fiscale[^\n]{0,40}\b(\d{11})\b/i) ??
+    extractRegexValue(normalized, /Codice\s*fiscale\s+e\s+n\.?\s*iscr\.[^\d]{0,20}(\d{11})\b/i);
+  const codiceFiscale = codiceFiscale16 ?? codiceFiscale11;
 
   const formaGiuridica =
     extractRegexValue(normalized, /(?:forma\s*giuridica)\s*[:\-]?\s*([^\n]{3,120})/i) ??
@@ -218,7 +224,11 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
     extractRegexValue(normalized, /Partita\s*IVA\s+(\d{11})\b/i);
   const codiceFiscaleHard =
     codiceFiscale ??
-    extractRegexValue(normalized, /Codice\s*fiscale(?:\s+e\s+n\.\s*iscr\.[^A-Z0-9]{0,10}|\s+e\s+n\.iscr\.[^A-Z0-9]{0,10})?\s*([A-Z0-9]{16})\b/i);
+    extractRegexValue(normalized, /Codice\s*fiscale(?:\s+e\s+n\.\s*iscr\.[^A-Z0-9]{0,10}|\s+e\s+n\.iscr\.[^A-Z0-9]{0,10})?\s*([A-Z0-9]{16})\b/i) ??
+    extractRegexValue(normalized, /Codice\s*fiscale(?:\s+e\s+n\.\s*iscr\.[^0-9]{0,20}|\s+e\s+n\.iscr\.[^0-9]{0,20})?\s*(\d{11})\b/i) ??
+    // Fallback: se troviamo la Partita IVA ma non il CF numerico, nella maggior parte delle visure coincidono.
+    partitaIvaHard ??
+    null;
   const formaGiuridicaHard =
     formaGiuridica ??
     extractRegexValue(normalized, /Forma\s*giuridica\s+([A-Za-z ]{5,60})\b/i);
@@ -320,34 +330,35 @@ async function extractPdfText(buf: Buffer, baseUrl?: string): Promise<string> {
     } catch {}
   }
 
-  // Tier 2: pdf-parse (preferred locally). We want this to work in Netlify preview too, so do not
-  // silently fall back unless we really must.
+  // Tier 2: pdf-parse (preferred). In Netlify, prefer the PDFParse class API (more stable) and avoid
+  // falling back to raw zlib streams (can produce garbage for many PDFs).
   try {
     const mod: any = await import('pdf-parse');
-    const pdfParseFn = mod?.default ?? mod;
+    const pkg: any = mod?.default ?? mod; // CJS export is exposed as default in ESM import
+    const PDFParseCtor = pkg?.PDFParse ?? mod?.PDFParse ?? pkg?.default?.PDFParse;
 
-    // pdf-parse can be either a function(buf)->Promise or a class PDFParse. Support both.
-    if (typeof pdfParseFn === 'function') {
-      const data = await pdfParseFn(buf);
-      const text = String(data?.text ?? '').trim();
-      if (text.length >= 80) return text;
-    }
-
-    const PDFParseCtor = mod?.PDFParse;
-    if (PDFParseCtor) {
+    if (typeof PDFParseCtor === 'function') {
       const parser = new PDFParseCtor({ data: buf });
       const data = await parser.getText();
-      await parser.destroy();
+      await parser.destroy?.();
       const text = String(data?.text ?? '').trim();
       if (text.length >= 80) return text;
+      if (text.length > 0) return text;
+    }
+
+    // Fallback: function API
+    if (typeof pkg === 'function') {
+      const data = await pkg(buf);
+      const text = String(data?.text ?? '').trim();
+      if (text.length >= 80) return text;
+      if (text.length > 0) return text;
     }
   } catch (e) {
     // If pdf-parse is missing or fails, we keep a fallback, but surface a short hint in logs.
-    console.warn('[compila-bando/extract] pdf-parse failed, falling back:', e instanceof Error ? e.message : e);
+    console.warn('[compila-bando/extract] pdf-parse failed:', e instanceof Error ? e.message : e);
   }
 
-  // Tier 3: raw zlib
-  return extractPdfTextZlib(buf);
+  return '';
 }
 
 function extractPdfTextZlib(buf: Buffer): string {
@@ -426,8 +437,8 @@ I documenti possono arrivare come testo estratto da PDF o come immagini (PNG di 
 Da una VISURA CAMERALE estrai:
 - ragione_sociale: denominazione esatta dell'impresa
 - sede_legale: indirizzo completo della sede legale
-- codice_fiscale: codice fiscale dell'impresa (16 caratteri alfanumerici)
-- partita_iva: partita IVA (formato ITXXXXXXXXXXX)
+- codice_fiscale: codice fiscale dell'impresa (11 cifre oppure 16 caratteri alfanumerici)
+- partita_iva: partita IVA (11 cifre, formato ITXXXXXXXXXXX oppure solo XXXXXXXXXXX)
 - rea: numero REA (es. MI-1234567)
 - forma_giuridica: tipo di società (SRL, SPA, ecc.)
 - nome_legale_rappresentante: nome e cognome del legale rappresentante
