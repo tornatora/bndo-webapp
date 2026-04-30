@@ -177,3 +177,9 @@
   - `lib/compila-bando/flow-runtime.ts`: rimosso candidate selector "tag-only" (es. `div`, `input`) per evitare click random.
   - `execute-flow`: se un `click`/`select` fallisce o non trova selector, usa `step.clickPoint` (xRatio/yRatio) come fallback per cliccare in modo stabile.
 - Flow canonical aggiornato copiando il file utente `Json finale Invitalia.json` su `data/flows/resto-al-sud-2-0.json`.
+
+### 6) Flow performance + SPID popup UX
+- `primeBrowserbaseSessionToInvitalia`: rimosse animazioni/scroll di priming (solo goto + wait) per evitare pagina che va su/giu all'avvio.
+- `resolveWaitUntil`: se JSON chiede `load`, usiamo `domcontentloaded` (piu' veloce e stabile su portali terzi).
+- `scroll` step: se JSON include `viewport.scrollY`, facciamo `window.scrollTo(0, scrollY)` (deterministico) invece di wheel.
+- Popup SPID: dimensioni wide (in base allo schermo) + retry close/focus dopo login.
