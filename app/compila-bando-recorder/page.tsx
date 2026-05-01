@@ -449,6 +449,27 @@ export default function CompilaBandoRecorderPage() {
     }
   }, [loadedRecording, session]);
 
+  const forceOpenLineaIntervento = useCallback(async () => {
+    if (!session?.sessionId) return;
+    setStatus('Forzo apertura: Linea di intervento...');
+    try {
+      const res = await fetch('/api/compila-bando/recorder/force', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: session.sessionId, action: 'open_linea_intervento' }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (json?.ok && json?.result?.ok) {
+        setStatus('OK: Linea di intervento forzata (dropdown dovrebbe essere aperto).');
+      } else {
+        const reason = json?.result?.reason || json?.error || 'force failed';
+        setStatus(`Errore force: ${String(reason)}`);
+      }
+    } catch (e) {
+      setStatus(`Errore force: ${e instanceof Error ? e.message : 'errore non gestito'}`);
+    }
+  }, [session?.sessionId]);
+
   const errorPayloadText = useMemo(() => {
     if (!lastReplayJson) return '';
     const payload = {
@@ -556,6 +577,26 @@ export default function CompilaBandoRecorderPage() {
           )}
 
           <hr style={{ margin: '14px 0', borderColor: '#e2e8f0' }} />
+
+          <button
+            onClick={() => void forceOpenLineaIntervento()}
+            type="button"
+            disabled={!session}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid rgba(15,23,42,0.14)',
+              background: session ? '#0b1136' : '#94a3b8',
+              color: '#fff',
+              fontWeight: 900,
+              cursor: session ? 'pointer' : 'not-allowed',
+              marginBottom: 10,
+            }}
+            title="Click forzato via DOM sul mat-select 'Linea di intervento' (piu' affidabile del click manuale nel Live View)."
+          >
+            Forza apertura “Linea di intervento”
+          </button>
 
           <button onClick={exportFlow} type="button" style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.14)', background: '#111827', color: '#fff', fontWeight: 900 }}>
             Scarica JSON
