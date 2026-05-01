@@ -53,6 +53,8 @@ export default function CompilaBandoRecorderPage() {
   const [status, setStatus] = useState<string>('Pronto');
   const [eventsCount, setEventsCount] = useState<number>(0);
   const [steps, setSteps] = useState<FlowStep[]>([]);
+  const [isRecording, setIsRecording] = useState<boolean>(true);
+  const [frozenSteps, setFrozenSteps] = useState<FlowStep[] | null>(null);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [replayStatus, setReplayStatus] = useState<string>('');
   const [lastReplayJson, setLastReplayJson] = useState<any | null>(null);
@@ -112,6 +114,8 @@ export default function CompilaBandoRecorderPage() {
     setRecordingId('');
     setEventsCount(0);
     setSteps([]);
+    setFrozenSteps(null);
+    setIsRecording(true);
     setFieldMapping({});
     lastEventCountRef.current = 0;
     setReplayStatus('');
@@ -140,7 +144,7 @@ export default function CompilaBandoRecorderPage() {
     setSession(json.session);
     const rid = nowId('rec');
     setRecordingId(rid);
-    setStatus('Sessione pronta. Interagisci nel Live View: click/type/select/goto vengono registrati automaticamente.');
+    setStatus('Sessione pronta. Premi "Ferma & salva" quando hai finito di registrare, poi fai replay.');
   }, [startUrl]);
 
   const installRecorder = useCallback(async () => {
@@ -154,6 +158,7 @@ export default function CompilaBandoRecorderPage() {
 
   const pollEvents = useCallback(async () => {
     if (!recordingId) return;
+    if (!isRecording) return;
     const sessionId = session?.sessionId ? encodeURIComponent(session.sessionId) : '';
     const qs = sessionId
       ? `recordingId=${encodeURIComponent(recordingId)}&sessionId=${sessionId}`
@@ -275,7 +280,7 @@ export default function CompilaBandoRecorderPage() {
       setSteps((prev) => [...prev, ...newSteps]);
       setStatus(`Registrazione attiva: ${events.length} eventi`);
     }
-  }, [recordingId, session?.sessionId]);
+  }, [isRecording, recordingId, session?.sessionId]);
 
   useEffect(() => {
     if (!session || !recordingId) return;
@@ -295,6 +300,25 @@ export default function CompilaBandoRecorderPage() {
       pollTimerRef.current = null;
     };
   }, [installRecorder, pollEvents, recordingId, session]);
+
+  const stopAndFreezeRecording = useCallback(() => {
+    setIsRecording(false);
+    setFrozenSteps((prev) => (prev && prev.length > 0 ? prev : steps.slice()));
+    setStatus(`Registrazione fermata. Step salvati: ${steps.length}. Ora puoi fare replay.`);
+  }, [steps]);
+
+  const startNewRecordingSameSession = useCallback(() => {
+    const rid = nowId('rec');
+    setRecordingId(rid);
+    setEventsCount(0);
+    setSteps([]);
+    setFrozenSteps(null);
+    setFieldMapping({});
+    lastEventCountRef.current = 0;
+    setReplayStatus('');
+    setIsRecording(true);
+    setStatus('Nuova registrazione attiva (stessa sessione). Interagisci nel Live View, poi premi "Ferma & salva".');
+  }, []);
 
   const exportFlow = useCallback(() => {
     const proceduraSlug = slugify(proceduraKey) || 'procedura';
@@ -319,6 +343,11 @@ export default function CompilaBandoRecorderPage() {
 
   const runReplay = useCallback(async () => {
     if (!session) return;
+    const stepsToRun = (frozenSteps && frozenSteps.length > 0) ? frozenSteps : steps;
+    if (!stepsToRun || stepsToRun.length === 0) {
+      setReplayStatus('Nessuno step da eseguire: registra e premi "Ferma & salva".');
+      return;
+    }
     setReplayStatus('Esecuzione in corso...');
     try {
       const proceduraSlug = slugify(proceduraKey) || 'procedura';
@@ -331,7 +360,7 @@ export default function CompilaBandoRecorderPage() {
         updatedAt: new Date().toISOString().slice(0, 10),
         expectedDurationSeconds: 320,
         fieldMapping,
-        steps,
+        steps: stepsToRun,
         proceduraKey: proceduraSlug,
         ...(subSlug ? { subProceduraKey: subSlug } : {}),
       };
@@ -375,7 +404,7 @@ export default function CompilaBandoRecorderPage() {
     } catch (e) {
       setReplayStatus(`Errore replay: ${e instanceof Error ? e.message : 'errore non gestito'}`);
     }
-  }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, session, steps, subProceduraKey]);
+  }, [bandoKey, fieldMapping, flowName, proceduraKey, session, steps, subProceduraKey, frozenSteps]);
 
   const loadRecordingFromFile = useCallback(async () => {
     const filename = selectedRecording.trim();
@@ -561,6 +590,49 @@ export default function CompilaBandoRecorderPage() {
           <button onClick={() => void startSession()} type="button" style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.14)', background: '#0b1136', color: '#fff', fontWeight: 900 }}>
             Avvia sessione
           </button>
+
+          {session && (
+            <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+              <button
+                onClick={() => stopAndFreezeRecording()}
+                type="button"
+                disabled={!isRecording || steps.length === 0}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(15,23,42,0.14)',
+                  background: (!isRecording || steps.length === 0) ? '#94a3b8' : '#111827',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: (!isRecording || steps.length === 0) ? 'not-allowed' : 'pointer',
+                }}
+                title="Ferma la registrazione e salva gli step registrati, pronti per il replay."
+              >
+                Ferma & salva registrazione
+              </button>
+              <button
+                onClick={() => startNewRecordingSameSession()}
+                type="button"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(15,23,42,0.14)',
+                  background: '#0b1136',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                }}
+                title="Riparte con una nuova registrazione nella stessa sessione Browserbase (resti autenticato)."
+              >
+                Nuova registrazione (stessa sessione)
+              </button>
+              <div style={{ fontSize: 11, color: '#64748b' }}>
+                stato: <strong>{isRecording ? 'REC' : 'STOP'}</strong>{frozenSteps ? ` | salvati: ${frozenSteps.length}` : ''}
+              </div>
+            </div>
+          )}
 
           {session && (
             <div style={{ marginTop: 10, fontSize: 12, color: '#334155', display: 'grid', gap: 6 }}>
