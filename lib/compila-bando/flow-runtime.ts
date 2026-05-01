@@ -101,7 +101,9 @@ export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
   if (t.placeholder) pushCandidate(candidates, `[placeholder="${escapedPlaceholder}"]`);
   if (t.role && t.text) pushCandidate(candidates, `[role="${escapeForSelector(t.role)}"]:has-text("${escapedText}")`);
   if (t.tag && t.text) pushCandidate(candidates, `${t.tag}:has-text("${escapedText}")`);
-  if (t.label) {
+  // For click steps, `label` often comes from DevTools ARIA locators, not an HTML <label>.
+  // We handle those via click-specific candidates below, so avoid wasting priority on label+input patterns.
+  if (t.label && !isClick) {
     pushCandidate(candidates, `label:has-text("${escapedLabel}")`);
     pushCandidate(candidates, `label:has-text("${escapedLabel}") + input`);
     pushCandidate(candidates, `label:has-text("${escapedLabel}") + select`);

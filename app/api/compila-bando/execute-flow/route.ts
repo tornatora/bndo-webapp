@@ -204,6 +204,8 @@ async function runClickStep(
     Boolean(step.target?.testId) ||
     Boolean(step.target?.xpath);
 
+  const clickName = String(step.target?.label || step.target?.text || '').trim();
+
   // If the recorder provided a clickPoint but no strong selector, prefer point-clicking first.
   if (!hasStrongSelector && step.clickPoint) {
     const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
@@ -219,9 +221,40 @@ async function runClickStep(
     return failedResult(step, stepIndex, startedAt, new Error('Nessun selettore valido trovato'), 'Click fallito: target non trovato');
   }
 
+  async function clickByAccessibleName(): Promise<boolean> {
+    if (!clickName) return false;
+    const tryRoles: Array<{ role: Parameters<Page['getByRole']>[0]; kind: string }> = [
+      { role: 'button', kind: 'role=button' },
+      { role: 'link', kind: 'role=link' },
+      { role: 'checkbox', kind: 'role=checkbox' },
+      { role: 'option', kind: 'role=option' },
+    ];
+    for (const { role } of tryRoles) {
+      try {
+        await page.getByRole(role as any, { name: clickName }).first().click({ timeout: stepTimeoutMs });
+        return true;
+      } catch {
+        // Try next role
+      }
+    }
+    try {
+      await page.getByText(clickName, { exact: false }).first().click({ timeout: stepTimeoutMs });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   try {
     const beforeUrl = page.url();
-    await page.click(selector, { timeout: stepTimeoutMs });
+    try {
+      // Use locator.first() to avoid strict mode violations when a selector matches multiple elements.
+      await page.locator(selector).first().click({ timeout: stepTimeoutMs });
+    } catch (error) {
+      // Fallback: if the recorder stored an ARIA/label-only click, try role/text based clicking.
+      const ok = await clickByAccessibleName();
+      if (!ok) throw error;
+    }
     if (isSubmitLikeAction(step)) {
       await waitForUrlTransition(page, beforeUrl, stepTimeoutMs);
     }
@@ -231,6 +264,20 @@ async function runClickStep(
       selectorTried: selector,
     });
   } catch (error) {
+    if (clickName) {
+      const beforeUrl = page.url();
+      const ok = await clickByAccessibleName();
+      if (ok) {
+        if (isSubmitLikeAction(step)) {
+          await waitForUrlTransition(page, beforeUrl, stepTimeoutMs);
+        }
+        await settleAfterAction(page, stepTimeoutMs);
+        await applyStepDelay(page, step);
+        return successResult(step, stepIndex, startedAt, `Click eseguito via accessibile: ${clickName}`, {
+          selectorTried: `accessible:${clickName}`,
+        });
+      }
+    }
     const byPoint = await clickByClickPoint(page, step, stepIndex, stepTimeoutMs, startedAt);
     if (byPoint) return byPoint;
     return failedResult(step, stepIndex, startedAt, error, 'Click fallito', { selectorTried: selector });
