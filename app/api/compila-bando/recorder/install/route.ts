@@ -95,6 +95,7 @@ function buildInstallScript(recordingId: string, appOrigin: string) {
     window.__bndoRecorderInstalled = true;
     window.__bndoRecorderId = ${JSON.stringify(recordingId)};
     const ENDPOINT = ${JSON.stringify(endpoint)};
+    const LOG_PREFIX = 'BNDO_RECORDER_EVENT:';
 
     const now = () => Date.now();
     const send = (payload) => {
@@ -102,6 +103,9 @@ function buildInstallScript(recordingId: string, appOrigin: string) {
         payload.recordingId = ${JSON.stringify(recordingId)};
         payload.url = String(location.href || '');
         payload.ts = payload.ts || now();
+        // Durable channel for Netlify previews: Browserbase session logs.
+        // Our API can fetch & parse these console lines even if the serverless instance changes.
+        try { console.log(LOG_PREFIX + JSON.stringify(payload)); } catch {}
         fetch(ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
