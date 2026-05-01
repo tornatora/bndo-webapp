@@ -198,3 +198,10 @@ Git:
 - Fix aggiuntivo: se `viewport.scrollY=0` ma lo step ha `amount`/`direction` (scroll down), non facciamo scrollTo(0) (che non muove): usiamo scrollBy(delta).
 - Popup SPID: dimensioni wide (in base allo schermo) + retry close/focus dopo login.
 - Chiusura popup piu' affidabile: dopo login la dashboard naviga il popup su `/spid-done` (BNDO) che si auto-chiude.
+
+### 7) Flow replay: click robusto (ARIA + no strict) (2026-05-01)
+- Problema: alcuni click da DevTools sono "ARIA locator" (accessible name) e `:has-text` puo' non matchare (o matchare multipli e fallire per strict mode).
+- Fix:
+  - `execute-flow/runClickStep`: usa `page.locator(selector).first().click()` per evitare `strict mode violation`
+  - fallback: se il click fallisce, prova `page.getByRole(button/link/checkbox/option, { name }).first().click()`, poi `getByText(name)`
+  - `flow-runtime`: per click con `label` non usa piu' `label:has-text + input/select` (noise da form labels)
