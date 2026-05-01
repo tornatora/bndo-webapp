@@ -68,6 +68,139 @@ export default function CompilaBandoRecorderPage() {
   const pollTimerRef = useRef<number | null>(null);
   const lastEventCountRef = useRef<number>(0);
 
+  const flushFromServer = useCallback(async () => {
+    if (!recordingId) return { ok: false as const, reason: 'no_recording_id' };
+    const sessionId = session?.sessionId ? encodeURIComponent(session.sessionId) : '';
+    const qs = sessionId
+      ? `recordingId=${encodeURIComponent(recordingId)}&sessionId=${sessionId}`
+      : `recordingId=${encodeURIComponent(recordingId)}`;
+    const res = await fetch(`/api/compila-bando/recorder/events?${qs}`).catch(() => null);
+    if (!res || !res.ok) return { ok: false as const, reason: 'fetch_failed' };
+    const json = (await res.json().catch(() => null)) as any;
+    const events: any[] = Array.isArray(json?.events) ? json.events : [];
+    setEventsCount(events.length);
+
+    if (events.length <= lastEventCountRef.current) {
+      return { ok: true as const, added: 0, total: events.length };
+    }
+
+    const from = lastEventCountRef.current;
+    lastEventCountRef.current = events.length;
+
+    const fresh = events.slice(from);
+    const newSteps: FlowStep[] = [];
+    const mappingUpdates: Record<string, string> = {};
+    for (const ev of fresh) {
+      if (!ev || typeof ev !== 'object') continue;
+      const t = String((ev as any).type || '');
+      if (!t || t === 'recorder_ready') continue;
+
+      if (t === 'goto') {
+        const url = String((ev as any).href || (ev as any).url || '');
+        if (!url) continue;
+        newSteps.push({
+          type: 'goto',
+          actionKind: 'goto',
+          stepId: nowId('rec_goto'),
+          pageKey: url,
+          url,
+          waitUntil: 'domcontentloaded',
+          reviewRequired: true,
+          confirmationStatus: 'recorded',
+        });
+        continue;
+      }
+
+      if (t === 'click') {
+        newSteps.push({
+          type: 'click',
+          actionKind: 'click_only',
+          stepId: nowId('rec_click'),
+          pageKey: String((ev as any).url || ''),
+          target: {
+            css: (ev as any).selector || '',
+            id: (ev as any).id || '',
+            name: (ev as any).name || '',
+            role: (ev as any).role || '',
+            label: (ev as any).label || '',
+            text: (ev as any).text || '',
+            tag: (ev as any).tag || '',
+          },
+          reviewRequired: true,
+          confirmationStatus: 'recorded',
+        });
+        continue;
+      }
+
+      if (t === 'type' || t === 'select') {
+        const valueSample = String((ev as any).valueSample || '').trim();
+        const valueKey = valueSample ? `recorded.${Date.now()}_${Math.floor(Math.random() * 1000)}` : '';
+        if (valueKey) mappingUpdates[valueKey] = valueSample;
+        newSteps.push({
+          type: t,
+          actionKind: t === 'select' ? 'select' : 'type',
+          stepId: nowId(`rec_${t}`),
+          pageKey: String((ev as any).url || ''),
+          target: {
+            css: (ev as any).selector || '',
+            id: (ev as any).id || '',
+            name: (ev as any).name || '',
+            label: (ev as any).label || '',
+            inputType: (ev as any).inputType || '',
+            tag: (ev as any).tag || '',
+          },
+          ...(valueKey ? { valueFrom: valueKey } : { valueLen: (ev as any).valueLen || 0 }),
+          reviewRequired: true,
+          confirmationStatus: 'recorded',
+        });
+        continue;
+      }
+
+      if (t === 'scroll') {
+        const scrollTop = typeof (ev as any).scrollTop === 'number' ? (ev as any).scrollTop : null;
+        const scrollLeft = typeof (ev as any).scrollLeft === 'number' ? (ev as any).scrollLeft : null;
+        const scrollHeight = typeof (ev as any).scrollHeight === 'number' ? (ev as any).scrollHeight : null;
+        const clientHeight = typeof (ev as any).clientHeight === 'number' ? (ev as any).clientHeight : null;
+        const isScrollable = scrollHeight !== null && clientHeight !== null ? scrollHeight > clientHeight + 2 : true;
+        if (!isScrollable) continue;
+        if (scrollTop === null || !Number.isFinite(scrollTop) || scrollTop <= 0) continue;
+
+        const selector = String((ev as any).selector || '').trim();
+        const target = selector
+          ? {
+              css: selector,
+              id: (ev as any).id || '',
+              label: (ev as any).label || '',
+              tag: (ev as any).tag || '',
+            }
+          : undefined;
+
+        newSteps.push({
+          type: 'scroll',
+          actionKind: 'scroll',
+          stepId: nowId('rec_scroll'),
+          pageKey: String((ev as any).url || ''),
+          ...(target ? { target } : {}),
+          viewport: {
+            scrollY: Math.max(0, Math.floor(scrollTop)),
+            ...(scrollLeft !== null && Number.isFinite(scrollLeft) ? { scrollX: Math.max(0, Math.floor(scrollLeft)) } : {}),
+          },
+          reviewRequired: true,
+          confirmationStatus: 'recorded',
+        });
+      }
+    }
+
+    if (Object.keys(mappingUpdates).length > 0) {
+      setFieldMapping((prev) => ({ ...prev, ...mappingUpdates }));
+    }
+    if (newSteps.length > 0) {
+      setSteps((prev) => [...prev, ...newSteps]);
+    }
+
+    return { ok: true as const, added: newSteps.length, total: events.length };
+  }, [recordingId, session?.sessionId]);
+
   const flowName = useMemo(() => {
     const dt = new Date();
     const stamp = dt.toISOString().slice(0, 10);
@@ -301,11 +434,16 @@ export default function CompilaBandoRecorderPage() {
     };
   }, [installRecorder, pollEvents, recordingId, session]);
 
-  const stopAndFreezeRecording = useCallback(() => {
+  const stopAndFreezeRecording = useCallback(async () => {
+    try {
+      await flushFromServer();
+    } catch {
+      // ignore
+    }
     setIsRecording(false);
     setFrozenSteps((prev) => (prev && prev.length > 0 ? prev : steps.slice()));
     setStatus(`Registrazione fermata. Step salvati: ${steps.length}. Ora puoi fare replay.`);
-  }, [steps]);
+  }, [flushFromServer, steps]);
 
   const startNewRecordingSameSession = useCallback(() => {
     const rid = nowId('rec');
@@ -320,9 +458,15 @@ export default function CompilaBandoRecorderPage() {
     setStatus('Nuova registrazione attiva (stessa sessione). Interagisci nel Live View, poi premi "Ferma & salva".');
   }, []);
 
-  const exportFlow = useCallback(() => {
+  const exportFlow = useCallback(async () => {
+    try {
+      await flushFromServer();
+    } catch {
+      // ignore
+    }
     const proceduraSlug = slugify(proceduraKey) || 'procedura';
     const subSlug = subProceduraKey.trim() ? slugify(subProceduraKey) : '';
+    const stepsToExport = frozenSteps && frozenSteps.length > 0 ? frozenSteps : steps;
     const flow = {
       name: flowName,
       version: 1,
@@ -335,11 +479,11 @@ export default function CompilaBandoRecorderPage() {
       // NB: il flow runtime fa selector-resolve robusto; qui registriamo solo target best-effort.
       expectedDurationSeconds: 320,
       fieldMapping,
-      steps,
+      steps: stepsToExport,
     };
     downloadJson(flow, `${bandoKey}-${proceduraSlug}${subSlug ? `-${subSlug}` : ''}-flow.json`);
     setStatus('Flow esportato (download).');
-  }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, steps, subProceduraKey]);
+  }, [bandoKey, bandoName, fieldMapping, flowName, proceduraKey, steps, subProceduraKey, frozenSteps, flushFromServer]);
 
   const runReplay = useCallback(async () => {
     if (!session) return;
