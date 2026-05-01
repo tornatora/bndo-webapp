@@ -107,6 +107,14 @@ Git:
 - `package.json`
 - `features/compila-bando/components/Step9BrowserBando.tsx` (typing animation)
 
+## Update (2026-05-01) - Recorder: eventi durabili (Browserbase session logs)
+Problema: in deploy Netlify l'event store in memoria (`globalThis Map`) non e' affidabile (istanze serverless diverse), quindi la registrazione live puo' "perdere" eventi.
+
+Fix (commit `8815c1f`, push su branch `fix-pdf-extraction`):
+- `recorder/install`: ogni evento viene anche loggato come `console.log("BNDO_RECORDER_EVENT:" + JSON.stringify(payload))` dentro la sessione Browserbase.
+- `recorder/events`: accetta `sessionId` e ricostruisce eventi leggendo `bb.sessions.logs.list(sessionId)` e filtrando per `recordingId`.
+- `/compila-bando-recorder`: polling aggiornato per inviare `sessionId` insieme a `recordingId`.
+
 ## Stato build locale
 - `npm run build:app` OK
 - warning lint non bloccanti già esistenti in altre aree
