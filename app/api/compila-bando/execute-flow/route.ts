@@ -205,6 +205,52 @@ async function runClickStep(
     Boolean(step.target?.xpath);
 
   const clickName = String(step.target?.label || step.target?.text || '').trim();
+  const isPresaVisione = /presa\s+visione/i.test(clickName);
+
+  // Some Invitalia screens enable the "Presa visione" checkbox only after scrolling inside a panel.
+  // This pre-scroll is harmless when not required, but avoids waiting for a click timeout on a disabled element.
+  if (isPresaVisione) {
+    const scrollBudgetMs = Math.min(1600, Math.max(500, Math.floor(stepTimeoutMs * 0.35)));
+    await page
+      .getByText(clickName, { exact: false })
+      .first()
+      .evaluate(
+        (node: any) => {
+          const start: Element | null = node instanceof Element ? node : null;
+          const isScrollable = (el: Element) => {
+            const style = window.getComputedStyle(el);
+            const overflowY = style.overflowY;
+            const canScroll =
+              (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
+              (el as any).scrollHeight > (el as any).clientHeight + 8;
+            return Boolean(canScroll);
+          };
+
+          let el: Element | null = start;
+          for (let depth = 0; depth < 20 && el; depth += 1) {
+            if (isScrollable(el)) {
+              try {
+                (el as any).scrollTop = (el as any).scrollHeight;
+                el.dispatchEvent(new Event('scroll', { bubbles: true }));
+              } catch {
+                // ignore
+              }
+              return;
+            }
+            el = el.parentElement;
+          }
+
+          try {
+            window.scrollBy(0, Math.floor(window.innerHeight * 0.85));
+          } catch {
+            // ignore
+          }
+        }
+      )
+      .catch(() => undefined);
+    await page.waitForTimeout(Math.min(550, scrollBudgetMs)).catch(() => undefined);
+    await settleAfterAction(page, Math.min(stepTimeoutMs, 2200));
+  }
 
   // If the recorder provided a clickPoint but no strong selector, prefer point-clicking first.
   if (!hasStrongSelector && step.clickPoint) {
@@ -728,8 +774,9 @@ async function executeStepWithRetry(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const result = await executeStep(page, step, stepIndex, stepTimeoutMs, flowTemplate, client);
-    if (result.success) return result;
-    last = result;
+    const enriched: FlowStepExecutionResult = { ...result, pageUrl: page.url() };
+    if (enriched.success) return enriched;
+    last = enriched;
 
     if (attempt < maxAttempts) {
       await page.waitForTimeout(450);

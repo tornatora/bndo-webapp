@@ -61,6 +61,7 @@ export type FlowStepExecutionResult = {
   selectorTried?: string;
   valueUsed?: string;
   urlUsed?: string;
+  pageUrl?: string;
   success: boolean;
   elapsedMs: number;
   message: string;

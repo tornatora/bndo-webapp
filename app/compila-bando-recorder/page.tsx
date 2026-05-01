@@ -55,6 +55,7 @@ export default function CompilaBandoRecorderPage() {
   const [steps, setSteps] = useState<FlowStep[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [replayStatus, setReplayStatus] = useState<string>('');
+  const [lastReplayJson, setLastReplayJson] = useState<any | null>(null);
 
   const [recordings, setRecordings] = useState<string[]>([]);
   const [selectedRecording, setSelectedRecording] = useState<string>('');
@@ -114,6 +115,7 @@ export default function CompilaBandoRecorderPage() {
     setFieldMapping({});
     lastEventCountRef.current = 0;
     setReplayStatus('');
+    setLastReplayJson(null);
 
     if (installTimerRef.current) window.clearInterval(installTimerRef.current);
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
@@ -359,6 +361,7 @@ export default function CompilaBandoRecorderPage() {
         }),
       });
       const json = await res.json().catch(() => ({} as any));
+      setLastReplayJson(json);
       if (json && json.ok) {
         setReplayStatus(`Replay OK: ${json.stepsExecuted} step eseguiti (${json.elapsedMs}ms)`);
       } else {
@@ -430,6 +433,7 @@ export default function CompilaBandoRecorderPage() {
         }),
       });
       const json = await res.json().catch(() => ({} as any));
+      setLastReplayJson(json);
       if (json && json.ok) {
         setReplayStatus(`Replay OK: ${json.stepsExecuted} step eseguiti (${json.elapsedMs}ms)`);
       } else {
@@ -440,6 +444,27 @@ export default function CompilaBandoRecorderPage() {
       setReplayStatus(`Errore replay: ${e instanceof Error ? e.message : 'errore non gestito'}`);
     }
   }, [loadedRecording, session]);
+
+  const errorPayloadText = useMemo(() => {
+    if (!lastReplayJson) return '';
+    const payload = {
+      ok: Boolean(lastReplayJson.ok),
+      elapsedMs: lastReplayJson.elapsedMs,
+      stepsExecuted: lastReplayJson.stepsExecuted,
+      failedSteps: Array.isArray(lastReplayJson.failedSteps) ? lastReplayJson.failedSteps : [],
+    };
+    return JSON.stringify(payload, null, 2);
+  }, [lastReplayJson]);
+
+  const copyErrors = useCallback(async () => {
+    if (!errorPayloadText) return;
+    try {
+      await navigator.clipboard.writeText(errorPayloadText);
+      setReplayStatus('Errori copiati negli appunti.');
+    } catch {
+      // ignore (user can copy manually from textarea)
+    }
+  }, [errorPayloadText]);
 
   return (
     <main style={{ padding: 18, maxWidth: 1280, margin: '0 auto' }}>
@@ -612,6 +637,46 @@ export default function CompilaBandoRecorderPage() {
               {replayStatus}
             </div>
           )}
+
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 900 }}>Errori sessione (copia/incolla)</summary>
+            <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => void copyErrors()}
+                disabled={!errorPayloadText}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(15,23,42,0.14)',
+                  background: errorPayloadText ? '#111827' : '#94a3b8',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: errorPayloadText ? 'pointer' : 'not-allowed',
+                }}
+                title="Copia gli errori (failedSteps) negli appunti"
+              >
+                Copia errori
+              </button>
+              <textarea
+                readOnly
+                value={errorPayloadText || 'Nessun replay eseguito.'}
+                style={{
+                  width: '100%',
+                  minHeight: 180,
+                  padding: 10,
+                  borderRadius: 12,
+                  border: '1px solid #e2e8f0',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace',
+                  fontSize: 11,
+                  color: '#0f172a',
+                  background: '#f8fafc',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+          </details>
 
           <div style={{ marginTop: 12, fontSize: 12, fontWeight: 800 }}>Ultimi step</div>
           <div style={{ marginTop: 6, maxHeight: 300, overflow: 'auto', fontSize: 11, color: '#334155', lineHeight: 1.45 }}>
