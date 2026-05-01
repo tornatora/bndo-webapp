@@ -154,7 +154,11 @@ export default function CompilaBandoRecorderPage() {
 
   const pollEvents = useCallback(async () => {
     if (!recordingId) return;
-    const res = await fetch(`/api/compila-bando/recorder/events?recordingId=${encodeURIComponent(recordingId)}`).catch(() => null);
+    const sessionId = session?.sessionId ? encodeURIComponent(session.sessionId) : '';
+    const qs = sessionId
+      ? `recordingId=${encodeURIComponent(recordingId)}&sessionId=${sessionId}`
+      : `recordingId=${encodeURIComponent(recordingId)}`;
+    const res = await fetch(`/api/compila-bando/recorder/events?${qs}`).catch(() => null);
     if (!res || !res.ok) return;
     const json = (await res.json().catch(() => null)) as any;
     const events: any[] = Array.isArray(json?.events) ? json.events : [];
@@ -271,7 +275,7 @@ export default function CompilaBandoRecorderPage() {
       setSteps((prev) => [...prev, ...newSteps]);
       setStatus(`Registrazione attiva: ${events.length} eventi`);
     }
-  }, [recordingId]);
+  }, [recordingId, session?.sessionId]);
 
   useEffect(() => {
     if (!session || !recordingId) return;
