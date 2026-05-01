@@ -205,3 +205,8 @@ Git:
   - `execute-flow/runClickStep`: usa `page.locator(selector).first().click()` per evitare `strict mode violation`
   - fallback: se il click fallisce, prova `page.getByRole(button/link/checkbox/option, { name }).first().click()`, poi `getByText(name)`
   - `flow-runtime`: per click con `label` non usa piu' `label:has-text + input/select` (noise da form labels)
+
+### 8) Recorder debug + "Presa visione" unblock (2026-05-01)
+- `/compila-bando-recorder`: aggiunta sezione "Errori sessione (copia/incolla)" che mostra `failedSteps[]` e bottone copia.
+- `execute-flow`: aggiunto `pageUrl` a ogni `stepResult` per capire su quale pagina si blocca.
+- `execute-flow`: click "Presa visione" fa pre-scroll del pannello scrollabile (se presente) prima del click (checkbox spesso e' disabilitata finche' non scrolli).
