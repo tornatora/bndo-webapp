@@ -23,6 +23,7 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_STEP_TIMEOUT_MS = 5_500;
 const DEFAULT_FLOW_BUDGET_MS = 58_000;
 const INVITALIA_AREA_HOST = 'invitalia-areariservata-fe.npi.invitalia.it';
+const INVITALIA_FORM_HOST = 'presentazione-domanda-pia.npi.invitalia.it';
 const DEFAULT_DELAY_SCALE = 0.35;
 const DEFAULT_MAX_DELAY_MS = 850;
 
@@ -77,7 +78,7 @@ async function waitForUrlTransition(page: Page, beforeUrl: string, stepTimeoutMs
 
 function isSubmitLikeAction(step: FlowStep): boolean {
   const kind = (step.actionKind || '').toLowerCase();
-  const targetText = (step.target?.text || '').toLowerCase();
+  const targetText = (step.target?.text || step.target?.label || '').toLowerCase();
   return (
     kind.includes('submit') ||
     targetText.includes('avanti') ||
@@ -611,9 +612,12 @@ async function resolvePage(connectUrl: string): Promise<{ browser: Browser; page
       const url = candidate.url().toLowerCase();
       let score = index;
       if (url && url !== 'about:blank') score += 100;
-      if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+      const isArea = url.includes(INVITALIA_AREA_HOST);
+      const isForm = url.includes(INVITALIA_FORM_HOST);
+      if (isArea) score += 1000;
+      if (isForm) score += 1100;
 
-      if (url.includes(INVITALIA_AREA_HOST)) {
+      if (isArea || isForm) {
         const bodyText = await candidate
           .locator('body')
           .innerText({ timeout: 750 })
@@ -656,6 +660,7 @@ async function selectBestPage(browser: Browser, current: Page): Promise<Page> {
     let score = index;
     if (url && url !== 'about:blank') score += 100;
     if (url.includes(INVITALIA_AREA_HOST)) score += 1000;
+    if (url.includes(INVITALIA_FORM_HOST)) score += 1100;
     if (candidate === current) score += 20;
     return { page: candidate, score };
   });

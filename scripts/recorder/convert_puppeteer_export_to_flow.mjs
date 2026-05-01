@@ -49,6 +49,15 @@ function pickBestLocator(locators) {
   if (list.length === 0) return null;
 
   const rawTextLocator = list.find((s) => s.startsWith('::-p-text('));
+  const aria = list.find((s) => s.startsWith('::-p-aria('));
+  let ariaLabel = '';
+  if (aria) {
+    const m = aria.match(/::-p-aria\((.+)\)$/);
+    const label = m ? m[1].trim() : '';
+    const unquoted = label.replace(/^["']|["']$/g, '');
+    const looksChained = unquoted.includes('>>>>') || unquoted.includes('[role=') || unquoted.includes('role=');
+    if (!looksChained) ariaLabel = unquoted;
+  }
 
   // Prefer stable selectors:
   const idSel = list.find((s) => s.startsWith('#') && !/mat-(select|option)-\d+/.test(s));
@@ -62,10 +71,9 @@ function pickBestLocator(locators) {
     }
     // Only treat as id selector when it is exactly "#id" (no combinators).
     const idOnly = idSel.match(/^#([A-Za-z0-9_-]+)$/);
-    return { css: idSel, ...(idOnly ? { id: idOnly[1] } : {}) };
+    return { css: idSel, ...(idOnly ? { id: idOnly[1] } : {}), ...(ariaLabel ? { label: ariaLabel } : {}) };
   }
 
-  const aria = list.find((s) => s.startsWith('::-p-aria('));
   if (aria) {
     const m = aria.match(/::-p-aria\((.+)\)$/);
     const label = m ? m[1].trim() : '';
@@ -87,8 +95,8 @@ function pickBestLocator(locators) {
 
   const cssAny = list.find((s) => s.startsWith('#') || s.startsWith('.') || s.includes(' ') || s.includes('>'));
   if (cssAny) {
-    const id = cssAny.startsWith('#') ? cssAny.slice(1) : undefined;
-    return { css: cssAny, ...(id ? { id } : {}) };
+    const idOnly = cssAny.match(/^#([A-Za-z0-9_-]+)$/);
+    return { css: cssAny, ...(idOnly ? { id: idOnly[1] } : {}), ...(ariaLabel ? { label: ariaLabel } : {}) };
   }
 
   const xpath = list.find((s) => s.includes('xpath') || s.includes('::-p-xpath('));
@@ -117,8 +125,8 @@ function shouldDropDynamicMaterialTarget(target) {
   const id = target?.id || '';
   // These ids change run-to-run on Angular Material.
   if (/^mat-(select|option)-\d+$/.test(id)) return true;
-  if (/^#mat-(select|option)-\d+/.test(css)) return true;
-  if (css.includes('mat-option') && !target?.text && !target?.label) return true;
+  // Drop only when the selector is a plain dynamic id. Keep structured selectors like "#mat-select-4 span".
+  if (/^#mat-(select|option)-\d+$/.test(css)) return true;
   return false;
 }
 

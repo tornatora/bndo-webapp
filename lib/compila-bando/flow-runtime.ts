@@ -90,6 +90,10 @@ export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
   const escapedLabel = t.label ? escapeForSelector(t.label) : '';
   const escapedPlaceholder = t.placeholder ? escapeForSelector(t.placeholder) : '';
 
+  const isClick = step.type === 'click';
+  const clickNameRaw = (t.text || t.label || '').trim();
+  const escapedClickName = clickNameRaw ? escapeForSelector(clickNameRaw) : '';
+
   pushCandidate(candidates, t.css);
   if (t.id) pushCandidate(candidates, `#${t.id}`);
   if (t.name) pushCandidate(candidates, `[name="${escapeForSelector(t.name)}"]`);
@@ -103,6 +107,19 @@ export function getFlowStepSelectorCandidates(step: FlowStep): string[] {
     pushCandidate(candidates, `label:has-text("${escapedLabel}") + select`);
   }
   if (t.text) pushCandidate(candidates, `text="${escapedText}"`);
+
+  // Click steps often come from DevTools "aria" locators (stored as label) or plain innerText.
+  // Prefer clickable elements first, then fall back to generic text matching.
+  if (isClick && escapedClickName) {
+    pushCandidate(candidates, `button:has-text("${escapedClickName}")`);
+    pushCandidate(candidates, `a:has-text("${escapedClickName}")`);
+    pushCandidate(candidates, `[role="button"]:has-text("${escapedClickName}")`);
+    pushCandidate(candidates, `[role="link"]:has-text("${escapedClickName}")`);
+    pushCandidate(candidates, `mat-option:has-text("${escapedClickName}")`);
+    pushCandidate(candidates, `[role="option"]:has-text("${escapedClickName}")`);
+    // Last resort: any element containing the text.
+    pushCandidate(candidates, `text="${escapedClickName}"`);
+  }
   // Intentionally DO NOT push plain tag selectors (e.g. "div", "input"):
   // they're too broad and can cause random clicks if more specific selectors fail.
 
