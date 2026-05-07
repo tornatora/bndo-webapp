@@ -51,6 +51,7 @@
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.10.0",
+    "@openai/chatkit-react": "^1.5.1",
     "@sparticuz/chromium": "^147.0.0",
     "@stripe/stripe-js": "^8.9.0",
     "@supabase/ssr": "0.5.2",
