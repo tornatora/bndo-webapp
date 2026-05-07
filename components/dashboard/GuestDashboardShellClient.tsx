@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo, useState, useRef, useEffect, memo, type MouseEvent } from 'react';
+import { useMemo, useState, useEffect, memo } from 'react';
 import { LogIn } from 'lucide-react';
 import {
   getDashboardShellItems,
@@ -92,12 +92,20 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
   const activeKey = resolveDashboardNavKey(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [navReady, setNavReady] = useState(false);
+  const [hasEmailFromQuiz, setHasEmailFromQuiz] = useState(false);
 
   useEffect(() => {
     const raf = window.requestAnimationFrame(() => {
       setNavReady(true);
     });
     return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      setHasEmailFromQuiz(Boolean(params.get('email')));
+    }
   }, []);
 
   const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
@@ -212,7 +220,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
                 }}
               >
                 <LogIn size={14} />
-                Accedi per continuare
+                {hasEmailFromQuiz ? 'Imposta password per continuare' : 'Accedi'}
               </Link>
             </div>
           ) : (
