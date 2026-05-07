@@ -1,0 +1,234 @@
+{
+  "name": "Invitalia Flow Resto al Sud 2.0 / voucher / libero-professionista",
+  "bandoKey": "resto-al-sud-2-0",
+  "subProceduraKey": "libero-professionista",
+  "proceduraKey": "voucher",
+  "version": 1,
+  "source": "chrome-devtools-recorder-puppeteer",
+  "updatedAt": "2026-05-01",
+  "expectedDurationSeconds": 320,
+  "fieldMapping": {
+    "recorded.1": "1996-09-25",
+    "recorded.2": "CINQUE"
+  },
+  "steps": [
+    {
+      "type": "goto",
+      "actionKind": "goto",
+      "stepId": "rec_goto_0",
+      "url": "https://invitalia-areariservata-fe.npi.invitalia.it/home",
+      "waitUntil": "domcontentloaded"
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_1",
+      "target": {
+        "css": "#mat-select-4 span"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_2",
+      "target": {
+        "css": "#mat-option-18 > span span"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_3",
+      "target": {
+        "label": "Presenta la domanda"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_4",
+      "target": {
+        "css": "app-root p:nth-of-type(1)"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_5",
+      "target": {
+        "text": "Presa visione"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_6",
+      "target": {
+        "css": "#lineaIntervento",
+        "id": "lineaIntervento",
+        "label": "Linea di intervento"
+      }
+    },
+    {
+      "type": "select",
+      "actionKind": "select",
+      "stepId": "rec_select_7",
+      "target": {
+        "css": "#lineaIntervento",
+        "id": "lineaIntervento",
+        "label": "Linea di intervento"
+      },
+      "valueFrom": "client.lineaIntervento"
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_8",
+      "target": {
+        "css": "#tipologiaProponente",
+        "id": "tipologiaProponente",
+        "label": "Tipologia di proponente"
+      }
+    },
+    {
+      "type": "select",
+      "actionKind": "select",
+      "stepId": "rec_select_9",
+      "target": {
+        "css": "#tipologiaProponente",
+        "id": "tipologiaProponente",
+        "label": "Tipologia di proponente"
+      },
+      "valueFrom": "client.tipologiaProponente"
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_10",
+      "target": {
+        "label": "Inizia la compilazione"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_11",
+      "target": {
+        "css": "#TipologiaImpresa",
+        "id": "TipologiaImpresa",
+        "label": "Tipologia proponente"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_12",
+      "target": {
+        "text": "Libero professionista"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_13",
+      "target": {
+        "css": "#Nome",
+        "id": "Nome",
+        "label": "Nome"
+      }
+    },
+    {
+      "type": "type",
+      "actionKind": "type",
+      "stepId": "rec_type_14",
+      "target": {
+        "css": "#Nome",
+        "id": "Nome",
+        "label": "Nome"
+      },
+      "valueFrom": "client.firstName"
+    },
+    {
+      "type": "type",
+      "actionKind": "type",
+      "stepId": "rec_type_15",
+      "target": {
+        "css": "#Cognome",
+        "id": "Cognome",
+        "label": "Cognome"
+      },
+      "valueFrom": "client.lastName"
+    },
+    {
+      "type": "type",
+      "actionKind": "type",
+      "stepId": "rec_type_16",
+      "target": {
+        "css": "#DataDiNascita",
+        "id": "DataDiNascita",
+        "label": "Data di nascita"
+      },
+      "valueFrom": "recorded.1"
+    },
+    {
+      "type": "type",
+      "actionKind": "type",
+      "stepId": "rec_type_17",
+      "target": {
+        "css": "#LuogoDiNascita",
+        "id": "LuogoDiNascita",
+        "label": "Luogo di nascita"
+      },
+      "valueFrom": "recorded.2"
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_18",
+      "target": {
+        "css": "#ngb-typeahead-2-0",
+        "id": "ngb-typeahead-2-0",
+        "label": "Cinquefrondi"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_19",
+      "target": {
+        "css": "#Sesso",
+        "id": "Sesso",
+        "label": "Sesso"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_20",
+      "target": {
+        "text": "Maschio"
+      }
+    },
+    {
+      "type": "click",
+      "actionKind": "click_only",
+      "stepId": "rec_click_21",
+      "target": {
+        "css": "#PartitaIvaVatCode",
+        "id": "PartitaIvaVatCode",
+        "label": "Partita IVA"
+      }
+    },
+    {
+      "type": "type",
+      "actionKind": "type",
+      "stepId": "rec_type_22",
+      "target": {
+        "css": "#PartitaIvaVatCode",
+        "id": "PartitaIvaVatCode",
+        "label": "Partita IVA"
+      },
+      "valueFrom": "client.partitaIva"
+    }
+  ]
+}

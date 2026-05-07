@@ -7,6 +7,7 @@ export type DashboardNavKey =
   | 'documenti'
   | 'messaggi'
   | 'profilo'
+  | 'avvio_pratica'
   | 'new_practice';
 
 export type DashboardShellItem = {
@@ -45,6 +46,7 @@ export const routes = {
     notifications: '/dashboard/notifications',
     profile: '/dashboard/profile',
     password: '/dashboard/password',
+    avvioPratica: '/dashboard/avviopratica',
     newPractice: '/dashboard/new-practice',
     practicesPrefix: '/dashboard/practices',
     list: '/dashboard/pratiche',
@@ -96,6 +98,7 @@ export function getDashboardShellItems(): DashboardShellItem[] {
     { key: 'catalogo_bandi', label: 'Catalogo Bandi', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
+    { key: 'avvio_pratica', label: 'Avvio pratica', href: routes.dashboard.avvioPratica, icon: 'avvio_pratica' },
     { key: 'new_practice', label: 'Nuova pratica', href: routes.dashboard.newPractice, icon: 'new_practice' },
   ];
 }
@@ -125,6 +128,7 @@ export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
   ) {
     return 'profilo';
   }
+  if (normalizedPathname.startsWith(routes.dashboard.avvioPratica)) return 'avvio_pratica';
   if (normalizedPathname.startsWith(routes.dashboard.newPractice)) return 'new_practice';
   return 'messaggi';
 }
@@ -156,6 +160,7 @@ export function resolveDashboardLoaderWord(pathname: string): string {
 
   if (normalizedPathname.startsWith(routes.dashboard.documents)) return 'documenti';
   if (normalizedPathname.startsWith(routes.dashboard.catalogoBandi)) return 'catalogo bandi';
+  if (normalizedPathname.startsWith(routes.dashboard.avvioPratica)) return 'avvio pratica';
   if (normalizedPathname.startsWith(routes.dashboard.newPractice)) return 'nuova pratica';
   if (normalizedPathname === routes.dashboard.chat) return 'chat';
   if (

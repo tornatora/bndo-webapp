@@ -1,5 +1,21 @@
-import { PDFParse } from 'pdf-parse';
 import type { ExtractedData } from './types';
+import { callPdfExtractFunction } from '@/lib/pdf/extractPdfText';
+
+// Polyfill DOM APIs needed by pdf-parse/pdfjs-dist on Netlify Lambda
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class {
+    a=1;b=0;c=0;d=1;e=0;f=0;
+    constructor(init?: string) {
+      if (typeof init === 'string' && init.startsWith('matrix(')) {
+        const p = init.slice(7,-1).split(',').map(Number);
+        this.a=p[0];this.b=p[1];this.c=p[2];this.d=p[3];this.e=p[4];this.f=p[5];
+      }
+    }
+  };
+}
+if (typeof globalThis.Path2D === 'undefined') {
+  (globalThis as any).Path2D = class {};
+}
 
 function normalizeForMatch(value: string) {
   return value
@@ -66,16 +82,25 @@ function extractSedeLegale(text: string): string | null {
   return null;
 }
 
+async function getPdfText(buffer: Buffer): Promise<{ text: string; pages: number | null }> {
+  // Tier 1: Netlify standalone function
+  const netlifyText = await callPdfExtractFunction(buffer);
+  if (netlifyText) return { text: netlifyText, pages: null };
+
+  // Tier 2: local pdf-parse
+  const { PDFParse } = await import('pdf-parse');
+  const parser = new PDFParse({ data: buffer });
+  const data = await parser.getText();
+  await parser.destroy();
+  return { text: String(data?.text ?? ''), pages: (data as any)?.total ?? null };
+}
+
 export async function extractFromPdf(buffer: Buffer): Promise<{
   extracted: ExtractedData;
   meta: { pages: number | null; textChars: number };
   warnings: string[];
 }> {
-  const parser = new PDFParse({ data: buffer });
-  const data = await parser.getText();
-  await parser.destroy();
-
-  const text = String(data?.text ?? '');
+  const { text, pages } = await getPdfText(buffer);
   const textNorm = normalizeForMatch(text);
   const textChars = textNorm.length;
 
@@ -89,7 +114,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
         rea: null,
         forma_giuridica: null,
       },
-      meta: { pages: (data as any)?.total ?? null, textChars },
+      meta: { pages, textChars },
       warnings: ['pdf_scanned_or_empty'],
     };
   }
@@ -121,7 +146,7 @@ export async function extractFromPdf(buffer: Buffer): Promise<{
       rea,
       forma_giuridica,
     },
-    meta: { pages: (data as any)?.total ?? null, textChars },
+    meta: { pages, textChars },
     warnings,
   };
 }

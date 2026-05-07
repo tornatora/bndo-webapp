@@ -153,7 +153,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isDashboardPath && !user && !isNetlifyPreview) {
+  if (isDashboardPath && !user && !isNetlifyPreview && path !== '/dashboard/avviopratica') {
     return NextResponse.redirect(buildAbsoluteUrl(appBase, '/login'));
   }
   if (isConsultantPath && !user && !isNetlifyPreview) {

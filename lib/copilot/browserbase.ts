@@ -3,6 +3,13 @@ import fs from 'node:fs';
 export type BrowserbaseSessionCreateResult = {
   id: string;
   connectUrl?: string;
+  expiresAt?: string;
+};
+
+export type BrowserbaseSessionRetrieveResult = {
+  id: string;
+  connectUrl?: string;
+  expiresAt?: string;
 };
 
 export type BrowserbaseDebugResult = {
@@ -11,10 +18,22 @@ export type BrowserbaseDebugResult = {
   pages?: Array<{ debuggerUrl?: string; debuggerFullscreenUrl?: string }>;
 };
 
+export type BrowserbaseRegion = 'us-west-2' | 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
+
 type BrowserbaseInstance = {
   sessions: {
-    create: (input: { projectId?: string; extensionId?: string }) => Promise<BrowserbaseSessionCreateResult>;
+    create: (input: {
+      projectId?: string;
+      extensionId?: string;
+      keepAlive?: boolean;
+      timeout?: number;
+      region?: BrowserbaseRegion;
+      browserSettings?: {
+        viewport?: { width: number; height: number };
+      };
+    }) => Promise<BrowserbaseSessionCreateResult>;
     debug: (sessionId: string) => Promise<BrowserbaseDebugResult>;
+    retrieve: (sessionId: string) => Promise<BrowserbaseSessionRetrieveResult>;
     close?: (sessionId: string) => Promise<unknown>;
   };
   extensions: {
@@ -23,15 +42,45 @@ type BrowserbaseInstance = {
 };
 
 function hasBrowserbaseConfig() {
-  return Boolean(process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID);
+  return Boolean(process.env.BROWSERBASE_API_KEY);
+}
+
+export type BrowserbaseEnvValidation = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
+export function validateBrowserbaseEnv(): BrowserbaseEnvValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const apiKey = (process.env.BROWSERBASE_API_KEY || '').trim();
+  const projectId = (process.env.BROWSERBASE_PROJECT_ID || '').trim();
+  const extensionId = (process.env.BROWSERBASE_EXTENSION_ID || '').trim();
+  const region = (process.env.BROWSERBASE_REGION || '').trim();
+
+  if (!apiKey) {
+    errors.push('BROWSERBASE_API_KEY mancante.');
+  }
+  if (apiKey && !/^bb_(live|test)_/.test(apiKey)) {
+    warnings.push('BROWSERBASE_API_KEY ha formato inatteso.');
+  }
+  if (!projectId) {
+    warnings.push('BROWSERBASE_PROJECT_ID non impostata: il progetto verra inferito dalla API key.');
+  }
+  if (!extensionId) {
+    warnings.push('BROWSERBASE_EXTENSION_ID non impostata: sessione senza estensione custom.');
+  }
+  if (region && !['us-west-2', 'us-east-1', 'eu-central-1', 'ap-southeast-1'].includes(region)) {
+    warnings.push('BROWSERBASE_REGION non valida: usa us-west-2 | us-east-1 | eu-central-1 | ap-southeast-1');
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 async function importBrowserbaseSdk() {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (
-    moduleName: string
-  ) => Promise<Record<string, unknown>>;
-
-  const mod = await dynamicImport('@browserbasehq/sdk');
+  const mod = (await import('@browserbasehq/sdk')) as Record<string, unknown>;
   const maybeDefault = mod.default as new (...args: unknown[]) => BrowserbaseInstance;
   const maybeNamed = mod.Browserbase as new (...args: unknown[]) => BrowserbaseInstance;
   const Ctor = maybeDefault ?? maybeNamed;
@@ -42,8 +91,9 @@ async function importBrowserbaseSdk() {
 }
 
 export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
-  if (!process.env.BROWSERBASE_API_KEY) {
-    throw new Error('BROWSERBASE_API_KEY non configurata.');
+  const validation = validateBrowserbaseEnv();
+  if (!validation.ok) {
+    throw new Error(validation.errors.join(' '));
   }
 
   const BrowserbaseCtor = await importBrowserbaseSdk();
@@ -52,15 +102,31 @@ export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
 
 export async function createBrowserbaseSession(input: {
   extensionId?: string;
-}): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null }> {
+  keepAlive?: boolean;
+  timeoutSeconds?: number;
+  viewport?: { width: number; height: number };
+  region?: BrowserbaseRegion;
+}): Promise<{ sessionId: string; connectUrl: string | null; liveViewUrl: string | null; expiresAt: string | null }> {
   if (!hasBrowserbaseConfig()) {
-    return { sessionId: '', connectUrl: null, liveViewUrl: null };
+    return { sessionId: '', connectUrl: null, liveViewUrl: null, expiresAt: null };
   }
+
+  const regionEnv = (process.env.BROWSERBASE_REGION || '').trim() as BrowserbaseRegion;
+  // Default to EU region for Invitalia (Italian portal). Can be overridden via env.
+  const region: BrowserbaseRegion =
+    input.region ||
+    (['us-west-2', 'us-east-1', 'eu-central-1', 'ap-southeast-1'].includes(regionEnv) ? regionEnv : 'eu-central-1');
 
   const bb = await createBrowserbaseClient();
   const created = await bb.sessions.create({
-    projectId: process.env.BROWSERBASE_PROJECT_ID,
-    extensionId: input.extensionId ?? process.env.BROWSERBASE_EXTENSION_ID,
+    projectId: process.env.BROWSERBASE_PROJECT_ID || undefined,
+    extensionId: input.extensionId || process.env.BROWSERBASE_EXTENSION_ID || undefined,
+    keepAlive: input.keepAlive ?? true,
+    timeout: input.timeoutSeconds ?? 1800,
+    region,
+    browserSettings: {
+      viewport: input.viewport ?? { width: 1470, height: 740 },
+    },
   });
   let liveViewUrl: string | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -77,6 +143,7 @@ export async function createBrowserbaseSession(input: {
     sessionId: created.id,
     connectUrl: created.connectUrl ?? null,
     liveViewUrl,
+    expiresAt: created.expiresAt ?? null,
   };
 }
 
@@ -87,10 +154,8 @@ export async function primeBrowserbaseSessionToInvitalia(
   if (!connectUrl) return;
 
   try {
-    const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (
-      moduleName: string
-    ) => Promise<Record<string, unknown>>;
-    const mod = await dynamicImport('playwright-core');
+    // Use playwright-core for deploy friendliness (smaller + explicit dependency tracing).
+    const mod = (await import('playwright-core')) as Record<string, unknown>;
     const chromium = mod.chromium as
       | {
           connectOverCDP: (
@@ -135,16 +200,8 @@ export async function primeBrowserbaseSessionToInvitalia(
         waitUntil: 'domcontentloaded',
         timeout: 45_000,
       });
-      // Delay a bit so the embedded live view has time to connect before the scripted motion starts.
-      await page.waitForTimeout(3500);
-      await page.evaluate(() => window.scrollTo({ top: 500, behavior: 'smooth' }));
-      await page.waitForTimeout(1300);
-      await page.evaluate(() => window.scrollTo({ top: 1200, behavior: 'smooth' }));
-      await page.waitForTimeout(1400);
-      await page.evaluate(() => window.scrollTo({ top: 300, behavior: 'smooth' }));
-      await page.waitForTimeout(1300);
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-      await page.waitForTimeout(900);
+      // Keep priming deterministic: no extra scrolling. Just a short delay so the page settles.
+      await page.waitForTimeout(1200);
     } finally {
       await browser.close();
     }

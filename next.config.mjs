@@ -33,9 +33,13 @@ const frameOrigins = Array.from(
       'https://hooks.stripe.com',
       'https://buy.stripe.com',
       'https://js.stripe.com',
+      'https://www.browserbase.com',
+      'https://connect-v2.usw2.browserbase.com',
+      'https://*.browserbase.com',
       normalizeOrigin(process.env.NEXT_PUBLIC_MARKETING_URL),
       normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
-      normalizeOrigin(process.env.NEXT_PUBLIC_ADMIN_URL)
+      normalizeOrigin(process.env.NEXT_PUBLIC_ADMIN_URL),
+      normalizeOrigin(process.env.BROWSERBASE_LIVEVIEW_ORIGIN),
     ].filter(Boolean)
   )
 );
@@ -64,6 +68,22 @@ const devFrameOrigins = ['http://localhost:3300', 'http://127.0.0.1:3300'];
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost', '192.168.0.11'],
+  experimental: {
+    // Keep heavy Node-only dependencies out of the Next.js bundle (Netlify-friendly).
+    serverComponentsExternalPackages: ['playwright-core', 'playwright', 'puppeteer-core'],
+  },
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      const extra = ['playwright-core', 'playwright', 'puppeteer-core'];
+      if (Array.isArray(config.externals)) {
+        config.externals = [...config.externals, ...extra];
+      } else {
+        // Build fresh externals with the extra packages
+        config.externals = extra;
+      }
+    }
+    return config;
+  },
   async headers() {
     const csp = [
       "default-src 'self'",
@@ -74,6 +94,10 @@ const nextConfig = {
       [
         "connect-src 'self'",
         'https:',
+        // Browserbase live view / devtools uses WebSockets.
+        'wss:',
+        'wss://connect-v2.usw2.browserbase.com',
+        'wss://*.browserbase.com',
         supabaseRealtimeOrigin,
         ...(isProduction ? [] : devConnectOrigins)
       ]

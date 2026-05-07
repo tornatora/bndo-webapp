@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ExternalLink, FileText } from 'lucide-react';
+import { BndoAdvisorChat } from '@/components/chat/BndoAdvisorChat';
 import { requireUserProfile } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 
@@ -112,6 +113,13 @@ export default async function TenderDetailPage({ params }: { params: { id: strin
           </div>
         )}
       </article>
+
+      <BndoAdvisorChat
+        sourcePage={`/dashboard/tenders/${params.id}`}
+        bandoContext="unknown"
+        title="BNDO Advisor"
+        subtitle="Supporto dedicato su Resto al Sud 2.0 e Autoimpiego Centro-Nord."
+      />
     </div>
   );
 }

@@ -26,7 +26,7 @@ function StepDot({ step, status }: { step: number; status: 'completed' | 'active
 export function CompilaBandoLayout({ state, maxReached, onNext, onBack, children, hideFooter, canGoNext = true }: Props) {
   const { currentStep, direction } = state;
   const isFirst = currentStep === 1;
-  const isLast = currentStep === 10;
+  const isLast = currentStep === 11;
 
   const stepStatus = (step: WizardStep): 'completed' | 'active' | 'upcoming' => {
     if (step < currentStep) return 'completed';
@@ -60,7 +60,7 @@ export function CompilaBandoLayout({ state, maxReached, onNext, onBack, children
           />
         </div>
         <div className={s.cbProgressSteps}>
-          {([1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as WizardStep[]).map((s) => (
+          {([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as WizardStep[]).map((s) => (
             <StepDot key={s} step={s} status={stepStatus(s)} />
           ))}
         </div>

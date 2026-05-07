@@ -1,71 +1,128 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { FileDown, Loader2, Check, AlertCircle } from 'lucide-react';
+import { FileDown, Loader2, Check, AlertCircle, RefreshCcw } from 'lucide-react';
 import { generatePDF } from '../lib/pdfGenerator';
-import type { ExtractedData, CustomField } from '../lib/types';
+import type { ExtractedData, CustomField, UploadedFile, GeneratedDoc, DocStatus } from '../lib/types';
 import s from '../styles/compila-bando.module.css';
 
 type Props = {
   extracted: ExtractedData;
   customFields: CustomField[];
+  otherFiles: UploadedFile[];
   onPdfBlob: (blob: Blob) => void;
-  onDocxBlob: (blob: Blob) => void;
+  onGeneratedDocs: (docs: GeneratedDoc[]) => void;
+  onDsanStatus: (status: DocStatus) => void;
+  onDsanError: (error: string) => void;
 };
 
-type DocStatus = 'generating' | 'ready' | 'error';
+const DSAN_KEYS = [
+  { key: 'dsan_antiriciclaggio', fileName: 'DSAN_Antiriciclaggio.pdf', label: 'DSAN Antiriciclaggio' },
+  { key: 'dsan_casellario_liquidatorie', fileName: 'DSAN_Casellario.pdf', label: 'DSAN Casellario' },
+  { key: 'dsan_requisiti_iniziativa', fileName: 'DSAN_Requisiti_Iniziativa.pdf', label: 'DSAN Requisiti Iniziativa' },
+  { key: 'dsan_requisiti_soggettivi', fileName: 'DSAN_Requisiti_Soggettivi.pdf', label: 'DSAN Requisiti Soggettivi' },
+  { key: 'descrizione_iniziativa_c2', fileName: 'Descrizione_Iniziativa_C2.pdf', label: 'Descrizione Iniziativa C2' },
+];
 
 export function Step7CompilazioneDoc({
   extracted,
   customFields,
+  otherFiles,
   onPdfBlob,
-  onDocxBlob,
+  onGeneratedDocs,
+  onDsanStatus,
+  onDsanError,
 }: Props) {
   const [pdfStatus, setPdfStatus] = useState<DocStatus>('generating');
-  const [docxStatus, setDocxStatus] = useState<DocStatus>('generating');
+  const [dsanStatus, setDsanStatusState] = useState<DocStatus>('generating');
   const [pdfBlob, setPdfBlobLocal] = useState<Blob | null>(null);
-  const [docxBlob, setDocxBlobLocal] = useState<Blob | null>(null);
-  const [docxError, setDocxError] = useState('');
+  const [dsanDocs, setDsanDocs] = useState<GeneratedDoc[]>([]);
+  const [dsanError, setDsanErrorState] = useState('');
+  const [manualFields, setManualFields] = useState<Record<string, string>>({
+    luogo_firma: '',
+    data_firma: '',
+    residenza_legale_rappresentante: '',
+    descrizione_iniziativa: '',
+    importo_programma: '',
+  });
 
-  const generate = useCallback(async () => {
-    // Generate PDF (client-side, sempre funziona)
+  // Generate PDF scheda aziendale (client-side)
+  useEffect(() => {
     try {
       const blob = generatePDF(extracted, customFields);
       setPdfBlobLocal(blob);
       onPdfBlob(blob);
       setPdfStatus('ready');
     } catch {
-      setPdfStatus('ready');
+      setPdfStatus('error');
     }
+  }, [extracted, customFields, onPdfBlob]);
 
-    // Generate DOCX via API
-    setTimeout(async () => {
-      try {
-        const res = await fetch('/api/compila-bando/generate-docs', {
+  // Generate DSAN docs via API (server-side with original templates)
+  const generateDsanDocs = useCallback(async () => {
+    setDsanStatusState('generating');
+    onDsanStatus('generating');
+    setDsanErrorState('');
+    onDsanError('');
+
+    try {
+      const docs: GeneratedDoc[] = [];
+
+      for (const item of DSAN_KEYS) {
+        const res = await fetch('/api/compila-bando/generate-dsan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: extracted }),
+          body: JSON.stringify({
+            doc: item.key,
+            data: extracted,
+            overrides: manualFields,
+            mode: 'base64',
+            format: 'pdf',
+          }),
         });
 
         if (!res.ok) {
-          throw new Error(`Errore ${res.status}`);
+          const err = await res.json().catch(() => ({ error: 'Errore sconosciuto' }));
+          throw new Error(`${item.label}: ${err.error || res.status}`);
         }
 
-        const blob = await res.blob();
-        setDocxBlobLocal(blob);
-        onDocxBlob(blob);
-        setDocxStatus('ready');
-      } catch (e) {
-        setDocxError(e instanceof Error ? e.message : 'Errore generazione DOCX');
-        setDocxStatus('error');
+        const json = await res.json();
+        if (!json.ok || !json.base64) {
+          throw new Error(`${item.label}: risposta non valida`);
+        }
+
+        const binary = atob(json.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: json.mimeType });
+
+        docs.push({
+          key: item.key,
+          fileName: item.fileName,
+          mimeType: json.mimeType,
+          blob,
+        });
       }
-    }, 800);
-  }, [extracted, customFields, onPdfBlob, onDocxBlob]);
+
+      setDsanDocs(docs);
+      onGeneratedDocs(docs);
+      setDsanStatusState('ready');
+      onDsanStatus('ready');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Errore generazione DSAN';
+      setDsanErrorState(msg);
+      onDsanError(msg);
+      setDsanStatusState('error');
+      onDsanStatus('error');
+    }
+  }, [extracted, manualFields, onGeneratedDocs, onDsanStatus, onDsanError]);
 
   useEffect(() => {
-    const t = setTimeout(generate, 600);
+    const t = setTimeout(() => void generateDsanDocs(), 800);
     return () => clearTimeout(t);
-  }, [generate]);
+  }, [generateDsanDocs]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -84,102 +141,69 @@ export function Step7CompilazioneDoc({
         Compilazione Documenti
       </h2>
       <p className={s.cbCardSubtitle} style={{ marginBottom: 24 }}>
-        Stiamo generando i documenti compilati con i tuoi dati.
+        Compiliamo i 5 DSAN con i template originali Invitalia e i tuoi dati.
       </p>
 
-      {docxStatus === 'error' && (
+      <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14 }}>
+        <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: '#0b1136' }}>
+          Campi da compilare per i DSAN
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {[
+            { key: 'luogo_firma', label: 'Luogo firma' },
+            { key: 'data_firma', label: 'Data firma' },
+            { key: 'residenza_legale_rappresentante', label: 'Residenza legale rappresentante' },
+            { key: 'importo_programma', label: 'Importo programma (€)' },
+          ].map((field) => (
+            <label key={field.key} style={{ display: 'grid', gap: 4, fontSize: 12, color: '#334155' }}>
+              {field.label}
+              <input
+                value={manualFields[field.key] || ''}
+                onChange={(e) => setManualFields((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                style={{ border: '1px solid #cbd5e1', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}
+              />
+            </label>
+          ))}
+        </div>
+        <label style={{ display: 'grid', gap: 4, marginTop: 8, fontSize: 12, color: '#334155' }}>
+          Descrizione iniziativa economica (Allegato C2)
+          <textarea
+            value={manualFields.descrizione_iniziativa || ''}
+            onChange={(e) => setManualFields((prev) => ({ ...prev, descrizione_iniziativa: e.target.value }))}
+            rows={5}
+            style={{ border: '1px solid #cbd5e1', borderRadius: 8, padding: '8px 10px', fontSize: 12, resize: 'vertical' }}
+          />
+        </label>
+      </div>
+
+      {otherFiles.length > 0 && (
+        <div style={{ marginBottom: 16, border: '1px solid #e2e8f0', borderRadius: 12, padding: 14 }}>
+          <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: '#0b1136' }}>
+            File utente caricati
+          </p>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {otherFiles.map((file, idx) => (
+              <div key={`${file.name}-${idx}`} style={{ fontSize: 12, color: '#475569' }}>
+                {file.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dsanStatus === 'error' && (
         <div style={{
           background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
           padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8
         }}>
           <AlertCircle size={16} color="#ef4444" />
-          <span style={{ fontSize: 13, color: '#991b1b' }}>DOCX: {docxError}</span>
+          <span style={{ fontSize: 13, color: '#991b1b' }}>Errore: {dsanError}</span>
+          <button className={s.cbBtnMuted} onClick={() => void generateDsanDocs()} type="button" style={{ marginLeft: 'auto' }}>
+            <RefreshCcw size={14} />
+            Riprova
+          </button>
         </div>
       )}
-
-      <div className={s.cbTwoCol}>
-        {/* PDF Card */}
-        <div
-            className={`${s.cbDocCard} ${
-            pdfStatus === 'ready' ? s.cbDocCardReady : s.cbDocCardGenerating
-          }`}
-        >
-          <div
-            className={`${s.cbDocCardIcon} ${
-              pdfStatus === 'ready'
-                ? s.cbDocCardIconReady
-                : s.cbDocCardIconGenerating
-            }`}
-          >
-            {pdfStatus === 'ready' ? (
-              <Check size={24} />
-            ) : (
-              <Loader2 size={24} className={s.cbSpinner} />
-            )}
-          </div>
-          <h3 className={s.cbDocCardTitle}>Scheda Aziendale</h3>
-          <p
-            className={`${s.cbDocCardStatus} ${
-              pdfStatus === 'ready'
-                ? s.cbDocCardStatusReady
-                : s.cbDocCardStatusGenerating
-            }`}
-          >
-            {pdfStatus === 'ready' ? 'Pronto' : 'In generazione...'}
-          </p>
-          {pdfStatus === 'ready' && (
-            <button
-              className={s.cbBtnPrimary}
-              onClick={() => pdfBlob && downloadBlob(pdfBlob, 'Scheda-Aziendale-BNDO.pdf')}
-              type="button"
-            >
-              <FileDown size={14} />
-              Scarica PDF
-            </button>
-          )}
-        </div>
-
-        {/* DOCX Card */}
-        <div
-            className={`${s.cbDocCard} ${
-            docxStatus === 'ready' ? s.cbDocCardReady : s.cbDocCardGenerating
-          }`}
-        >
-          <div
-            className={`${s.cbDocCardIcon} ${
-              docxStatus === 'ready'
-                ? s.cbDocCardIconReady
-                : s.cbDocCardIconGenerating
-            }`}
-          >
-            {docxStatus === 'ready' ? (
-              <Check size={24} />
-            ) : (
-              <Loader2 size={24} className={s.cbSpinner} />
-            )}
-          </div>
-          <h3 className={s.cbDocCardTitle}>Documento Anagrafico</h3>
-          <p
-            className={`${s.cbDocCardStatus} ${
-              docxStatus === 'ready'
-                ? s.cbDocCardStatusReady
-                : s.cbDocCardStatusGenerating
-            }`}
-          >
-            {docxStatus === 'ready' ? 'Pronto' : docxStatus === 'error' ? 'Errore' : 'In generazione...'}
-          </p>
-          {docxStatus === 'ready' && (
-            <button
-              className={s.cbBtnMuted}
-              onClick={() => docxBlob && downloadBlob(docxBlob, 'Documento-Anagrafico-BNDO.docx')}
-              type="button"
-            >
-              <FileDown size={14} />
-              Scarica DOCX
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

@@ -1,31 +1,51 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase } from '../lib/types';
+import type { WizardState, WizardStep, WizardDirection, UploadedFile, CustomField, SpidPhase, GeneratedDoc, DocStatus } from '../lib/types';
 import { DEFAULT_EXTRACTED, INITIAL_EXTRACTED } from '../lib/demoData';
 
-function makeInitialState(): WizardState {
+function makeInitialState(initialStep: WizardStep = 1): WizardState {
+  const shouldSeedDemo = initialStep > 1;
   return {
-    currentStep: 1,
+    currentStep: initialStep,
     direction: 'next',
-    useAiAgent: false,
-    files: { visura: null, cartaIdentita: null, altri: [] },
-    extracted: INITIAL_EXTRACTED,
-    customFields: [],
+    useAiAgent: initialStep >= 10,
+    files: shouldSeedDemo
+      ? {
+          visura: { name: 'visura-demo.pdf', size: 128000, type: 'application/pdf' },
+          cartaIdentita: { name: 'carta-identita-demo.jpg', size: 48000, type: 'image/jpeg' },
+          altri: [
+            { name: 'Preventivo arredamento.pdf', size: 98000, type: 'application/pdf' },
+            { name: 'Preventivo attrezzature.pdf', size: 112000, type: 'application/pdf' },
+          ],
+        }
+      : { visura: null, cartaIdentita: null, altri: [] },
+    extracted: shouldSeedDemo ? { ...DEFAULT_EXTRACTED } : INITIAL_EXTRACTED,
+    customFields: shouldSeedDemo
+      ? [
+          { key: 'luogo_firma', value: 'Napoli' },
+          { key: 'importo_programma', value: '75000' },
+        ]
+      : [],
     generatedPdfBlob: null,
-    generatedDocxBlob: null,
+    generatedDocs: [],
+    dsanStatus: 'generating',
+    dsanError: '',
     spidPhase: 'login',
     spidAuthenticated: false,
   };
 }
 
-export function useCompilaBandoWizard() {
-  const [state, setState] = useState<WizardState>(makeInitialState);
-  const maxReachedRef = useRef<number>(1);
+export function useCompilaBandoWizard(initialStep: WizardStep = 1) {
+  const [state, setState] = useState<WizardState>(() => makeInitialState(initialStep));
+  const maxReachedRef = useRef<number>(initialStep);
+  const step9LockRef = useRef(false);
 
   const goToStep = useCallback((step: WizardStep) => {
     setState((prev) => {
+      if (step9LockRef.current && step < 10) return prev;
       const direction: WizardDirection = step > prev.currentStep ? 'next' : 'back';
+      if (step >= 10) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction };
     });
@@ -33,8 +53,9 @@ export function useCompilaBandoWizard() {
 
   const next = useCallback(() => {
     setState((prev) => {
-      if (prev.currentStep >= 10) return prev;
+      if (prev.currentStep >= 11) return prev;
       const step = (prev.currentStep + 1) as WizardStep;
+      if (step >= 10) step9LockRef.current = true;
       if (step > maxReachedRef.current) maxReachedRef.current = step;
       return { ...prev, currentStep: step, direction: 'next' };
     });
@@ -44,6 +65,7 @@ export function useCompilaBandoWizard() {
     setState((prev) => {
       if (prev.currentStep <= 1) return prev;
       const step = (prev.currentStep - 1) as WizardStep;
+      if (step9LockRef.current && step < 10) return prev;
       return { ...prev, currentStep: step, direction: 'back' };
     });
   }, []);
@@ -103,8 +125,16 @@ export function useCompilaBandoWizard() {
     setState((prev) => ({ ...prev, generatedPdfBlob: blob }));
   }, []);
 
-  const setGeneratedDocxBlob = useCallback((blob: Blob | null) => {
-    setState((prev) => ({ ...prev, generatedDocxBlob: blob }));
+  const setGeneratedDocs = useCallback((docs: GeneratedDoc[]) => {
+    setState((prev) => ({ ...prev, generatedDocs: docs }));
+  }, []);
+
+  const setDsanStatus = useCallback((status: DocStatus) => {
+    setState((prev) => ({ ...prev, dsanStatus: status }));
+  }, []);
+
+  const setDsanError = useCallback((error: string) => {
+    setState((prev) => ({ ...prev, dsanError: error }));
   }, []);
 
   const setSpidPhase = useCallback((phase: SpidPhase) => {
@@ -128,9 +158,10 @@ export function useCompilaBandoWizard() {
   }, []);
 
   const reset = useCallback(() => {
-    setState(makeInitialState());
+    setState(makeInitialState(initialStep));
     maxReachedRef.current = 1;
-  }, []);
+    step9LockRef.current = false;
+  }, [initialStep]);
 
   return {
     state,
@@ -148,7 +179,9 @@ export function useCompilaBandoWizard() {
     removeCustomField,
     setUseAiAgent,
     setGeneratedPdfBlob,
-    setGeneratedDocxBlob,
+    setGeneratedDocs,
+    setDsanStatus,
+    setDsanError,
     setSpidPhase,
     setSpidAuthenticated,
     skipUploads,

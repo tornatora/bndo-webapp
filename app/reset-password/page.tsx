@@ -7,7 +7,10 @@ import { createClient } from '@/lib/supabase/browser';
 type Stage = 'checking' | 'ready' | 'done' | 'error';
 
 export default function ResetPasswordPage() {
-  const supabase = useMemo(() => createClient(), []);
+  const hasSupabaseEnv = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+  const supabase = useMemo(() => (hasSupabaseEnv ? createClient() : null), [hasSupabaseEnv]);
   const [stage, setStage] = useState<Stage>('checking');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -16,6 +19,12 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     async function initializeRecoverySession() {
+      if (!supabase) {
+        setStage('error');
+        setMessage('Reset password non disponibile in questa preview: manca configurazione Supabase.');
+        return;
+      }
+
       const url = new URL(window.location.href);
       const code = url.searchParams.get('code');
       const tokenHash = url.searchParams.get('token_hash');
@@ -59,6 +68,12 @@ export default function ResetPasswordPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+
+    if (!supabase) {
+      setStage('error');
+      setMessage('Reset password non disponibile in questa preview: manca configurazione Supabase.');
+      return;
+    }
 
     if (password.length < 8) {
       setMessage('La password deve avere almeno 8 caratteri.');

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hasAdminAccess, hasConsultantAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { ADMIN_URL, APP_URL, buildAbsoluteUrl, hostFromBaseUrl } from '@/lib/site-urls';
 import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
@@ -85,12 +85,15 @@ export async function POST(request: NextRequest) {
     });
   if (rateLimit) return rateLimit;
 
+  // Create a placeholder response to capture auth cookies from Supabase.
+  // We'll copy them to the real redirect response later.
+  const cookieCarrier = NextResponse.next();
+
   const supabaseAdmin = hasRealServiceRoleKey() ? getSupabaseAdmin() : null;
   let email = identifier;
 
   if (!identifier.includes('@')) {
     if (!supabaseAdmin) {
-      // Without a real service-role key we cannot safely map username -> email.
       return redirectWithError('Inserisci la tua email (non username)', mode, nextParam, baseUrls);
     }
 
@@ -107,7 +110,8 @@ export async function POST(request: NextRequest) {
     email = profile.email;
   }
 
-  const supabase = createClient();
+  // Create Supabase client with the placeholder response so auth cookies land on it
+  const supabase = createRouteHandlerClient(request, cookieCarrier);
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
@@ -117,6 +121,25 @@ export async function POST(request: NextRequest) {
   const {
     data: { user }
   } = await supabase.auth.getUser();
+
+  // Create the final redirect response and copy auth cookies from the carrier
+  function redirectTo(url: URL): NextResponse {
+    const res = NextResponse.redirect(url, { status: 303 });
+    const stored = cookieCarrier.cookies.getAll();
+    for (const cookie of stored) {
+      try {
+        res.cookies.set(cookie.name, cookie.value, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+        });
+      } catch {
+        // skip individual cookie failures
+      }
+    }
+    return res;
+  }
 
   if (user) {
     const { data: signedProfile } = supabaseAdmin
@@ -129,7 +152,7 @@ export async function POST(request: NextRequest) {
     if (mode === 'admin') {
       if (isAdmin) {
         const safeTarget = resolveSafeRedirect(nextParam, adminDefault, allowedHosts, adminBaseUrl);
-        return NextResponse.redirect(safeTarget, { status: 303 });
+        return redirectTo(safeTarget);
       }
 
       await supabase.auth.signOut();
@@ -137,16 +160,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (isAdmin) {
-      return NextResponse.redirect(adminDefault, { status: 303 });
+      return redirectTo(adminDefault);
     }
     if (isConsultant) {
       const consultantDefault = buildAbsoluteUrl(appBaseUrl, '/consultant');
       const safeConsultantTarget = resolveSafeRedirect(nextParam, consultantDefault, allowedHosts, appBaseUrl);
-      return NextResponse.redirect(safeConsultantTarget, { status: 303 });
+      return redirectTo(safeConsultantTarget);
     }
   }
 
   const userDefault = buildAbsoluteUrl(appBaseUrl, '/dashboard/pratiche');
   const safeUserTarget = resolveSafeRedirect(nextParam, userDefault, allowedHosts, appBaseUrl);
-  return NextResponse.redirect(safeUserTarget, { status: 303 });
+  return redirectTo(safeUserTarget);
 }

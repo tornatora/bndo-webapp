@@ -67,6 +67,14 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
       </svg>
     );
   }
+  if (name === 'avvio_pratica') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" {...stroke} />
+        <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
   if (name === 'catalogo_bandi') {
     return (
       <svg {...common}>

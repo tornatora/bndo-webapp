@@ -9,6 +9,7 @@
   CHAT_PROXY_TIMEOUT_MS = "30000"
 
 [functions]
+  # Source functions live here. Netlify builds them into `.netlify/functions` during deploy.
   directory = "netlify/functions"
 
 [functions.refresh-bandi]
@@ -19,3 +20,6 @@
 
 [functions.scrape-regional-grants]
   schedule = "0 4 * * *"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
