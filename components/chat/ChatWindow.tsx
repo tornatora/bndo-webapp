@@ -362,6 +362,7 @@ export function ChatWindow({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isMainLandingPage = pathname === '/';
   const resolvedInitialView: 'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail' =
     initialView === 'home' || initialView === 'form' || initialView === "pratiche" || initialView === 'grantDetail' || initialView === 'choice' || initialView === 'quiz' || initialView === 'myPractices' || initialView === 'practiceDetail'
       ? initialView
@@ -1507,24 +1508,24 @@ export function ChatWindow({
         {view === 'chat' || messages.length > 0 ? (
           <div className={view === 'chat' ? 'view-pane chat-view-pane' : 'view-pane chat-view-pane is-hidden'} aria-hidden={view !== 'chat'}>
             <div className="chatgpt-stage">
-              {isLimitedReleaseMode() && (
-                <div className="limited-beta-banner" style={{
-                  background: 'linear-gradient(135deg, rgba(11,17,54,0.95), #0a2540)',
-                  color: '#fff',
-                  padding: '10px 18px',
-                  borderRadius: '10px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  textAlign: 'center',
-                  marginBottom: '16px',
-                  boxShadow: '0 4px 18px rgba(11,17,54,0.15)',
-                }}>
-                  <span style={{ marginRight: '6px' }}>🔒</span>
-                  Modalità limitata: {LIMITED_CHAT_SCOPE_NOTICE}
-                </div>
-              )}
               {messages.length === 0 ? (
                 <div className="chat-landing">
+                  {isLimitedReleaseMode() && isMainLandingPage ? (
+                    <div className="limited-beta-banner" style={{
+                      background: 'linear-gradient(135deg, rgba(11,17,54,0.95), #0a2540)',
+                      color: '#fff',
+                      padding: '10px 18px',
+                      borderRadius: '10px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      marginBottom: '14px',
+                      boxShadow: '0 4px 18px rgba(11,17,54,0.15)',
+                    }}>
+                      <span style={{ marginRight: '6px' }}>🔒</span>
+                      Modalità limitata: {LIMITED_CHAT_SCOPE_NOTICE}
+                    </div>
+                  ) : null}
                   <div className="landing-title">
                     <div className="landing-title-top">{LANDING_TITLE_PREFIX}</div>
                     <div ref={fitWrapRef} className="landing-title-bottom" style={{ ['--fit-scale' as any]: fitScale }}><span className="landing-title-fixed">Parlami</span><span className="landing-rotate" key={rotateIdx}>{stripLeadingParlami(LANDING_ROTATING_FULL[rotateIdx] ?? LANDING_ROTATING_FULL[0])}</span></div>
