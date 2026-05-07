@@ -22,6 +22,7 @@ import { ScannerBandiProView } from '@/components/views/ScannerBandiProView';
 import { buildUnifiedScanRequestBody, selectUnifiedScanStrictness } from '@/lib/matching/scanRequestPolicy';
 import { isLimitedReleaseMode, LIMITED_CHAT_SCOPE_NOTICE } from '@/shared/config/release-mode';
 import './ThinkingBubble.css';
+import { RealtimeVoice, type RealtimeVoiceHandle, type VoiceState } from '@/components/chat/RealtimeVoice';
 
 type UserProfile = {
   activityType?: string | null;
@@ -386,6 +387,9 @@ export function ChatWindow({
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const voiceTextRef = useRef('');
+  const voiceRef = useRef<RealtimeVoiceHandle>(null);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail'>(resolvedInitialView);
@@ -1170,6 +1174,42 @@ export function ChatWindow({
     }
   }
 
+  const chatApiBase = (() => {
+    if (typeof process === 'undefined') return '/api/conversation';
+    const v = (process.env.NEXT_PUBLIC_ENABLE_BNDO_CHAT ?? '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on'
+      ? '/api/chatkit/chat'
+      : '/api/conversation';
+  })();
+
+  async function speakText(text: string) {
+    if (chatApiBase !== '/api/chatkit/chat') return;
+    if (!text || voiceState === 'playing' || voiceState === 'responding') return;
+    try {
+      const res = await fetch('/api/chatkit/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'unknown');
+        console.error('TTS endpoint error:', res.status, errText);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = (e) => {
+        console.error('TTS audio playback error:', e);
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
+    } catch (err) {
+      console.error('TTS speakText error:', err);
+    }
+  }
+
   async function onSend(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -1190,7 +1230,7 @@ export function ChatWindow({
     let hasAddedAssistantPlaceholder = false;
 
     try {
-      const res = await fetch('/api/conversation', {
+      const res = await fetch(chatApiBase, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1319,6 +1359,10 @@ export function ChatWindow({
       setIsTyping(false);
       setIsThinking(false);
       setShowTypingIndicator(false);
+      // Parla la risposta testuale se non siamo già in una sessione vocale
+      if (assistantTextToCommit && voiceState === 'idle') {
+        speakText(assistantTextToCommit);
+      }
     }
   }
 
@@ -1519,8 +1563,11 @@ export function ChatWindow({
                       fontSize: '13px',
                       fontWeight: 600,
                       textAlign: 'center',
-                      marginBottom: '14px',
+                      marginTop: '0',
+                      marginBottom: '10px',
                       boxShadow: '0 4px 18px rgba(11,17,54,0.15)',
+                      maxWidth: '760px',
+                      width: '100%',
                     }}>
                       <span style={{ marginRight: '6px' }}>🔒</span>
                       Modalità limitata: {LIMITED_CHAT_SCOPE_NOTICE}
@@ -1620,14 +1667,73 @@ export function ChatWindow({
 
             <div ref={composerDockRef} className="composer-dock">
               <div className="composer-inner">
+                {chatApiBase === '/api/chatkit/chat' && (
+                  <RealtimeVoice
+                    ref={voiceRef}
+                    sessionUrl="/api/chatkit/realtime-session"
+                    onTextDelta={(delta) => {
+                      // Accumulate voice text
+                      voiceTextRef.current += delta;
+                      // Update or create assistant bubble
+                      setMessages((prev) => {
+                        const last = prev[prev.length - 1];
+                        if (last && last.role === 'assistant' && last.id === '__voice__') {
+                          return [...prev.slice(0, -1), { ...last, body: voiceTextRef.current }];
+                        }
+                        return prev;
+                      });
+                    }}
+                    onTextDone={(fullText) => {
+                      // Finalize the assistant bubble
+                      voiceTextRef.current = '';
+                      setMessages((prev) => {
+                        const last = prev[prev.length - 1];
+                        if (last && last.role === 'assistant' && last.id === '__voice__') {
+                          return [...prev.slice(0, -1), { id: uid(), role: 'assistant', kind: 'text', body: fullText }];
+                        }
+                        return prev;
+                      });
+                    }}
+                    onUserTranscript={(transcript) => {
+                      // Show user's transcribed speech as a bubble
+                      setMessages((prev) => [
+                        ...prev,
+                        { id: uid(), role: 'user', kind: 'text', body: transcript },
+                        { id: '__voice__', role: 'assistant', kind: 'text', body: '' },
+                      ]);
+                    }}
+                    onAudioDone={() => {
+                      // Audio playback finished
+                    }}
+                    onStateChange={setVoiceState}
+                    onError={(err) => {
+                      console.error('Voice error:', err);
+                      setMessages((prev) => {
+                        const last = prev[prev.length - 1];
+                        if (last && last.id === '__voice_err__') {
+                          return [...prev.slice(0, -1), { id: '__voice_err__', role: 'assistant', kind: 'text', body: `🎤 ${err}` }];
+                        }
+                        return [...prev, { id: '__voice_err__', role: 'assistant', kind: 'text', body: `🎤 ${err}` }];
+                      });
+                    }}
+                  />
+                )}
                 <InputArea
                   placeholder={placeholder}
-                  disabled={isTyping || isScanning}
+                  disabled={isTyping || isScanning || voiceState === 'responding' || voiceState === 'playing'}
                   onSend={onSend}
                   onReset={resetConversation}
                   focusMode={isMobileViewport ? 'manual' : 'desktop'}
                   blurSignal={inputBlurSignal}
                   onComposerFocusChange={setIsComposerFocused}
+                  onVoiceStart={() => {
+                    voiceRef.current?.startRecording();
+                  }}
+                  onVoiceEnd={() => {
+                    voiceRef.current?.stopRecording();
+                  }}
+                  voiceState={voiceState}
+                  voiceAvailable={chatApiBase === '/api/chatkit/chat'}
                 />
               </div>
             </div>

@@ -1351,9 +1351,6 @@ body.scanner-overlay-open {
   .landing-title-fixed::after { animation: none !important; }
 }
 
-.chat-landing-input {
-  width: min(740px, 100%);
-}
 
 /* ChatGPT-like stage (BNDO colors) */
 .chatgpt-stage {
@@ -3299,8 +3296,8 @@ body.scanner-overlay-open {
 .composer {
   width: 100%;
   display: grid;
-  grid-template-columns: 1fr 42px;
-  gap: 10px;
+  grid-template-columns: 1fr 42px 42px;
+  gap: 8px;
   align-items: center;
   position: relative;
   overflow: hidden;
@@ -3311,6 +3308,47 @@ body.scanner-overlay-open {
   backdrop-filter: blur(18px) saturate(170%);
   -webkit-backdrop-filter: blur(18px) saturate(170%);
   box-shadow: 0 14px 36px rgba(11, 17, 54, 0.12);
+}
+
+.composer-mic {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(11, 17, 54, 0.10);
+  background: rgba(248, 250, 252, 0.72);
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  color: rgba(11, 17, 54, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.composer-mic:hover {
+  background: rgba(241, 245, 249, 0.85);
+  color: rgba(11, 17, 54, 0.85);
+}
+
+.composer-mic:active,
+.composer-mic--active {
+  background: #ef4444 !important;
+  color: #fff !important;
+}
+
+.composer-mic--active {
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+.composer-mic svg {
+  display: block;
+}
+
+@keyframes voice-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
 }
 
 .composer::before {
@@ -3409,7 +3447,7 @@ body.scanner-overlay-open {
   }
 
   .composer {
-    grid-template-columns: 1fr 44px;
+    grid-template-columns: 1fr 44px 44px;
     gap: 10px;
     padding: 10px 12px;
     box-shadow: none;

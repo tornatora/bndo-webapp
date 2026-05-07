@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hasAdminAccess, hasConsultantAccess } from '@/lib/roles';
 import { getSupabaseAdmin, hasRealServiceRoleKey } from '@/lib/supabase/admin';
-import { createClient } from '@/lib/supabase/server';
+import { createRouteHandlerClient } from '@/lib/supabase/server';
 import { enforceRateLimit, getClientIp, rejectCrossSiteMutation } from '@/lib/security/http';
 
 function readBody(request: NextRequest) {
@@ -61,7 +61,8 @@ export async function POST(request: NextRequest) {
     email = profile.email;
   }
 
-  const supabase = createClient();
+  const cookieCarrier = NextResponse.next();
+  const supabase = createRouteHandlerClient(request, cookieCarrier);
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     return NextResponse.json({ error: 'Credenziali non valide.' }, { status: 401 });
@@ -75,16 +76,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Sessione non disponibile.' }, { status: 500 });
   }
 
+  // Build response with auth cookies copied from carrier
   const { data: signedProfile } = supabaseAdmin
     ? await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle()
     : await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
 
-  if (signedProfile?.role && hasAdminAccess(signedProfile.role)) {
-    return NextResponse.json({ ok: true, next: '/admin' });
-  }
-  if (signedProfile?.role && hasConsultantAccess(signedProfile.role)) {
-    return NextResponse.json({ ok: true, next: '/consultant' });
+  function jsonOk(data: Record<string, unknown>): NextResponse {
+    const res = NextResponse.json({ ok: true, ...data });
+    const stored = cookieCarrier.cookies.getAll();
+    for (const cookie of stored) {
+      try {
+        res.cookies.set(cookie.name, cookie.value, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+        });
+      } catch {
+        // skip
+      }
+    }
+    return res;
   }
 
-  return NextResponse.json({ ok: true, next });
+  if (signedProfile?.role && hasAdminAccess(signedProfile.role)) {
+    return jsonOk({ next: '/admin' });
+  }
+  if (signedProfile?.role && hasConsultantAccess(signedProfile.role)) {
+    return jsonOk({ next: '/consultant' });
+  }
+
+  return jsonOk({ next });
 }

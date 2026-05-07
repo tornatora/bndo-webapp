@@ -35,7 +35,7 @@ function BndoAdvisorChatEnabled({
   bandoContext = 'unknown',
   className,
   title = 'BNDO Advisor',
-  subtitle = 'Consulenza guidata su Resto al Sud 2.0 e Autoimpiego Centro-Nord.'
+  subtitle = 'Consulenza guidata su Resto al Sud 2.0 e Autoimpiego Centro-Nord.',
 }: BndoAdvisorChatProps) {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [loadingSecret, setLoadingSecret] = useState(true);

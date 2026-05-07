@@ -412,12 +412,12 @@ export default function QuizPage() {
       return;
     }
     setSubmissionError(null);
+    const fullName = `${contact.firstName} ${contact.lastName}`.trim();
     const query = new URLSearchParams();
-    query.set('practice', practiceType);
-    query.set('quiz', latestSubmissionId);
-    query.set('skip_payment', '1');
-    query.set('onboarding_mode', 'dashboard_client');
-    window.location.href = `/onboarding?${query.toString()}`;
+    query.set('email', contact.email);
+    query.set('quiz_id', latestSubmissionId);
+    query.set('nome', fullName);
+    window.location.href = `/dashboard/avviopratica?${query.toString()}`;
   }
 
   function openConsultantChat() {

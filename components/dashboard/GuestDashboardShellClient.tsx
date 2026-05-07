@@ -4,21 +4,16 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo, useState, useRef, useEffect, memo, type MouseEvent } from 'react';
-import { LogOut, User, ChevronDown } from 'lucide-react';
-import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
+import { LogIn } from 'lucide-react';
 import {
-  buildLogoutPath,
   getDashboardShellItems,
-  resolveAssistantHomeUrl,
   resolveDashboardNavKey,
   type DashboardShellItem,
 } from '@/shared/config';
-import { MARKETING_URL } from '@/shared/lib';
+import { APP_URL } from '@/shared/lib';
 
-type DashboardShellClientProps = {
+type GuestDashboardShellClientProps = {
   children: React.ReactNode;
-  username: string;
-  viewerProfileId: string;
 };
 
 const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) {
@@ -92,17 +87,11 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
   );
 });
 
-export function DashboardShellClient({ children, username, viewerProfileId }: DashboardShellClientProps) {
+export function GuestDashboardShellClient({ children }: GuestDashboardShellClientProps) {
   const pathname = usePathname();
   const activeKey = resolveDashboardNavKey(pathname);
-  const isMessagesRoute = activeKey === 'messaggi';
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarUserMenuOpen, setSidebarUserMenuOpen] = useState(false);
-  const [topbarUserMenuOpen, setTopbarUserMenuOpen] = useState(false);
   const [navReady, setNavReady] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
-  const topbarMenuRef = useRef<HTMLDivElement>(null);
-  const logoutUrl = buildLogoutPath(resolveAssistantHomeUrl());
 
   useEffect(() => {
     const raf = window.requestAnimationFrame(() => {
@@ -111,28 +100,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
     return () => window.cancelAnimationFrame(raf);
   }, []);
 
-  useEffect(() => {
-    function handleClickOutside(event: any) {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
-        setSidebarUserMenuOpen(false);
-      }
-      if (topbarMenuRef.current && !topbarMenuRef.current.contains(event.target)) {
-        setTopbarUserMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
-
-  const onLogoutIntent = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (typeof window === 'undefined') return;
-    const ok = window.confirm('Vuoi effettuare il logout dal tuo account?');
-    if (!ok) {
-      event.preventDefault();
-    }
-  };
 
   const renderShellItem = (item: DashboardShellItem) =>
     item.external ? (
@@ -170,7 +138,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
 
   const rootShellClass = `${
     sidebarOpen ? 'bndo-shell with-sidebar sidebar-open dashboard-auth-shell' : 'bndo-shell with-sidebar dashboard-auth-shell'
-  }${isMessagesRoute ? ' is-messages-route' : ''}`;
+  }`;
 
   return (
     <div className={rootShellClass}>
@@ -195,62 +163,48 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
 
         <div className="sidebar-bottom">
           {sidebarOpen ? (
-            <>
-              <Link className="sidebar-user sidebar-user-open sidebar-user-profile" href="/dashboard/profile" title="Apri profilo">
-                <span className="sidebar-avatar" aria-hidden="true">
-                  B
-                </span>
-                <div className="sidebar-user-meta">
-                  <div className="sidebar-user-name">@{username}</div>
-                </div>
-              </Link>
-              <a className="sidebar-user sidebar-logout-card" href={logoutUrl} onClick={onLogoutIntent}>
-                <span className="sidebar-avatar" aria-hidden="true">
-                  <LogOut size={16} />
-                </span>
-                <div className="sidebar-user-meta">
-                  <div className="sidebar-user-name">Logout</div>
-                  <div className="sidebar-user-sub">Esci dal tuo account</div>
-                </div>
-              </a>
-            </>
-          ) : (
-            <div className="sidebar-user-container" ref={profileMenuRef}>
-              <button
-                type="button"
-                className={`sidebar-user sidebar-user-profile ${sidebarUserMenuOpen ? 'is-active' : ''}`}
-                title="Profilo & Logout"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSidebarUserMenuOpen(!sidebarUserMenuOpen);
+            <div className="guest-sidebar-info sidebar-user sidebar-user-open">
+              <div className="sidebar-user-meta">
+                <div className="sidebar-user-name">BNDO</div>
+                <div className="sidebar-user-sub">Finanza agevolata</div>
+              </div>
+              <div className="guest-sidebar-desc" style={{ marginTop: '8px', fontSize: '13px', lineHeight: '1.5', opacity: 0.8 }}>
+                BNDO ti aiuta a ottenere fino a 200.000€ a fondo perduto per aprire la tua attività.
+                Verifica i requisiti in pochi minuti e avvia la pratica con un agente AI o un consulente dedicato.
+              </div>
+              <Link
+                href={`${APP_URL}/login`}
+                className="guest-sidebar-cta"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginTop: '12px',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  background: 'var(--color-accent, #6366f1)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  textDecoration: 'none',
                 }}
               >
+                <LogIn size={14} />
+                Accedi
+              </Link>
+            </div>
+          ) : (
+            <div className="sidebar-user-container">
+              <Link
+                href={`${APP_URL}/login`}
+                className="sidebar-user sidebar-user-profile"
+                title="Accedi"
+                style={{ textDecoration: 'none' }}
+              >
                 <span className="sidebar-avatar sidebar-avatar-link" aria-hidden="true">
-                  {username.charAt(0).toUpperCase()}
+                  <LogIn size={16} />
                 </span>
-                
-                {/* Logout shortcut on hover when sidebar is closed */}
-                {!sidebarUserMenuOpen && (
-                  <div className="sidebar-hover-logout">
-                    <a href={logoutUrl} onClick={onLogoutIntent} className="hover-logout-btn" title="Logout">
-                      <LogOut size={14} />
-                    </a>
-                  </div>
-                )}
-              </button>
-              {sidebarUserMenuOpen && (
-                <div className="sidebar-profile-dropdown">
-                  <div className="dropdown-header">@{username}</div>
-                  <Link href="/dashboard/profile" className="dropdown-item" onClick={() => setSidebarUserMenuOpen(false)}>
-                    <User className="h-4 w-4" />
-                    Profilo
-                  </Link>
-                  <a href={logoutUrl} className="dropdown-item is-logout" onClick={(e) => { setSidebarUserMenuOpen(false); onLogoutIntent(e); }}>
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </a>
-                </div>
-              )}
+              </Link>
             </div>
           )}
         </div>
@@ -258,53 +212,33 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
 
       <section className="mainpane">
         <header className="topbar">
-          <a className="topbar-logo" href={MARKETING_URL} aria-label="BNDO Home">
+          <a className="topbar-logo" href={APP_URL} aria-label="BNDO Home">
             <Image src="/Logo-BNDO-header.png" alt="BNDO" width={170} height={44} priority />
           </a>
           <div className="nav-actions">
-            <NotificationsBell
-              viewerProfileId={viewerProfileId}
-              inboxHref="/dashboard/notifications"
-              defaultActionPath="/dashboard/pratiche"
-            />
-            <div className="nav-user-container" ref={topbarMenuRef}>
-              <button
-                type="button"
-                className={`nav-user-toggle ${topbarUserMenuOpen ? 'is-active' : ''}`}
-                id="userName"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setTopbarUserMenuOpen(!topbarUserMenuOpen);
-                }}
-              >
-                <span className="nav-user-avatar">
-                  {username.charAt(0).toUpperCase()}
-                </span>
-                <span className="nav-user-name">@{username}</span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${topbarUserMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {topbarUserMenuOpen && (
-                <div className="topbar-profile-dropdown">
-                  <div className="dropdown-header">Opzioni Account</div>
-                  <Link href="/dashboard/profile" className="dropdown-item" onClick={() => setTopbarUserMenuOpen(false)}>
-                    <User className="h-4 w-4" />
-                    Profilo
-                  </Link>
-                  <a href={logoutUrl} className="dropdown-item is-logout" onClick={(e) => { setTopbarUserMenuOpen(false); onLogoutIntent(e); }}>
-                    <LogOut className="h-4 w-4" />
-                    Esci (Logout)
-                  </a>
-                </div>
-              )}
-            </div>
+            <Link
+              href={`${APP_URL}/login`}
+              className="guest-login-btn"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                background: 'var(--color-accent, #6366f1)',
+                color: '#fff',
+                fontWeight: 600,
+                fontSize: '14px',
+                textDecoration: 'none',
+              }}
+            >
+              <LogIn size={16} />
+              Accedi
+            </Link>
           </div>
         </header>
 
-        <main
-          className={`dashboard-content dashboard-content-client${
-            isMessagesRoute ? ' dashboard-content-client-messages' : ''
-          }`}
-        >
+        <main className="dashboard-content dashboard-content-client">
           {children}
           <div className="mobile-content-spacer" aria-hidden="true" />
         </main>
