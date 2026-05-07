@@ -187,7 +187,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
 
                 <div className="guest-sidebar-plan">
                   <strong>👨‍💼 Consulente BNDO — 400€</strong>
-                  <p>Consulente dedicato dalla verifica all'erogazione. Supporto personalizzato completo, review documentale e affiancamento continuo.</p>
+                  <p>Consulente dedicato dalla verifica all&apos;erogazione. Supporto personalizzato completo, review documentale e affiancamento continuo.</p>
                 </div>
 
                 <div className="guest-sidebar-plan">
