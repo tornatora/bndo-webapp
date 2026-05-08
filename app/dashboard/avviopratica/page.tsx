@@ -245,12 +245,12 @@ export default function AvvioPraticaPage() {
         .avvio-pratica-title {
           font-size: 28px;
           font-weight: 700;
-          color: var(--color-text, #111);
+          color: var(--text);
           margin: 0 0 12px;
         }
         .avvio-pratica-subtitle {
           font-size: 16px;
-          color: var(--color-text-secondary, #555);
+          color: var(--text-light);
           margin: 0;
           line-height: 1.5;
         }
@@ -266,21 +266,21 @@ export default function AvvioPraticaPage() {
           text-align: center;
           padding: 32px 24px;
           border-radius: 16px;
-          border: 2px solid var(--color-border, #e5e7eb);
-          background: var(--color-surface, #fff);
+          border: 2px solid var(--border);
+          background: var(--bg);
           cursor: pointer;
           transition: all 0.2s ease;
           font-family: inherit;
           width: 100%;
         }
         .avvio-pratica-card:hover {
-          border-color: var(--color-accent, #6366f1);
-          box-shadow: 0 4px 20px rgba(99, 102, 241, 0.1);
+          border-color: #22c55f;
+          box-shadow: 0 4px 20px rgba(34, 197, 94, 0.1);
           transform: translateY(-2px);
         }
         .avvio-pratica-card.is-selected {
-          border-color: var(--color-accent, #6366f1);
-          box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+          border-color: #22c55f;
+          box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
         }
         .avvio-pratica-card-badge {
           width: 52px;
@@ -289,21 +289,21 @@ export default function AvvioPraticaPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: var(--color-accent-light, #eef2ff);
-          color: var(--color-accent, #6366f1);
+          background: rgba(34, 197, 94, 0.1);
+          color: #22c55f;
           margin-bottom: 16px;
         }
         .avvio-pratica-card-title {
           font-size: 17px;
           font-weight: 600;
-          color: var(--color-text, #111);
+          color: var(--text);
           margin: 0 0 8px;
           line-height: 1.3;
         }
         .avvio-pratica-card-price {
           font-size: 28px;
           font-weight: 700;
-          color: var(--color-accent, #6366f1);
+          color: #22c55f;
           margin-bottom: 16px;
         }
         .avvio-pratica-card-features {
@@ -320,12 +320,12 @@ export default function AvvioPraticaPage() {
           align-items: center;
           gap: 8px;
           font-size: 13px;
-          color: var(--color-text-secondary, #555);
+          color: var(--text-light);
           text-align: left;
         }
         .avvio-pratica-card-features li svg {
           flex-shrink: 0;
-          color: #22c55e;
+          color: var(--green);
         }
         .avvio-pratica-card-action {
           display: flex;
@@ -333,7 +333,7 @@ export default function AvvioPraticaPage() {
           gap: 6px;
           font-size: 14px;
           font-weight: 600;
-          color: var(--color-accent, #6366f1);
+          color: #22c55f;
           margin-top: auto;
         }
         .avvio-pratica-footer {
@@ -343,7 +343,7 @@ export default function AvvioPraticaPage() {
           gap: 8px;
           margin-top: 40px;
           font-size: 13px;
-          color: var(--color-text-secondary, #888);
+          color: var(--text-light);
         }
 
         /* Modal */
@@ -358,7 +358,7 @@ export default function AvvioPraticaPage() {
           padding: 24px;
         }
         .avvio-pratica-modal {
-          background: var(--color-surface, #fff);
+          background: var(--bg);
           border-radius: 16px;
           padding: 32px;
           max-width: 420px;
@@ -371,7 +371,7 @@ export default function AvvioPraticaPage() {
         }
         .avvio-pratica-modal-desc {
           font-size: 14px;
-          color: var(--color-text-secondary, #555);
+          color: var(--text-light);
           margin: 0 0 24px;
           line-height: 1.5;
         }
@@ -383,22 +383,22 @@ export default function AvvioPraticaPage() {
           font-size: 13px;
           font-weight: 600;
           margin-bottom: 6px;
-          color: var(--color-text, #111);
+          color: var(--text);
         }
         .avvio-pratica-modal-field input {
           width: 100%;
           padding: 10px 14px;
           border-radius: 10px;
-          border: 1.5px solid var(--color-border, #d1d5db);
+          border: 1.5px solid var(--border);
           font-size: 15px;
-          background: var(--color-surface, #fff);
-          color: var(--color-text, #111);
+          background: var(--bg);
+          color: var(--text);
           outline: none;
           transition: border-color 0.15s ease;
           box-sizing: border-box;
         }
         .avvio-pratica-modal-field input:focus {
-          border-color: var(--color-accent, #6366f1);
+          border-color: #22c55f;
         }
         .avvio-pratica-modal-error {
           font-size: 13px;
@@ -410,7 +410,7 @@ export default function AvvioPraticaPage() {
           padding: 12px;
           border-radius: 10px;
           border: none;
-          background: var(--color-accent, #6366f1);
+          background: #22c55f;
           color: #fff;
           font-size: 15px;
           font-weight: 600;
@@ -433,7 +433,7 @@ export default function AvvioPraticaPage() {
           text-align: center;
         }
         .avvio-pratica-modal-success svg {
-          color: #22c55e;
+          color: var(--green);
           margin-bottom: 16px;
         }
         .avvio-pratica-modal-success h3 {
@@ -443,7 +443,7 @@ export default function AvvioPraticaPage() {
         }
         .avvio-pratica-modal-success p {
           font-size: 14px;
-          color: var(--color-text-secondary, #555);
+          color: var(--text-light);
           margin: 0;
         }
         .spin {

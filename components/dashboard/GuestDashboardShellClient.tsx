@@ -209,7 +209,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
                   gap: '6px',
                   padding: '10px 18px',
                   borderRadius: '8px',
-                  background: 'var(--color-accent, #6366f1)',
+                  background: '#22c55f',
                   color: '#fff',
                   fontWeight: 600,
                   fontSize: '13px',
@@ -255,7 +255,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
                 gap: '6px',
                 padding: '8px 16px',
                 borderRadius: '8px',
-                background: 'var(--color-accent, #6366f1)',
+                background: '#22c55f',
                 color: '#fff',
                 fontWeight: 600,
                 fontSize: '14px',
@@ -297,7 +297,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
       <style>{`
         .guest-sidebar-explanations {
           padding: 12px 0;
-          border-top: 1px solid var(--color-border-light, rgba(255,255,255,0.08));
+          border-top: 1px solid rgba(255,255,255,0.08);
           margin-top: 8px;
           overflow-y: auto;
           flex: 1;
@@ -308,7 +308,7 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.06em;
-          color: var(--color-text-secondary, #888);
+          color: var(--text-light);
           margin: 0 0 10px;
           padding: 0 16px;
         }
@@ -320,25 +320,25 @@ export function GuestDashboardShellClient({ children }: GuestDashboardShellClien
           display: block;
           font-size: 13px;
           font-weight: 600;
-          color: var(--color-text, #fff);
+          color: #fff;
           margin-bottom: 3px;
         }
         .guest-sidebar-plan p {
           font-size: 12px;
           line-height: 1.5;
-          color: var(--color-text-secondary, #999);
+          color: var(--text-light);
           margin: 0;
         }
         .guest-sidebar-summary {
           padding: 12px 16px;
           margin: 8px 12px 0;
           border-radius: 8px;
-          background: rgba(99, 102, 241, 0.1);
+          background: rgba(34, 197, 94, 0.1);
         }
         .guest-sidebar-summary p {
           font-size: 12px;
           line-height: 1.5;
-          color: var(--color-text, #ddd);
+          color: var(--text-light);
           margin: 0;
         }
         .sidebar-bottom {
