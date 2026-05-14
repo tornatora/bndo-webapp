@@ -139,8 +139,6 @@ export default async function ConsultantDetailPage({ params }: { params: Params 
                     background: '#FAFBFC', textDecoration: 'none', color: '#0B1136',
                     fontSize: 12, transition: 'all .15s',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#F1F2F4'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#FAFBFC'; }}
                 >
                   <span style={{ flex: 1, fontWeight: 500 }}>{app.companies?.name || '—'}</span>
                   <span style={{ color: 'rgba(11,17,54,0.4)' }}>

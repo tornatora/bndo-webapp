@@ -79,8 +79,6 @@ export default async function AdminConsultantsPage() {
                 color: '#0B1136',
                 transition: 'all .15s',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(11,17,54,0.15)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(11,17,54,0.06)'; e.currentTarget.style.boxShadow = 'none'; }}
             >
               <span style={{
                 width: 38, height: 38, borderRadius: 10,
