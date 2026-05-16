@@ -829,7 +829,7 @@ export default async function AdminClientDetailPage({
               <span>Chat con Cliente</span>
             </div>
 
-            {!threadId ? (
+            {!threadId || !profile ? (
               <div className="empty-state">
                 <div className="empty-icon">💬</div>
                 <p className="empty-text">Impossibile creare/aprire il thread chat per questa azienda.</p>

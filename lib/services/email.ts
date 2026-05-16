@@ -136,7 +136,7 @@ async function sendViaResend(
   }
 }
 
-async function sendEmail(
+export async function sendEmail(
   to: string[],
   subject: string,
   text: string,
