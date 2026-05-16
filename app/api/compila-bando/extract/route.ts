@@ -313,7 +313,7 @@ function extractFromVisuraText(text: string): Partial<ExtractedPayload> {
 }
 
 function getDeepseekClient(): OpenAI | null {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const apiKey = process.env.DEEPSEEK_API_KEY2?.trim();
   if (!apiKey) return null;
   return new OpenAI({
     apiKey,

@@ -19,8 +19,8 @@ async function loadBrowserbaseCtor() {
 }
 
 async function main() {
-  if (!process.env.BROWSERBASE_API_KEY) {
-    throw new Error('BROWSERBASE_API_KEY mancante.');
+  if (!process.env.BROWSERBASE_API_KEY2) {
+    throw new Error('BROWSERBASE_API_KEY2 mancante.');
   }
 
   const zipPath = path.join(process.cwd(), 'extensions', 'bndo-extension.zip');
@@ -33,7 +33,7 @@ async function main() {
   }
 
   const Browserbase = await loadBrowserbaseCtor();
-  const bb = new Browserbase({ apiKey: process.env.BROWSERBASE_API_KEY });
+  const bb = new Browserbase({ apiKey: process.env.BROWSERBASE_API_KEY2 });
 
   const created = await bb.extensions.create({
     file: fs.createReadStream(targetZipPath),

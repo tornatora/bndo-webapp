@@ -22,6 +22,11 @@ function resolveAllowedOrigin(request: NextRequest) {
       allowedHosts.add(originHost);
     }
 
+    // Allow all Netlify preview domains
+    if (originHost.endsWith('.netlify.app')) {
+      return origin;
+    }
+
     return allowedHosts.has(originHost) ? origin : null;
   } catch {
     return null;

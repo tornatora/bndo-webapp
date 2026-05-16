@@ -1,9 +1,14 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Sparkles, UserCircle, Video, ShieldCheck, ArrowRight, CheckCircle, Loader2 } from 'lucide-react';
 import { APP_URL } from '@/shared/lib';
+
+const BANDO_OPTIONS = [
+  { id: 'resto-al-sud-2-0', label: 'Resto al Sud 2.0', desc: 'Per nuove imprese in Abruzzo, Basilicata, Calabria, Campania, Molise, Puglia, Sardegna, Sicilia' },
+  { id: 'autoimpiego-centro-nord', label: 'Autoimpiego Centro Nord', desc: 'Per nuove imprese in Centro e Nord Italia' },
+] as const;
 
 type PlanKey = 'agent' | 'consultant' | 'videocall';
 
@@ -44,14 +49,29 @@ const PLAN_DATA: Record<PlanKey, { title: string; price: string; icon: typeof Sp
 };
 
 export default function AvvioPraticaPage() {
-  const searchParams = useSearchParams();
+  const sp = useSearchParams();
   const router = useRouter();
-  const email = searchParams.get('email');
-  const quizId = searchParams.get('quiz_id');
-  const nome = searchParams.get('nome');
+  const email = sp.get('email');
+  const quizId = sp.get('quiz_id');
+  const nome = sp.get('nome');
+  const bandoParam = sp.get('bando');
+
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/auth/session', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.resolve(null)))
+      .then((data) => {
+        setAuthenticated(data?.authenticated === true);
+      })
+      .catch(() => setAuthenticated(false))
+      .finally(() => setAuthLoading(false));
+  }, []);
 
   const [selectedPlan, setSelectedPlan] = useState<PlanKey | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showBandoChoice, setShowBandoChoice] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -62,6 +82,11 @@ export default function AvvioPraticaPage() {
     (plan: PlanKey) => {
       setSelectedPlan(plan);
       if (!email) {
+        // Dashboard user (already authenticated)
+        if (plan === 'consultant') {
+          setShowBandoChoice(true);
+          return;
+        }
         router.push('/quiz');
         return;
       }
@@ -69,6 +94,11 @@ export default function AvvioPraticaPage() {
     },
     [email, router]
   );
+
+  const handleBandoSelect = useCallback((bandoId: string) => {
+    setShowBandoChoice(false);
+    router.push(`/dashboard/pia-flow?bando=${bandoId}`);
+  }, [router]);
 
   const handleCreateAccount = useCallback(async () => {
     setPasswordError(null);
@@ -105,7 +135,7 @@ export default function AvvioPraticaPage() {
         const target = selectedPlan === 'agent'
           ? '/dashboard/new-practice?mode=chat'
           : selectedPlan === 'consultant'
-            ? '/dashboard/new-practice?mode=consultant'
+            ? `/dashboard/pia-flow?bando=${bandoParam || 'resto-al-sud-2-0'}`
             : '/dashboard/pratiche';
         window.location.href = target;
       }, 1500);
@@ -113,7 +143,7 @@ export default function AvvioPraticaPage() {
       setPasswordError('Errore di connessione. Riprova.');
       setIsCreatingAccount(false);
     }
-  }, [email, password, confirmPassword, nome, quizId, selectedPlan]);
+  }, [email, password, confirmPassword, nome, quizId, selectedPlan, bandoParam]);
 
   return (
     <div className="avvio-pratica-page">
@@ -124,10 +154,21 @@ export default function AvvioPraticaPage() {
         <p className="avvio-pratica-subtitle">
           Scegli come vuoi avviare la tua pratica per ottenere fino a <strong>200.000€ a fondo perduto</strong>
         </p>
+
+        {!authenticated && !authLoading && (
+          <div className="avvio-pratica-actions">
+            <a href={`/login${email ? `?next=/dashboard/avviopratica?email=${encodeURIComponent(email)}${bandoParam ? `&bando=${encodeURIComponent(bandoParam)}` : ''}` : ''}`} className="avvio-btn avvio-btn--primary">
+              Accedi
+            </a>
+            <a href="/esplora" className="avvio-btn avvio-btn--ghost">
+              Esplora piattaforma
+            </a>
+          </div>
+        )}
       </div>
 
       <div className="avvio-pratica-plans">
-        {(Object.entries(PLAN_DATA) as [PlanKey, typeof PLAN_DATA['agent']][]).map(([key, plan]) => {
+        {(Object.entries(PLAN_DATA) as [PlanKey, typeof PLAN_DATA['agent']][]).filter(([key]) => key !== 'agent').map(([key, plan]) => {
           const Icon = plan.icon;
           const isSelected = selectedPlan === key;
           return (
@@ -221,6 +262,38 @@ export default function AvvioPraticaPage() {
         </div>
       )}
 
+      {/* Bando selection modal for dashboard users */}
+      {showBandoChoice && (
+        <div className="avvio-pratica-overlay" onClick={() => setShowBandoChoice(false)}>
+          <div className="avvio-pratica-modal avvio-bando-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="avvio-pratica-modal-title">Scegli il bando</h3>
+            <p className="avvio-pratica-modal-desc">
+              Seleziona per quale bando vuoi avviare la pratica con un consulente BNDO.
+            </p>
+            <div className="avvio-bando-options">
+              {BANDO_OPTIONS.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  className="avvio-bando-card"
+                  onClick={() => handleBandoSelect(b.id)}
+                >
+                  <div className="avvio-bando-card-title">{b.label}</div>
+                  <div className="avvio-bando-card-desc">{b.desc}</div>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="avvio-bando-cancel"
+              onClick={() => setShowBandoChoice(false)}
+            >
+              Annulla
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Success state */}
       {accountCreated && (
         <div className="avvio-pratica-overlay">
@@ -254,10 +327,47 @@ export default function AvvioPraticaPage() {
           margin: 0;
           line-height: 1.5;
         }
+        .avvio-pratica-actions {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          margin-top: 20px;
+        }
+        .avvio-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 10px 24px;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 600;
+          font-family: inherit;
+          text-decoration: none;
+          transition: all 0.15s ease;
+        }
+        .avvio-btn--primary {
+          background: #0b1136;
+          color: #fff;
+          border: none;
+        }
+        .avvio-btn--primary:hover {
+          background: #1a2460;
+        }
+        .avvio-btn--ghost {
+          background: transparent;
+          color: #0b1136;
+          border: 1.5px solid #0b1136;
+        }
+        .avvio-btn--ghost:hover {
+          background: rgba(11,17,54,0.05);
+        }
         .avvio-pratica-plans {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(2, 1fr);
           gap: 24px;
+          max-width: 720px;
+          margin: 0 auto;
         }
         .avvio-pratica-card {
           display: flex;
@@ -451,6 +561,63 @@ export default function AvvioPraticaPage() {
         }
         @keyframes spin {
           to { transform: rotate(360deg); }
+        }
+
+        /* Bando selection */
+        .avvio-bando-modal {
+          max-width: 480px;
+        }
+        .avvio-bando-options {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+        .avvio-bando-card {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 20px;
+          border-radius: 12px;
+          border: 1.5px solid var(--border, #e5e7eb);
+          background: var(--bg, #fff);
+          cursor: pointer;
+          transition: all .2s ease;
+          font-family: inherit;
+          text-align: left;
+          width: 100%;
+        }
+        .avvio-bando-card:hover {
+          border-color: #0acf83;
+          box-shadow: 0 2px 12px rgba(10,207,131,.12);
+        }
+        .avvio-bando-card:active {
+          transform: scale(.98);
+        }
+        .avvio-bando-card-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: #0B1136;
+        }
+        .avvio-bando-card-desc {
+          font-size: 12px;
+          color: rgba(11,17,54,.55);
+          line-height: 1.5;
+        }
+        .avvio-bando-cancel {
+          background: none;
+          border: none;
+          color: rgba(11,17,54,.4);
+          font-size: 13px;
+          cursor: pointer;
+          font-family: inherit;
+          text-decoration: underline;
+          width: 100%;
+          text-align: center;
+          padding: 8px;
+        }
+        .avvio-bando-cancel:hover {
+          color: rgba(11,17,54,.6);
         }
 
         @media (max-width: 768px) {

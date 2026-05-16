@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { MockChatPanel } from '@/components/admin/MockChatPanel';
 import { RequestDocumentsModal } from '@/components/admin/RequestDocumentsModal';
 import { ChatPanel } from '@/components/dashboard/ChatPanel';
-import { requireOpsProfile } from '@/lib/auth';
+import { getOptionalUserProfile } from '@/shared/api';
+import { hasAdminAccess } from '@/lib/roles';
 import { createClient } from '@/lib/supabase/server';
 import { getClientSummary } from '@/lib/admin/client-summary';
 import { getMockClientDetail } from '@/lib/mock/data';
@@ -24,6 +25,17 @@ import { PreventiviSection } from '@/components/dashboard/PreventiviSection';
 const ParamsSchema = z.object({
   companyId: z.string().uuid()
 });
+
+function DetailFallback({ companyId }: { companyId: string }) {
+  return (
+    <div className="dashboard-shell-client admin-shell-admin">
+      <div style={{ padding: 40, textAlign: 'center', color: 'rgba(11,17,54,0.4)', fontSize: 13 }}>
+        <p>Impossibile caricare i dati del cliente.</p>
+        <a href="/admin/clients" style={{ color: '#0B1136', marginTop: 12, display: 'inline-block' }}>← Torna ai clienti</a>
+      </div>
+    </div>
+  );
+}
 
 function buildMockDocPreviewUrl(doc: { file_name: string; created_at: string }, companyName: string) {
   const body = [
@@ -419,62 +431,99 @@ export default async function AdminClientDetailPage({
     );
   }
 
-  const { profile } = await requireOpsProfile();
-  const supabase = createClient();
-
-  const summary = await getClientSummary(supabase, companyId);
-
-  const { data: existingThread } = await supabase
-    .from('consultant_threads')
-    .select('id')
-    .eq('company_id', companyId)
-    .limit(1)
-    .maybeSingle();
-
-  let threadId = existingThread?.id ?? null;
-
-  if (!threadId) {
-    const { data: createdThread, error } = await supabase
-      .from('consultant_threads')
-      .insert({ company_id: companyId })
-      .select('id')
-      .single();
-
-    if (!error && createdThread?.id) {
-      threadId = createdThread.id;
-    } else {
-      const { data: fallbackThread } = await supabase
-        .from('consultant_threads')
-        .select('id')
-        .eq('company_id', companyId)
-        .limit(1)
-        .maybeSingle();
-      threadId = fallbackThread?.id ?? null;
+  let profile = null as { id: string; role: string } | null;
+  try {
+    if (process.env.MOCK_BACKEND !== 'true') {
+      const bundle = await getOptionalUserProfile();
+      if (!bundle || !hasAdminAccess(bundle.profile.role)) {
+        return <DetailFallback companyId={companyId} />;
+      }
+      profile = bundle.profile;
     }
+  } catch (err) {
+    console.error('[admin/client-detail] Auth error:', err);
+    return <DetailFallback companyId={companyId} />;
   }
 
-  const { data: participant } = threadId
-    ? await supabase
-        .from('consultant_thread_participants')
-        .select('last_read_at')
-        .eq('thread_id', threadId)
-        .eq('profile_id', profile.id)
-        .maybeSingle()
-    : { data: null };
+  let supabase: ReturnType<typeof createClient> | null = null;
+  try {
+    supabase = createClient();
+  } catch (err) {
+    console.error('[admin/client-detail] Client error:', err);
+  }
 
-  const { data: initialMessages } = threadId
-    ? await supabase
-        .from('consultant_messages')
-        .select('id, thread_id, sender_profile_id, body, created_at')
-        .eq('thread_id', threadId)
-        .order('created_at', { ascending: true })
-        .limit(200)
-    : { data: [] };
+  if (!supabase) {
+    return <DetailFallback companyId={companyId} />;
+  }
 
-  // serviceOrder intentionally not loaded here anymore (scheda cliente is now editable form-first).
+  let summary: Awaited<ReturnType<typeof getClientSummary>> | null = null;
+  try {
+    summary = await getClientSummary(supabase, companyId);
+  } catch (err) {
+    console.error('[admin/client-detail] Summary error:', err);
+  }
+
+  let threadId: string | null = null;
+  let participant: { last_read_at: string | null } | null = null;
+  let initialMessages: any[] = [];
+  try {
+    const { data: existingThread } = await supabase
+      .from('consultant_threads')
+      .select('id')
+      .eq('company_id', companyId)
+      .limit(1)
+      .maybeSingle();
+
+    threadId = existingThread?.id ?? null;
+
+    if (!threadId) {
+      const { data: createdThread, error } = await supabase
+        .from('consultant_threads')
+        .insert({ company_id: companyId })
+        .select('id')
+        .single();
+
+      if (!error && createdThread?.id) {
+        threadId = createdThread.id;
+      } else {
+        const { data: fallbackThread } = await supabase
+          .from('consultant_threads')
+          .select('id')
+          .eq('company_id', companyId)
+          .limit(1)
+          .maybeSingle();
+        threadId = fallbackThread?.id ?? null;
+      }
+    }
+
+    if (threadId && profile) {
+      const [pRes, mRes] = await Promise.all([
+        supabase
+          .from('consultant_thread_participants')
+          .select('last_read_at')
+          .eq('thread_id', threadId)
+          .eq('profile_id', profile.id)
+          .maybeSingle(),
+        supabase
+          .from('consultant_messages')
+          .select('id, thread_id, sender_profile_id, body, created_at')
+          .eq('thread_id', threadId)
+          .order('created_at', { ascending: true })
+          .limit(200)
+      ]);
+      participant = pRes.data;
+      initialMessages = mRes.data ?? [];
+    }
+  } catch (err) {
+    console.error('[admin/client-detail] Thread/messages error:', err);
+  }
 
   const selectedPracticeId = activeTab.startsWith('practice:') ? activeTab.split(':')[1] : null;
-  const selectedPractice = selectedPracticeId ? summary.applications.find((p) => p.id === selectedPracticeId) ?? null : null;
+  const selectedPractice = selectedPracticeId && summary ? summary.applications.find((p) => p.id === selectedPracticeId) ?? null : null;
+
+  if (!summary) {
+    return <DetailFallback companyId={companyId} />;
+  }
 
   return (
     <div className="dashboard-shell-client admin-shell-admin">

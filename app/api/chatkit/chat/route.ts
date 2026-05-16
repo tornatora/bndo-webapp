@@ -3,7 +3,13 @@ import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
 
-const openai = new OpenAI();
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY non configurata.');
+  }
+  return new OpenAI({ apiKey });
+}
 
 const AGENT_INSTRUCTIONS = `Sei l'assistente ufficiale di BNDO, una piattaforma specializzata in finanza agevolata.
 
@@ -234,7 +240,8 @@ export async function POST(request: Request) {
           let fullText = '';
           let responseId: string | null = null;
 
-          const response = await openai.responses.create({
+          const client = getOpenAIClient();
+          const response = await client.responses.create({
             model: process.env.OPENAI_CHATKIT_MODEL || 'gpt-5.4-mini',
             instructions: AGENT_INSTRUCTIONS,
             input: message,

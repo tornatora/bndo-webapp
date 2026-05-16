@@ -1,5 +1,6 @@
 import { APP_URL, MARKETING_URL } from '@/shared/lib';
 
+/* Lite version — nav items for bndo.it + app.bndo.it */
 export type DashboardNavKey =
   | 'home'
   | 'pratiche'
@@ -8,7 +9,11 @@ export type DashboardNavKey =
   | 'messaggi'
   | 'profilo'
   | 'avvio_pratica'
-  | 'new_practice';
+  | 'new_practice'
+  | 'chat_consulente'
+  | 'chat_bubble'
+  | 'chat_ai'
+  | 'monitor';
 
 export type DashboardShellItem = {
   key: DashboardNavKey;
@@ -54,6 +59,14 @@ export const routes = {
   admin: {
     root: '/admin',
     clients: '/admin/clients',
+    consultants: '/admin/consultants',
+    assignments: '/admin/assignments',
+    finance: '/admin/finance',
+    chatLog: '/admin/chat-log',
+    visits: '/admin/visits-traffic',
+    notifications: '/admin/notifications',
+    quizResponses: '/admin/quiz-responses',
+    audit: '/admin/audit',
   },
   api: {
     authLogin: '/api/auth/login',
@@ -63,7 +76,6 @@ export const routes = {
 
 const DASHBOARD_PUBLIC_SHELL_PATHS = new Set<string>([
   routes.dashboard.home,
-  routes.dashboard.chat,
   routes.dashboard.scanner,
   routes.dashboard.scannerLegacy,
   routes.dashboard.bandi,
@@ -92,15 +104,30 @@ export function buildLogoutPath(redirectTarget: string) {
   return `${routes.api.logout}?redirect=${encodeURIComponent(redirectTarget)}`;
 }
 
-export function getDashboardShellItems(): DashboardShellItem[] {
+/** Items for authenticated dashboard (app.bndo.it — sidebar blu) */
+export function getAuthShellItems(): DashboardShellItem[] {
   return [
     { key: 'home', label: 'Home', href: routes.dashboard.list, icon: 'home' },
-    { key: 'catalogo_bandi', label: 'Catalogo Bandi', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
+    { key: 'catalogo_bandi', label: 'Bandi Disponibili', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
+    { key: 'messaggi', label: 'Chat con il tuo consulente umano', href: routes.dashboard.messages, icon: 'messaggi' },
+    { key: 'chat_consulente', label: 'Chiedi all\'AI', href: routes.dashboard.chat, icon: 'chat_ai' },
+    { key: 'avvio_pratica', label: 'Avvio pratica', href: routes.dashboard.avvioPratica, icon: 'avvio_pratica' },
+    { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
+  ];
+}
+
+/** Items for guest/public dashboard (bndo.it — sidebar bianca) */
+export function getGuestShellItems(): DashboardShellItem[] {
+  return [
+    { key: 'catalogo_bandi', label: 'Bandi Disponibili', href: routes.dashboard.catalogoBandi, icon: 'catalogo_bandi' },
     { key: 'messaggi', label: 'Messaggi', href: routes.dashboard.messages, icon: 'messaggi' },
     { key: 'profilo', label: 'Profilo', href: routes.dashboard.profile, icon: 'profilo' },
-    { key: 'avvio_pratica', label: 'Avvio pratica', href: routes.dashboard.avvioPratica, icon: 'avvio_pratica' },
-    { key: 'new_practice', label: 'Nuova pratica', href: routes.dashboard.newPractice, icon: 'new_practice' },
   ];
+}
+
+/** Keep for backward compat — same as auth for now */
+export function getDashboardShellItems(): DashboardShellItem[] {
+  return getAuthShellItems();
 }
 
 export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
@@ -130,6 +157,7 @@ export function resolveDashboardNavKey(pathname: string): DashboardNavKey {
   }
   if (normalizedPathname.startsWith(routes.dashboard.avvioPratica)) return 'avvio_pratica';
   if (normalizedPathname.startsWith(routes.dashboard.newPractice)) return 'new_practice';
+  if (normalizedPathname === routes.dashboard.chat) return 'chat_consulente';
   return 'messaggi';
 }
 

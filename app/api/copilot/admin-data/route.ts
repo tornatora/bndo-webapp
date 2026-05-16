@@ -86,7 +86,7 @@ function normalizeDomain(value: string) {
 }
 
 function createHealthCheckPayload() {
-  const hasBrowserbase = Boolean(process.env.BROWSERBASE_API_KEY && process.env.BROWSERBASE_PROJECT_ID);
+  const hasBrowserbase = Boolean(process.env.BROWSERBASE_API_KEY2 && process.env.BROWSERBASE_PROJECT_ID);
   const hasExtension = Boolean(process.env.BROWSERBASE_EXTENSION_ID);
   const hasWorkerHook = Boolean(process.env.COPILOT_WORKER_WEBHOOK_URL);
 

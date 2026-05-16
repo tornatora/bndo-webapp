@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 
 type CatalogItem = {
   grantId: string;
@@ -94,6 +95,8 @@ type BandiCatalogViewProps = {
   title?: string;
   subtitle?: string;
   onOpenDetail?: (grantId: string) => void;
+  /** When true, shows only the limited selection of bandi + coming-soon placeholders (lite version) */
+  limited?: boolean;
 };
 
 function formatDeadline(value: string | null): string {
@@ -103,10 +106,69 @@ function formatDeadline(value: string | null): string {
   return `Scadenza: ${date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 }
 
+// --- Limited mode bandi ---
+
+type LimitedBandoCard = {
+  id: string;
+  title: string;
+  authorityName: string;
+  isComingSoon: boolean;
+  href: string;
+};
+
+const LIMITED_ACTIVE_BANDI: LimitedBandoCard[] = [
+  {
+    id: 'autoimpiego-centro-nord',
+    title: 'Autoimpiego Centro Nord',
+    authorityName: 'Invitalia',
+    isComingSoon: false,
+    href: '/quiz/autoimpiego',
+  },
+  {
+    id: 'resto-al-sud-20',
+    title: 'Resto al Sud 2.0',
+    authorityName: 'Invitalia',
+    isComingSoon: false,
+    href: '/quiz/autoimpiego',
+  },
+];
+
+const LIMITED_COMING_SOON_BANDI: LimitedBandoCard[] = [
+  {
+    id: 'on-tasso-zero',
+    title: 'ON - Oltre Nuove Imprese a Tasso Zero',
+    authorityName: 'Invitalia',
+    isComingSoon: true,
+    href: '#',
+  },
+  {
+    id: 'smart-start',
+    title: 'Smart&Start Italia',
+    authorityName: 'Invitalia',
+    isComingSoon: true,
+    href: '#',
+  },
+  {
+    id: 'nuova-sabatini',
+    title: 'Nuova Sabatini',
+    authorityName: 'MIMIT',
+    isComingSoon: true,
+    href: '#',
+  },
+  {
+    id: 'fusese',
+    title: 'FUSESE',
+    authorityName: 'Programma europeo',
+    isComingSoon: true,
+    href: '#',
+  },
+];
+
 export function BandiCatalogView({
-  title = 'Catalogo Bandi',
+  title = 'Bandi Disponibili',
   subtitle = 'Tutti i bandi attivi da fonti italiane',
   onOpenDetail,
+  limited = true,
 }: BandiCatalogViewProps) {
   const [items, setItems] = useState<CatalogItem[]>(() => catalogBootstrapData?.items ?? []);
   const [page, setPage] = useState(() => catalogBootstrapData?.page ?? 1);
@@ -216,6 +278,7 @@ export function BandiCatalogView({
   }, [onOpenDetail]);
 
   useEffect(() => {
+    if (limited) return; // No API fetching in limited mode
     let cancelled = false;
 
     const boot = async () => {
@@ -246,8 +309,150 @@ export function BandiCatalogView({
     return () => {
       cancelled = true;
     };
-  }, [fetchPage, applyCatalogPayload]);
+  }, [fetchPage, applyCatalogPayload, limited]);
 
+  // --- LIMITED MODE RENDER ---
+  if (limited) {
+    const displayTitle = 'Bandi attualmente disponibili su BNDO';
+    const displaySubtitle = 'Seleziona un bando per verificare i requisiti e avviare la pratica.';
+
+    return (
+      <div className="content-stage mobile-menu-safe catalog-content-stage">
+        <div className="page-head">
+          <div className="page-title">{displayTitle}</div>
+          <div className="page-sub">{displaySubtitle}</div>
+        </div>
+
+        <div className="catalog-limited-grid">
+          {/* Active bandi */}
+          {LIMITED_ACTIVE_BANDI.map((bando) => (
+            <Link
+              key={bando.id}
+              href={bando.href}
+              className="catalog-limited-card catalog-limited-card--active"
+            >
+              <div className="catalog-limited-card-badge">Attivo</div>
+              <h3 className="catalog-limited-card-title">{bando.title}</h3>
+              <p className="catalog-limited-card-authority">{bando.authorityName}</p>
+              <p className="catalog-limited-card-desc">
+                Verifica i requisiti e avvia la tua pratica per ottenere fino a 200.000€ a fondo perduto.
+              </p>
+              <div className="catalog-limited-card-action">
+                <span>Verifica requisiti</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </div>
+            </Link>
+          ))}
+
+          {/* Coming soon bandi */}
+          {LIMITED_COMING_SOON_BANDI.map((bando) => (
+            <div
+              key={bando.id}
+              className="catalog-limited-card catalog-limited-card--coming-soon"
+            >
+              <div className="catalog-limited-card-badge catalog-limited-card-badge--soon">COMING SOON</div>
+              <h3 className="catalog-limited-card-title">{bando.title}</h3>
+              <p className="catalog-limited-card-authority">{bando.authorityName}</p>
+              <p className="catalog-limited-card-desc">
+                Non ancora disponibile. Torneremo presto con questo bando.
+              </p>
+              <div className="catalog-limited-card-action catalog-limited-card-action--soon">
+                <span>Prossimamente</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <style>{`
+          .catalog-limited-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 24px;
+            margin-top: 24px;
+          }
+          .catalog-limited-card {
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            border-radius: 16px;
+            border: 2px solid var(--border);
+            background: var(--bg);
+            transition: all 0.2s ease;
+            text-decoration: none;
+            color: inherit;
+          }
+          .catalog-limited-card--active {
+            border-color: var(--green);
+            cursor: pointer;
+          }
+          .catalog-limited-card--active:hover {
+            box-shadow: 0 4px 20px rgba(34, 197, 94, 0.15);
+            transform: translateY(-2px);
+          }
+          .catalog-limited-card--coming-soon {
+            border-color: var(--border);
+            background: #f8f8f8;
+            opacity: 0.7;
+            cursor: default;
+          }
+          .catalog-limited-card-badge {
+            display: inline-block;
+            align-self: flex-start;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-bottom: 12px;
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--green);
+          }
+          .catalog-limited-card-badge--soon {
+            background: rgba(156, 163, 175, 0.15);
+            color: #9ca3af;
+          }
+          .catalog-limited-card-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin: 0 0 4px;
+            line-height: 1.3;
+            color: var(--text);
+          }
+          .catalog-limited-card-authority {
+            font-size: 13px;
+            color: var(--text-light);
+            margin: 0 0 12px;
+          }
+          .catalog-limited-card-desc {
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-light);
+            margin: 0 0 16px;
+            flex: 1;
+          }
+          .catalog-limited-card-action {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--green);
+          }
+          .catalog-limited-card-action--soon {
+            color: #9ca3af;
+          }
+          body.dark .catalog-limited-card--coming-soon {
+            background: rgba(255,255,255,0.03);
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // --- FULL MODE RENDER (original) ---
   return (
     <div className="content-stage mobile-menu-safe catalog-content-stage">
       <div className="page-head">

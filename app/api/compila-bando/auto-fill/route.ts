@@ -179,7 +179,7 @@ export async function POST(req: Request) {
         }
       }
     } else {
-      providerError = 'BROWSERBASE_API_KEY non configurata.';
+      providerError = 'BROWSERBASE_API_KEY2 non configurata.';
     }
 
     if (!providerError) {

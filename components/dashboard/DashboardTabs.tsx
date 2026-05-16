@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
   buildLogoutPath,
-  getDashboardShellItems,
+  getAuthShellItems,
   resolveAssistantHomeUrl,
   resolveDashboardNavKey,
   type DashboardShellItem,
@@ -44,6 +44,14 @@ function DashboardIcon({ name }: { name: DashboardShellItem['icon'] }) {
   if (name === 'messaggi') {
     return (
       <svg {...common}>
+        <rect x="2" y="4" width="20" height="16" rx="2" {...stroke} />
+        <path {...stroke} d="M22 6l-10 7L2 6" />
+      </svg>
+    );
+  }
+  if (name === 'chat_bubble') {
+    return (
+      <svg {...common}>
         <path {...stroke} d="M7 18l-3 3V6.5A3.5 3.5 0 0 1 7.5 3h9A3.5 3.5 0 0 1 20 6.5v7A3.5 3.5 0 0 1 16.5 17H7Z" />
         <path {...stroke} d="M8 8h8M8 11.5h6" />
       </svg>
@@ -55,6 +63,24 @@ function DashboardIcon({ name }: { name: DashboardShellItem['icon'] }) {
         <path {...stroke} d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v12H9.7A2.7 2.7 0 0 0 7 21.7V4.5Z" />
         <path {...stroke} d="M7 19h12.5" />
         <path {...stroke} d="M10 9h6.5M10 12h6.5M10 15h4.5" />
+      </svg>
+    );
+  }
+  if (name === 'avvio_pratica') {
+    return (
+      <svg {...common}>
+        <path {...stroke} d="M4 14c0-3 2-6 5-6" />
+        <path {...stroke} d="M20 14c0-3-2-6-5-6" />
+        <path {...stroke} d="M12 8l-4 4 4 3 4-3-4-4z" />
+      </svg>
+    );
+  }
+  if (name === 'monitor') {
+    return (
+      <svg {...common}>
+        <rect x="2" y="4" width="20" height="13" rx="2" {...stroke} />
+        <path {...stroke} d="M8 21h8" />
+        <path {...stroke} d="M12 17v4" />
       </svg>
     );
   }
@@ -70,7 +96,7 @@ export function DashboardTabs() {
   const pathname = usePathname();
   const activeKey = resolveDashboardNavKey(pathname);
   const [open, setOpen] = useState(true);
-  const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
+  const items = useMemo<DashboardShellItem[]>(() => getAuthShellItems(), []);
 
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('bndo-dashboard-sidebar-open') : null;

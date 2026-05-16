@@ -8,7 +8,7 @@ import { LogOut, User, ChevronDown } from 'lucide-react';
 import { NotificationsBell } from '@/components/dashboard/NotificationsBell';
 import {
   buildLogoutPath,
-  getDashboardShellItems,
+  getAuthShellItems,
   resolveAssistantHomeUrl,
   resolveDashboardNavKey,
   type DashboardShellItem,
@@ -54,6 +54,14 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
   if (name === 'messaggi') {
     return (
       <svg {...common}>
+        <rect x="2" y="4" width="20" height="16" rx="2" {...stroke} />
+        <path {...stroke} d="M22 6l-10 7L2 6" />
+      </svg>
+    );
+  }
+  if (name === 'chat_bubble') {
+    return (
+      <svg {...common}>
         <path {...stroke} d="M7 18l-3 3V6.5A3.5 3.5 0 0 1 7.5 3h9A3.5 3.5 0 0 1 20 6.5v7A3.5 3.5 0 0 1 16.5 17H7Z" />
         <path {...stroke} d="M8 8h8M8 11.5h6" />
       </svg>
@@ -67,11 +75,48 @@ const Icon = memo(function Icon({ name }: { name: DashboardShellItem['icon'] }) 
       </svg>
     );
   }
+  if (name === 'monitor') {
+    return (
+      <svg {...common}>
+        <rect x="2" y="4" width="20" height="13" rx="2" {...stroke} />
+        <path {...stroke} d="M8 21h8" />
+        <path {...stroke} d="M12 17v4" />
+      </svg>
+    );
+  }
+  if (name === 'chat_ai') {
+    return (
+      <svg {...common} stroke="none">
+        {/* Antenna */}
+        <path d="M12 1.5v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="12" cy="1.5" r="1.3" fill="currentColor" />
+        {/* Head */}
+        <rect x="4" y="4.5" width="16" height="11" rx="3.5" stroke="currentColor" strokeWidth="2" fill="none" />
+        {/* Eyes */}
+        <circle cx="9" cy="9.5" r="2.2" fill="currentColor" />
+        <circle cx="15" cy="9.5" r="2.2" fill="currentColor" />
+        {/* Eye shine */}
+        <circle cx="8.2" cy="8.7" r="0.7" fill="white" />
+        <circle cx="14.2" cy="8.7" r="0.7" fill="white" />
+        {/* Mouth */}
+        <path d="M10 12.5a3 3 0 0 0 4 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+        {/* Ears */}
+        <rect x="2.5" y="8" width="2" height="4.5" rx="0.8" fill="currentColor" />
+        <rect x="19.5" y="8" width="2" height="4.5" rx="0.8" fill="currentColor" />
+        {/* Neck */}
+        <rect x="10.5" y="15" width="3" height="1.5" rx="0.3" stroke="currentColor" strokeWidth="1.5" fill="none" />
+        {/* Body */}
+        <path d="M7.5 16.5h9a1 1 0 0 1 1 1v4.5H6.5v-4.5a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.5" fill="none" />
+        {/* Chest LED */}
+        <circle cx="12" cy="19.5" r="1" fill="currentColor" />
+      </svg>
+    );
+  }
   if (name === 'avvio_pratica') {
     return (
       <svg {...common}>
-        <circle cx="12" cy="12" r="9" {...stroke} />
-        <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="8.5" {...stroke} />
+        <path {...stroke} d="M8 12h7M12 8.5l3.5 3.5-3.5 3.5" />
       </svg>
     );
   }
@@ -124,7 +169,7 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const items = useMemo<DashboardShellItem[]>(() => getDashboardShellItems(), []);
+  const items = useMemo<DashboardShellItem[]>(() => getAuthShellItems(), []);
 
   const onLogoutIntent = (event: MouseEvent<HTMLAnchorElement>) => {
     if (typeof window === 'undefined') return;
@@ -313,18 +358,16 @@ export function DashboardShellClient({ children, username, viewerProfileId }: Da
       <nav className="mobile-tabs" aria-label="Navigazione mobile dashboard">
         {items.map((item) =>
           item.external ? (
-            <a key={item.key} className="mobile-tab" href={item.href}>
+            <a key={item.key} className={`mobile-tab ${activeKey === item.key ? 'active' : ''}`} href={item.href} title={item.label}>
               <span className="mobile-tab-icon" aria-hidden="true">
                 <Icon name={item.icon} />
               </span>
-              <span className="mobile-tab-label">{item.label}</span>
             </a>
           ) : (
-            <Link key={item.key} className={`mobile-tab ${activeKey === item.key ? 'active' : ''}`} href={item.href}>
+            <Link key={item.key} className={`mobile-tab ${activeKey === item.key ? 'active' : ''}`} href={item.href} title={item.label}>
               <span className="mobile-tab-icon" aria-hidden="true">
                 <Icon name={item.icon} />
               </span>
-              <span className="mobile-tab-label">{item.label}</span>
             </Link>
           )
         )}

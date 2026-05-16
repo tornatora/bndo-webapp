@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { DashboardShellClient } from '@/components/dashboard/DashboardShellClient';
 import { GuestDashboardShellClient } from '@/components/dashboard/GuestDashboardShellClient';
-import { isPublicDashboardShellPath, routes } from '@/shared/config';
+import { isPublicDashboardShellPath } from '@/shared/config';
 
 type DashboardShellBoundaryProps = {
   children: React.ReactNode;
@@ -15,13 +15,8 @@ type DashboardShellBoundaryProps = {
 
 export function DashboardShellBoundary({ children, shellProfile }: DashboardShellBoundaryProps) {
   const pathname = usePathname();
-  const isGuestAvvioPratica = pathname === routes.dashboard.avvioPratica || pathname.startsWith(routes.dashboard.avvioPratica + '?');
-
   if (!shellProfile) {
-    if (isGuestAvvioPratica) {
-      return <GuestDashboardShellClient>{children}</GuestDashboardShellClient>;
-    }
-    return <>{children}</>;
+    return <GuestDashboardShellClient>{children}</GuestDashboardShellClient>;
   }
 
   if (isPublicDashboardShellPath(pathname)) {

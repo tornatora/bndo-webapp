@@ -42,7 +42,7 @@ type BrowserbaseInstance = {
 };
 
 function hasBrowserbaseConfig() {
-  return Boolean(process.env.BROWSERBASE_API_KEY);
+  return Boolean(process.env.BROWSERBASE_API_KEY2);
 }
 
 export type BrowserbaseEnvValidation = {
@@ -55,16 +55,16 @@ export function validateBrowserbaseEnv(): BrowserbaseEnvValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const apiKey = (process.env.BROWSERBASE_API_KEY || '').trim();
+  const apiKey = (process.env.BROWSERBASE_API_KEY2 || '').trim();
   const projectId = (process.env.BROWSERBASE_PROJECT_ID || '').trim();
   const extensionId = (process.env.BROWSERBASE_EXTENSION_ID || '').trim();
   const region = (process.env.BROWSERBASE_REGION || '').trim();
 
   if (!apiKey) {
-    errors.push('BROWSERBASE_API_KEY mancante.');
+    errors.push('BROWSERBASE_API_KEY2 mancante.');
   }
   if (apiKey && !/^bb_(live|test)_/.test(apiKey)) {
-    warnings.push('BROWSERBASE_API_KEY ha formato inatteso.');
+    warnings.push('BROWSERBASE_API_KEY2 ha formato inatteso.');
   }
   if (!projectId) {
     warnings.push('BROWSERBASE_PROJECT_ID non impostata: il progetto verra inferito dalla API key.');
@@ -97,7 +97,7 @@ export async function createBrowserbaseClient(): Promise<BrowserbaseInstance> {
   }
 
   const BrowserbaseCtor = await importBrowserbaseSdk();
-  return new BrowserbaseCtor({ apiKey: process.env.BROWSERBASE_API_KEY });
+  return new BrowserbaseCtor({ apiKey: process.env.BROWSERBASE_API_KEY2 });
 }
 
 export async function createBrowserbaseSession(input: {

@@ -70,7 +70,7 @@ export default async function ConsultantPracticeDetailPage({
   const { data: application, error: applicationError } = await admin
     .from('tender_applications')
     .select(
-      'id, company_id, tender_id, status, supplier_registry_status, notes, updated_at, tender:tenders(title), company:companies(name)'
+      'id, company_id, tender_id, status, supplier_registry_status, notes, updated_at, bando_type, tender:tenders(title), company:companies(name)'
     )
     .eq('id', applicationId)
     .maybeSingle();
@@ -237,6 +237,21 @@ export default async function ConsultantPracticeDetailPage({
         : null;
   } catch {
     // CRM non disponibile
+  }
+
+  // Fetch PIA submission data
+  let piaSubmission: Record<string, any> | null = null;
+  if (application.bando_type) {
+    try {
+      const { data } = await admin
+        .from('pia_submissions')
+        .select('*')
+        .eq('application_id', applicationId)
+        .maybeSingle();
+      if (data) piaSubmission = data as unknown as Record<string, any>;
+    } catch {
+      // Tabella potrebbe non esistere ancora
+    }
   }
 
   const documentsWithLinks = await Promise.all(
@@ -421,6 +436,66 @@ export default async function ConsultantPracticeDetailPage({
           status: row.status
         }))}
       />
+
+      {/* Sezione PIA — dati questionario */}
+      {piaSubmission && (
+        <section className="section-card">
+          <div className="section-title">
+            <span>📋</span>
+            <span>Dati questionario PIA</span>
+          </div>
+          <div className="pia-submission-grid" style={{ marginTop: 8 }}>
+            {piaSubmission.bando_type && (
+              <div className="pia-grid-item">
+                <span className="pia-grid-label">Bando</span>
+                <span className="pia-grid-value">
+                  {piaSubmission.bando_type === 'resto-al-sud-2-0' ? 'Resto al Sud 2.0' : 'Autoimpiego Centro Nord'}
+                </span>
+              </div>
+            )}
+            {piaSubmission.completed_at && (
+              <div className="pia-grid-item">
+                <span className="pia-grid-label">Completato il</span>
+                <span className="pia-grid-value">{new Date(piaSubmission.completed_at).toLocaleString('it-IT')}</span>
+              </div>
+            )}
+
+            {/* DSAN Casellario */}
+            <div className="pia-grid-item full-width"><span className="pia-grid-section-label">DSAN — Casellario</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Condanne penali</span><span className="pia-grid-value">{piaSubmission.form_data?.dsanCondanne === 'si' ? 'Sì' : piaSubmission.form_data?.dsanCondanne === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.dsanCondanne === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.dsanCondanneDettaglio ?? '')}</span></div>}
+            <div className="pia-grid-item"><span className="pia-grid-label">Misure prevenzione</span><span className="pia-grid-value">{piaSubmission.form_data?.dsanMisurePrevenzione === 'si' ? 'Sì' : piaSubmission.form_data?.dsanMisurePrevenzione === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.dsanMisurePrevenzione === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.dsanMisureDettaglio ?? '')}</span></div>}
+            <div className="pia-grid-item"><span className="pia-grid-label">Procedure esecutive</span><span className="pia-grid-value">{piaSubmission.form_data?.dsanProcedureEsecutive === 'si' ? 'Sì' : piaSubmission.form_data?.dsanProcedureEsecutive === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.dsanProcedureEsecutive === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.dsanProcedureDettaglio ?? '')}</span></div>}
+
+            {/* Requisiti iniziativa */}
+            <div className="pia-grid-item full-width"><span className="pia-grid-section-label">Requisiti iniziativa</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Pieno esercizio</span><span className="pia-grid-value">{piaSubmission.form_data?.reqPienoEsercizio === 'si' ? 'Sì' : piaSubmission.form_data?.reqPienoEsercizio === 'no' ? 'No' : '-'}</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Procedure interdittive</span><span className="pia-grid-value">{piaSubmission.form_data?.reqProcedureInterdittive === 'si' ? 'Sì' : piaSubmission.form_data?.reqProcedureInterdittive === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.reqProcedureInterdittive === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.reqProcedureInterdittiveDettaglio ?? '')}</span></div>}
+            <div className="pia-grid-item"><span className="pia-grid-label">Costituita mese prec.</span><span className="pia-grid-value">{piaSubmission.form_data?.reqCostituitaMesePrecedente === 'si' ? 'Sì' : piaSubmission.form_data?.reqCostituitaMesePrecedente === 'no' ? 'No' : '-'}</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Variazioni societarie</span><span className="pia-grid-value">{piaSubmission.form_data?.reqVariazioniSocietarie === 'si' ? 'Sì' : piaSubmission.form_data?.reqVariazioniSocietarie === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.reqVariazioniSocietarie === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.reqVariazioniDettaglio ?? '')}</span></div>}
+
+            {/* De minimis */}
+            <div className="pia-grid-item full-width"><span className="pia-grid-section-label">De minimis</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Aiuti ricevuti</span><span className="pia-grid-value">{piaSubmission.form_data?.deMinimisRicevuti === 'si' ? 'Sì' : piaSubmission.form_data?.deMinimisRicevuti === 'no' ? 'No' : '-'}</span></div>
+
+            {/* Requisiti soggettivi */}
+            <div className="pia-grid-item full-width"><span className="pia-grid-section-label">Requisiti soggettivi</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Condizione lavorativa</span><span className="pia-grid-value">{String(piaSubmission.form_data?.reqCondizioneLavorativa ?? '-')}</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">ATECO identico</span><span className="pia-grid-value">{piaSubmission.form_data?.reqAtecoIdentico === 'si' ? 'Sì' : piaSubmission.form_data?.reqAtecoIdentico === 'no' ? 'No' : '-'}</span></div>
+
+            {/* Antiriciclaggio */}
+            <div className="pia-grid-item full-width"><span className="pia-grid-section-label">Antiriciclaggio</span></div>
+            <div className="pia-grid-item"><span className="pia-grid-label">Titolare coincide</span><span className="pia-grid-value">{piaSubmission.form_data?.aeTitolareCoincide === 'si' ? 'Sì' : piaSubmission.form_data?.aeTitolareCoincide === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.aeCriterio && <div className="pia-grid-item"><span className="pia-grid-label">Criterio</span><span className="pia-grid-value">{String(piaSubmission.form_data.aeCriterio)}</span></div>}
+            <div className="pia-grid-item"><span className="pia-grid-label">Conflitto interessi</span><span className="pia-grid-value">{piaSubmission.form_data?.aeConflittoInteressi === 'si' ? 'Sì' : piaSubmission.form_data?.aeConflittoInteressi === 'no' ? 'No' : '-'}</span></div>
+            {piaSubmission.form_data?.aeConflittoInteressi === 'si' && <div className="pia-grid-item full-width"><span className="pia-grid-label">Dettaglio</span><span className="pia-grid-value">{String(piaSubmission.form_data.aeConflittoDettaglio ?? '')}</span></div>}
+          </div>
+        </section>
+      )}
 
       {/* Sezione Preventivi */}
       <section className="section-card">

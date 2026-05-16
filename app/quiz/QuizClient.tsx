@@ -105,6 +105,7 @@ export default function QuizPage() {
   const [blockedFromStep, setBlockedFromStep] = useState<StepId | null>(null);
   const [pendingEarlyBlock, setPendingEarlyBlock] = useState<StepId | null>(null);
   const [lastSavedNonEligibleStep, setLastSavedNonEligibleStep] = useState<StepId | null>(null);
+  const [countdown, setCountdown] = useState(5);
 
   const progress = Math.round((progressMap[step] / 13) * 100);
   const region = answers.q3 ?? null;
@@ -204,6 +205,23 @@ export default function QuizPage() {
         canvasEl.parentNode.removeChild(canvasEl);
       }
     };
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== 'success') return;
+    setCountdown(5);
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          goToPracticePayment();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   function goTo(next: StepId) {
@@ -417,6 +435,7 @@ export default function QuizPage() {
     query.set('email', contact.email);
     query.set('quiz_id', latestSubmissionId);
     query.set('nome', fullName);
+    query.set('bando', isSouth ? 'resto-al-sud-2-0' : 'autoimpiego-centro-nord');
     window.location.href = `/dashboard/avviopratica?${query.toString()}`;
   }
 
@@ -856,8 +875,8 @@ export default function QuizPage() {
                 <p>
                   Avvia subito la pratica online: un consulente BNDO ti guiderà in ogni passaggio operativo.
                 </p>
-                <button type="button" className="btn-premium">
-                  Avvia la pratica online
+                <button type="button" className="btn-premium" disabled>
+                  Ti stiamo indirizzando alla tua dashboard... {countdown}
                 </button>
               </div>
 

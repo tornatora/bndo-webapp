@@ -30,9 +30,6 @@ export default async function DashboardPage() {
 
   const { profile } = await requireUserProfile();
 
-  if (hasAdminAccess(profile.role)) {
-    redirect('/admin');
-  }
   if (hasConsultantAccess(profile.role)) {
     redirect('/consultant');
   }

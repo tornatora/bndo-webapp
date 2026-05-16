@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import type { IncentiviDoc } from '@/lib/matching/types';
 
-const openai = new OpenAI(); // Automatically uses OPENAI_API_KEY from environment
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY non configurata per lo scraping.');
+  }
+  return new OpenAI({ apiKey });
+}
 
 // Schema definition for the expected JSON structured output
 const incentivesDocSchema = z.object({
@@ -59,7 +65,8 @@ Estrai le informazioni necessarie per creare l'IncentiviDoc strutturato.
   `;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const client = getOpenAIClient();
+    const completion = await client.chat.completions.create({
       model: 'gpt-4o-mini', // Fast, cheap, and very good at structured outputs
       messages: [
         { role: 'system', content: systemPrompt },

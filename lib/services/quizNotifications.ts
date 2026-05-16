@@ -93,9 +93,21 @@ export async function dispatchQuizSubmissionNotifications(input: QuizSubmissionN
   const roleRecipients = (opsProfiles ?? [])
     .map((profile) => String(profile.email ?? '').trim().toLowerCase())
     .filter(Boolean);
-  const recipients = Array.from(new Set([...roleRecipients, ...parseExtraRecipients()]));
+  const envRecipients = parseExtraRecipients();
+  const recipients = Array.from(new Set([...roleRecipients, ...envRecipients]));
+
+  // Diagnostic log
+  console.log('[QUIZ_NOTIFY_DIAG] recipients from profiles:', JSON.stringify(roleRecipients));
+  console.log('[QUIZ_NOTIFY_DIAG] recipients from env vars:', JSON.stringify(envRecipients));
+  console.log('[QUIZ_NOTIFY_DIAG] final recipients:', JSON.stringify(recipients));
+  console.log('[QUIZ_NOTIFY_DIAG] SMTP_HOST:', process.env.SMTP_HOST);
+  console.log('[QUIZ_NOTIFY_DIAG] SMTP_USER:', process.env.SMTP_USER);
+  console.log('[QUIZ_NOTIFY_DIAG] SMTP_PASS set:', Boolean(process.env.SMTP_PASS));
+  console.log('[QUIZ_NOTIFY_DIAG] RESEND_API_KEY set:', Boolean(process.env.RESEND_API_KEY));
+  console.log('[QUIZ_NOTIFY_DIAG] RESEND_FROM_EMAIL:', process.env.RESEND_FROM_EMAIL);
 
   if (recipients.length === 0) {
+    console.log('[QUIZ_NOTIFY_DIAG] no recipients, skipping email');
     return { notificationCreated: true, emailSent: false, emailSkipped: true };
   }
 
@@ -111,6 +123,8 @@ export async function dispatchQuizSubmissionNotifications(input: QuizSubmissionN
     adminLink,
     answers: input.answers
   });
+
+  console.log('[QUIZ_NOTIFY_DIAG] email result:', JSON.stringify(emailResult));
 
   return {
     notificationCreated: !notifResult.error,

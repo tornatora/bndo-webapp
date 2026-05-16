@@ -451,6 +451,7 @@ export type Database = {
           status: 'draft' | 'submitted' | 'reviewed';
           supplier_registry_status: 'pending' | 'in_progress' | 'completed';
           notes: string | null;
+          bando_type: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -461,6 +462,7 @@ export type Database = {
           status?: 'draft' | 'submitted' | 'reviewed';
           supplier_registry_status?: 'pending' | 'in_progress' | 'completed';
           notes?: string | null;
+          bando_type?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -471,6 +473,7 @@ export type Database = {
           status?: 'draft' | 'submitted' | 'reviewed';
           supplier_registry_status?: 'pending' | 'in_progress' | 'completed';
           notes?: string | null;
+          bando_type?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -937,6 +940,91 @@ export type Database = {
           created_at?: string;
         };
         Relationships: [];
+      };
+      pia_submissions: {
+        Row: {
+          id: string;
+          application_id: string;
+          user_id: string;
+          bando_type: string;
+          status: string;
+          contact_phone: string | null;
+          activity_confirmed: Json;
+          employment_status: Json;
+          criminal_precedents: Json;
+          public_aid: Json;
+          effective_owner: Json;
+          expense_plan: Json;
+          business_idea: string | null;
+          iban: string | null;
+          ordine_iscrizione: Json;
+          casellario_giudiziale: Json;
+          gdpr_consents: Json;
+          form_data: Json;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          application_id: string;
+          user_id: string;
+          bando_type: string;
+          status?: string;
+          contact_phone?: string | null;
+          activity_confirmed?: Json;
+          employment_status?: Json;
+          criminal_precedents?: Json;
+          public_aid?: Json;
+          effective_owner?: Json;
+          expense_plan?: Json;
+          business_idea?: string | null;
+          iban?: string | null;
+          ordine_iscrizione?: Json;
+          casellario_giudiziale?: Json;
+          gdpr_consents?: Json;
+          form_data?: Json;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          application_id?: string;
+          user_id?: string;
+          bando_type?: string;
+          status?: string;
+          contact_phone?: string | null;
+          activity_confirmed?: Json;
+          employment_status?: Json;
+          criminal_precedents?: Json;
+          public_aid?: Json;
+          effective_owner?: Json;
+          expense_plan?: Json;
+          business_idea?: string | null;
+          iban?: string | null;
+          ordine_iscrizione?: Json;
+          casellario_giudiziale?: Json;
+          gdpr_consents?: Json;
+          form_data?: Json;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'pia_submissions_application_id_fkey';
+            columns: ['application_id'];
+            referencedRelation: 'tender_applications';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'pia_submissions_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       notification_tasks: {
         Row: {

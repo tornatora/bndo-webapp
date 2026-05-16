@@ -159,7 +159,7 @@ export async function POST(request: Request) {
 
     // Best effort admin notification + email (never blocks user flow).
     try {
-      await dispatchQuizSubmissionNotifications({
+      const notifyResult = await dispatchQuizSubmissionNotifications({
         submissionId: quizSubmission.id,
         fullName,
         email: payload.email.toLowerCase(),
@@ -176,6 +176,7 @@ export async function POST(request: Request) {
         createdAtIso: quizSubmission.created_at,
         answers: buildQuizAnswersForNotification(bandoType, payload.answers)
       });
+      console.log('[QUIZ_NOTIFY_RESULT]', JSON.stringify(notifyResult));
     } catch (e) {
       console.error('[QUIZ_NOTIFY_DISPATCH_ERROR]', e);
     }

@@ -159,9 +159,6 @@ export async function POST(request: NextRequest) {
       return redirectWithError('Questo account non ha accesso admin', 'admin', adminDefault.toString(), baseUrls);
     }
 
-    if (isAdmin) {
-      return redirectTo(adminDefault);
-    }
     if (isConsultant) {
       const consultantDefault = buildAbsoluteUrl(appBaseUrl, '/consultant');
       const safeConsultantTarget = resolveSafeRedirect(nextParam, consultantDefault, allowedHosts, appBaseUrl);

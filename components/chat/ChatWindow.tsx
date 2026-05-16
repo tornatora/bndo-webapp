@@ -388,8 +388,14 @@ export function ChatWindow({
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [inputBlurSignal, setInputBlurSignal] = useState(0);
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const voiceTextRef = useRef('');
+  const ttsEnabledRef = useRef(true);
+
+  // Keep ref in sync with state for use in async callbacks
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
   const voiceRef = useRef<RealtimeVoiceHandle>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [focusResultMessageId, setFocusResultMessageId] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [view, setView] = useState<'chat' | 'home' | 'form' | 'pratiche' | 'grantDetail' | 'choice' | 'quiz' | 'myPractices' | 'practiceDetail'>(resolvedInitialView);
@@ -1184,7 +1190,8 @@ export function ChatWindow({
 
   async function speakText(text: string) {
     if (chatApiBase !== '/api/chatkit/chat') return;
-    if (!text || voiceState === 'playing' || voiceState === 'responding') return;
+    if (!text) return;
+    if (!ttsEnabledRef.current) return; // TTS mutato
     try {
       const res = await fetch('/api/chatkit/tts', {
         method: 'POST',
@@ -1198,15 +1205,31 @@ export function ChatWindow({
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => URL.revokeObjectURL(url);
+      // Use a persistent Audio element (Safari unlocks autoplay per-element from user gesture)
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      const audio = audioRef.current;
+      // Unload previous source
+      audio.pause();
+      audio.src = '';
+      audio.load();
+      audio.src = url;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+      };
       audio.onerror = (e) => {
         console.error('TTS audio playback error:', e);
         URL.revokeObjectURL(url);
       };
       await audio.play();
     } catch (err) {
-      console.error('TTS speakText error:', err);
+      // Safari blocks audio.play() without user gesture — silent catch
+      if (err instanceof DOMException && err.name === 'NotAllowedError') {
+        console.warn('TTS blocked by autoplay policy (Safari). User must interact first.');
+      } else {
+        console.error('TTS speakText error:', err);
+      }
     }
   }
 
@@ -1426,7 +1449,7 @@ export function ChatWindow({
       },
       {
         id: 'pratiche',
-        label: 'Catalogo Bandi',
+        label: 'Bandi Disponibili',
         icon: 'favorite' as const,
         onClick: () => {
           goMyPractices();
@@ -1534,7 +1557,7 @@ export function ChatWindow({
         {view === 'myPractices' || view === 'pratiche' || viewLoaded.myPractices || viewLoaded.pratiche ? (
           <div className={(view === 'myPractices' || view === 'pratiche') ? 'view-pane' : 'view-pane is-hidden'} aria-hidden={view !== 'myPractices' && view !== 'pratiche'}>
             <BandiCatalogView
-              title="Catalogo Bandi"
+              title="Bandi Disponibili"
               subtitle="Tutti i bandi attivi da fonti italiane"
               onOpenDetail={(grantId) => onOpenGrantDetailForPractice(grantId, 'scanner')}
             />
@@ -1671,6 +1694,11 @@ export function ChatWindow({
                   <RealtimeVoice
                     ref={voiceRef}
                     sessionUrl="/api/chatkit/realtime-session"
+                    transcribeUrl="/api/chatkit/transcribe"
+                    onTranscriptReady={(transcript) => {
+                      // Invia il testo trascritto al flusso normale della chat (conversation + TTS)
+                      onSend(transcript);
+                    }}
                     onTextDelta={(delta) => {
                       // Accumulate voice text
                       voiceTextRef.current += delta;
@@ -1718,6 +1746,7 @@ export function ChatWindow({
                     }}
                   />
                 )}
+                {/* Pulsante suono rimosso */}
                 <InputArea
                   placeholder={placeholder}
                   disabled={isTyping || isScanning || voiceState === 'responding' || voiceState === 'playing'}

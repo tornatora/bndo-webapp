@@ -1,3 +1,5 @@
+import nodemailer from 'nodemailer';
+
 type SendOnboardingCredentialsEmailInput = {
   toEmail: string;
   contactName: string;
@@ -24,6 +26,141 @@ function escapeHtml(input: string) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+// ─── SMTP Transport (Aruba) ─────────────────────────────────────────────────
+
+function getSmtpConfig() {
+  return {
+    host: process.env.SMTP_HOST || 'smtps.aruba.it',
+    port: Number(process.env.SMTP_PORT) || 465,
+    secure: process.env.SMTP_SECURE !== 'false', // default true (SSL)
+    user: process.env.SMTP_USER || 'admin@bndo.it',
+    pass: process.env.SMTP_PASS || '',
+    fromName: process.env.SMTP_FROM_NAME || 'BNDO',
+    fromEmail: process.env.SMTP_FROM_EMAIL || 'admin@bndo.it',
+  };
+}
+
+function isSmtpConfigured(): boolean {
+  const cfg = getSmtpConfig();
+  return Boolean(cfg.host && cfg.user && cfg.pass);
+}
+
+async function sendViaSmtp(
+  to: string[],
+  subject: string,
+  text: string,
+  html: string
+): Promise<SendEmailResult> {
+  const cfg = getSmtpConfig();
+
+  if (!cfg.pass) {
+    return { sent: false, skipped: true, error: 'SMTP_PASS non configurata.' };
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: { user: cfg.user, pass: cfg.pass },
+    });
+
+    const info = await transporter.sendMail({
+      from: `"${cfg.fromName}" <${cfg.fromEmail}>`,
+      to: to.join(', '),
+      subject,
+      text,
+      html,
+    });
+
+    return {
+      sent: true,
+      providerMessageId: info.messageId || undefined,
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      error: error instanceof Error ? error.message : 'Errore SMTP sconosciuto.',
+    };
+  }
+}
+
+async function sendViaResend(
+  to: string[],
+  subject: string,
+  text: string,
+  html: string,
+  fromEmail: string
+): Promise<SendEmailResult> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    return { sent: false, skipped: true, error: 'RESEND_API_KEY non configurata.' };
+  }
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from: fromEmail, to, subject, text, html }),
+    });
+
+    const rawResponse = await response.text();
+    let parsedResponse: ResendResponse = {};
+    try {
+      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
+      if (parsedUnknown && typeof parsedUnknown === 'object') {
+        parsedResponse = parsedUnknown as ResendResponse;
+      }
+    } catch {
+      parsedResponse = {};
+    }
+
+    if (!response.ok) {
+      return { sent: false, error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}` };
+    }
+
+    return {
+      sent: true,
+      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined,
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      error: error instanceof Error ? error.message : 'Errore Resend sconosciuto.',
+    };
+  }
+}
+
+async function sendEmail(
+  to: string[],
+  subject: string,
+  text: string,
+  html: string
+): Promise<SendEmailResult> {
+  // Prova SMTP (Aruba) se configurato, altrimenti Resend
+  if (isSmtpConfigured()) {
+    const smtpResult = await sendViaSmtp(to, subject, text, html);
+    if (smtpResult.sent) return smtpResult;
+    // SMTP ha fallito — logga l'errore e prova con Resend
+    console.error('[EMAIL] SMTP error — fallback to Resend:', smtpResult.error || 'unknown error');
+  }
+
+  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
+  if (resendFromEmail) {
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (!resendApiKey) {
+      console.error('[EMAIL] Resend not configured: RESEND_API_KEY is missing');
+      return { sent: false, skipped: true, error: 'RESEND_API_KEY non configurata.' };
+    }
+    return sendViaResend(to, subject, text, html, resendFromEmail);
+  }
+
+  return { sent: false, skipped: true, error: 'Nessun metodo di invio email configurato (SMTP o Resend).' };
 }
 
 type SendDocumentReminderEmailInput = {
@@ -81,17 +218,6 @@ function formatQuizAnswerLines(
 export async function sendOnboardingCredentialsEmail(
   input: SendOnboardingCredentialsEmailInput
 ): Promise<SendEmailResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!resendApiKey || !resendFromEmail) {
-    return {
-      sent: false,
-      skipped: true,
-      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
-    };
-  }
-
   const subject = `Credenziali accesso BNDO - ${input.companyName}`;
 
   const text = [
@@ -125,65 +251,10 @@ export async function sendOnboardingCredentialsEmail(
     </div>
   `;
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: resendFromEmail,
-        to: [input.toEmail],
-        subject,
-        text,
-        html
-      })
-    });
-
-    const rawResponse = await response.text();
-    let parsedResponse: ResendResponse = {};
-    try {
-      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
-      if (parsedUnknown && typeof parsedUnknown === 'object') {
-        parsedResponse = parsedUnknown as ResendResponse;
-      }
-    } catch {
-      parsedResponse = {};
-    }
-
-    if (!response.ok) {
-      return {
-        sent: false,
-        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
-      };
-    }
-
-    return {
-      sent: true,
-      providerMessageId:
-        typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      error: error instanceof Error ? error.message : 'Unknown email transport error.'
-    };
-  }
+  return sendEmail([input.toEmail], subject, text, html);
 }
 
 export async function sendDocumentReminderEmail(input: SendDocumentReminderEmailInput): Promise<SendEmailResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!resendApiKey || !resendFromEmail) {
-    return {
-      sent: false,
-      skipped: true,
-      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
-    };
-  }
-
   const subject = `Promemoria documento - ${input.practiceTitle}`;
 
   const text = [
@@ -211,64 +282,10 @@ export async function sendDocumentReminderEmail(input: SendDocumentReminderEmail
     </div>
   `;
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: resendFromEmail,
-        to: [input.toEmail],
-        subject,
-        text,
-        html
-      })
-    });
-
-    const rawResponse = await response.text();
-    let parsedResponse: ResendResponse = {};
-    try {
-      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
-      if (parsedUnknown && typeof parsedUnknown === 'object') {
-        parsedResponse = parsedUnknown as ResendResponse;
-      }
-    } catch {
-      parsedResponse = {};
-    }
-
-    if (!response.ok) {
-      return {
-        sent: false,
-        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
-      };
-    }
-
-    return {
-      sent: true,
-      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      error: error instanceof Error ? error.message : 'Unknown email transport error.'
-    };
-  }
+  return sendEmail([input.toEmail], subject, text, html);
 }
 
 export async function sendPracticeProgressEmail(input: SendPracticeProgressEmailInput): Promise<SendEmailResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!resendApiKey || !resendFromEmail) {
-    return {
-      sent: false,
-      skipped: true,
-      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
-    };
-  }
-
   const subject = `Aggiornamento pratica - ${input.practiceTitle}`;
 
   const text = [
@@ -293,66 +310,12 @@ export async function sendPracticeProgressEmail(input: SendPracticeProgressEmail
     </div>
   `;
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: resendFromEmail,
-        to: [input.toEmail],
-        subject,
-        text,
-        html
-      })
-    });
-
-    const rawResponse = await response.text();
-    let parsedResponse: ResendResponse = {};
-    try {
-      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
-      if (parsedUnknown && typeof parsedUnknown === 'object') {
-        parsedResponse = parsedUnknown as ResendResponse;
-      }
-    } catch {
-      parsedResponse = {};
-    }
-
-    if (!response.ok) {
-      return {
-        sent: false,
-        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
-      };
-    }
-
-    return {
-      sent: true,
-      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      error: error instanceof Error ? error.message : 'Unknown email transport error.'
-    };
-  }
+  return sendEmail([input.toEmail], subject, text, html);
 }
 
 export async function sendQuizSubmissionAlertEmail(
   input: SendQuizSubmissionAlertEmailInput
 ): Promise<SendEmailResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!resendApiKey || !resendFromEmail) {
-    return {
-      sent: false,
-      skipped: true,
-      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
-    };
-  }
-
   const recipients = Array.from(
     new Set(
       input.recipients
@@ -440,66 +403,12 @@ export async function sendQuizSubmissionAlertEmail(
     </div>
   `;
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: resendFromEmail,
-        to: recipients,
-        subject,
-        text,
-        html
-      })
-    });
-
-    const rawResponse = await response.text();
-    let parsedResponse: ResendResponse = {};
-    try {
-      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
-      if (parsedUnknown && typeof parsedUnknown === 'object') {
-        parsedResponse = parsedUnknown as ResendResponse;
-      }
-    } catch {
-      parsedResponse = {};
-    }
-
-    if (!response.ok) {
-      return {
-        sent: false,
-        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
-      };
-    }
-
-    return {
-      sent: true,
-      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      error: error instanceof Error ? error.message : 'Unknown email transport error.'
-    };
-  }
+  return sendEmail(recipients, subject, text, html);
 }
 
 export async function sendGenericNotificationEmail(
   input: SendGenericNotificationEmailInput
 ): Promise<SendEmailResult> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!resendApiKey || !resendFromEmail) {
-    return {
-      sent: false,
-      skipped: true,
-      error: 'Missing RESEND_API_KEY or RESEND_FROM_EMAIL.'
-    };
-  }
-
   const toEmail = input.toEmail.trim().toLowerCase();
   if (!toEmail) {
     return {
@@ -529,48 +438,5 @@ export async function sendGenericNotificationEmail(
     </div>
   `;
 
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: resendFromEmail,
-        to: [toEmail],
-        subject,
-        text,
-        html
-      })
-    });
-
-    const rawResponse = await response.text();
-    let parsedResponse: ResendResponse = {};
-    try {
-      const parsedUnknown: unknown = rawResponse ? JSON.parse(rawResponse) : {};
-      if (parsedUnknown && typeof parsedUnknown === 'object') {
-        parsedResponse = parsedUnknown as ResendResponse;
-      }
-    } catch {
-      parsedResponse = {};
-    }
-
-    if (!response.ok) {
-      return {
-        sent: false,
-        error: `Resend error ${response.status}: ${rawResponse.slice(0, 250)}`
-      };
-    }
-
-    return {
-      sent: true,
-      providerMessageId: typeof parsedResponse?.id === 'string' ? (parsedResponse.id as string) : undefined
-    };
-  } catch (error) {
-    return {
-      sent: false,
-      error: error instanceof Error ? error.message : 'Unknown email transport error.'
-    };
-  }
+  return sendEmail([toEmail], subject, text, html);
 }
