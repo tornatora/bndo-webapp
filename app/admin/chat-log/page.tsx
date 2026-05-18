@@ -1,6 +1,28 @@
 import { getOptionalUserProfile, createServerSupabaseClient } from '@/shared/api';
 import { hasAdminAccess } from '@/lib/roles';
-import Link from 'next/link';
+import { ChatThreadList } from './ChatThreadList';
+
+export const dynamic = 'force-dynamic';
+
+export type ThreadEntry = {
+  id: string;
+  companyName: string;
+  companyId: string | null;
+  threadType: 'chat' | 'practice';
+  practiceType: string | null;
+  applicationId: string | null;
+  messageCount: number;
+  lastActivity: string;
+  lastMessage: string | null;
+};
+
+export type ThreadMessage = {
+  id: string;
+  body: string;
+  createdAt: string;
+  senderName: string;
+  senderRole: string | null;
+};
 
 export default async function AdminChatLogPage() {
   try {
@@ -15,67 +37,105 @@ export default async function AdminChatLogPage() {
     return <ChatLogFallback />;
   }
 
-  let generalMessages: any[] = [];
-  let practiceMessages: any[] = [];
+  let threads: ThreadEntry[] = [];
+  let messagesByThread: Record<string, ThreadMessage[]> = {};
+
   try {
     const supabase = createServerSupabaseClient();
 
-    const [gRes, pRes] = await Promise.all([
-      supabase
-        .from('consultant_messages')
-        .select(`
-          id, body, created_at, sender_profile_id,
-          sender:profiles!sender_profile_id(full_name, email, role),
-          thread:consultant_threads!thread_id(company_id, companies(name))
-        `)
-        .order('created_at', { ascending: false })
-        .limit(50),
-      (supabase as any)
-        .from('consultant_practice_messages')
-        .select(`
-          id, body, created_at, sender_profile_id,
-          sender:profiles!sender_profile_id(full_name, email, role),
-          thread:consultant_practice_threads!thread_id(
-            application_id,
-            application:tender_applications!application_id(
-              company_id, bando_type,
-              company:companies(name)
-            )
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(50),
+    // Fetch general threads with company info
+    const { data: generalThreads } = await supabase
+      .from('consultant_threads')
+      .select(`id, company_id, created_at, companies!inner(name)`)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    // Fetch practice threads with application/company info
+    const { data: practiceThreads } = await (supabase as any)
+      .from('consultant_practice_threads')
+      .select(`id, application_id, company_id, created_at,
+        application:tender_applications!inner(company_id, bando_type, companies!inner(name))`)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    const generalThreadIds = (generalThreads ?? []).map((t: any) => t.id);
+    const practiceThreadIds = (practiceThreads ?? []).map((t: any) => t.id);
+
+    // Fetch messages for all threads
+    const [gMsgs, pMsgs] = await Promise.all([
+      generalThreadIds.length > 0
+        ? supabase
+            .from('consultant_messages')
+            .select(`id, body, created_at, thread_id, sender_profile_id,
+              sender:profiles!sender_profile_id(full_name, email, role)`)
+            .in('thread_id', generalThreadIds)
+            .order('created_at', { ascending: true })
+            .limit(500)
+        : { data: [] },
+      practiceThreadIds.length > 0
+        ? (supabase as any)
+            .from('consultant_practice_messages')
+            .select(`id, body, created_at, thread_id, sender_profile_id,
+              sender:profiles!sender_profile_id(full_name, email, role)`)
+            .in('thread_id', practiceThreadIds)
+            .order('created_at', { ascending: true })
+            .limit(500)
+        : { data: [] },
     ]);
 
-    generalMessages = gRes.data ?? [];
-    practiceMessages = pRes.data ?? [];
+    // Build threads from general
+    for (const t of generalThreads ?? []) {
+      const msgs = ((gMsgs?.data ?? []) as any[]).filter((m: any) => m.thread_id === t.id);
+      const lastMsg = msgs[msgs.length - 1];
+      threads.push({
+        id: t.id,
+        companyName: (t as any).companies?.name || '—',
+        companyId: (t as any).company_id || null,
+        threadType: 'chat',
+        practiceType: null,
+        applicationId: null,
+        messageCount: msgs.length,
+        lastActivity: lastMsg?.created_at || (t as any).created_at,
+        lastMessage: lastMsg?.body?.slice(0, 160) || null,
+      });
+      messagesByThread[t.id] = msgs.map((m: any) => ({
+        id: m.id,
+        body: m.body,
+        createdAt: m.created_at,
+        senderName: m.sender?.full_name || m.sender?.email || 'Sconosciuto',
+        senderRole: m.sender?.role || null,
+      }));
+    }
+
+    // Build threads from practice
+    for (const t of practiceThreads ?? []) {
+      const msgs = ((pMsgs?.data ?? []) as any[]).filter((m: any) => m.thread_id === t.id);
+      const lastMsg = msgs[msgs.length - 1];
+      threads.push({
+        id: t.id,
+        companyName: (t as any).application?.companies?.name || '—',
+        companyId: (t as any).company_id || null,
+        threadType: 'practice',
+        practiceType: (t as any).application?.bando_type || null,
+        applicationId: (t as any).application_id || null,
+        messageCount: msgs.length,
+        lastActivity: lastMsg?.created_at || (t as any).created_at,
+        lastMessage: lastMsg?.body?.slice(0, 160) || null,
+      });
+      messagesByThread[t.id] = msgs.map((m: any) => ({
+        id: m.id,
+        body: m.body,
+        createdAt: m.created_at,
+        senderName: m.sender?.full_name || m.sender?.email || 'Sconosciuto',
+        senderRole: m.sender?.role || null,
+      }));
+    }
+
+    // Sort by last activity
+    threads.sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
   } catch (err) {
     console.error('[admin/chat-log] Query error:', err);
   }
-
-  // Combine and sort
-  const combined = [
-    ...generalMessages.map((m: any) => ({
-      id: m.id,
-      body: m.body,
-      created_at: m.created_at,
-      sender: m.sender,
-      companyName: m.thread?.companies?.name || '—',
-      type: 'chat_ai' as const,
-      href: m.thread?.company_id ? `/admin/clients/${m.thread.company_id}` : null,
-    })),
-    ...practiceMessages.map((m: any) => ({
-      id: m.id,
-      body: m.body,
-      created_at: m.created_at,
-      sender: m.sender,
-      companyName: m.thread?.application?.company?.name || '—',
-      type: 'practice' as const,
-      href: m.thread?.application?.company_id ? `/admin/clients/${m.thread.application.company_id}` : null,
-    })),
-  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-  const totalMessages = combined.length;
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1000 }}>
@@ -84,20 +144,16 @@ export default async function AdminChatLogPage() {
           Chat Log
         </h1>
         <p style={{ fontSize: 12, color: 'rgba(11,17,54,0.5)', margin: 0 }}>
-          {totalMessages} messaggi recenti (AI + pratiche).
+          {threads.length} conversazioni trovate. Clicca per leggere.
         </p>
       </div>
 
-      {totalMessages === 0 ? (
+      {threads.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'rgba(11,17,54,0.4)', fontSize: 13 }}>
-          Nessun messaggio presente.
+          Nessuna conversazione presente.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {combined.map((msg) => (
-            <ChatMessageRow key={msg.id + msg.type} message={msg} />
-          ))}
-        </div>
+        <ChatThreadList threads={threads} messagesByThread={messagesByThread} />
       )}
     </div>
   );
@@ -110,84 +166,4 @@ function ChatLogFallback() {
       <p style={{ fontSize: 13, color: 'rgba(11,17,54,0.5)' }}>Accesso non disponibile. Ricarica o riaccedi.</p>
     </div>
   );
-}
-
-type ChatEntry = {
-  id: string;
-  body: string;
-  created_at: string;
-  sender: { full_name: string | null; email: string | null; role: string | null } | null;
-  companyName: string;
-  type: 'chat_ai' | 'practice';
-  href: string | null;
-};
-
-function ChatMessageRow({ message }: { message: ChatEntry }) {
-  const senderName = message.sender?.full_name || message.sender?.email || 'Sconosciuto';
-  const roleLabel = message.sender?.role === 'client_admin' ? 'Cliente'
-    : message.sender?.role === 'consultant' ? 'Consulente'
-    : message.sender?.role === 'ops_admin' ? 'Admin'
-    : message.sender?.role || '—';
-  const date = new Date(message.created_at);
-  const dateStr = date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const bodyPreview = message.body.length > 120 ? message.body.slice(0, 120) + '...' : message.body;
-
-  const inner = (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 12,
-      padding: '12px 16px', borderRadius: 10,
-      background: '#fff', border: '0.5px solid rgba(11,17,54,0.06)',
-      transition: 'all .15s',
-    }}>
-      {/* Avatar */}
-      <span style={{
-        width: 32, height: 32, borderRadius: 8,
-        background: message.type === 'practice' ? '#DBEAFE' : '#F1F2F4',
-        color: message.type === 'practice' ? '#2563EB' : 'rgba(11,17,54,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, fontWeight: 700, flexShrink: 0,
-      }}>
-        {senderName.charAt(0).toUpperCase()}
-      </span>
-
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#0B1136' }}>{senderName}</span>
-          <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: '#F1F2F4', color: 'rgba(11,17,54,0.45)' }}>
-            {roleLabel}
-          </span>
-          <span style={{ fontSize: 10, color: 'rgba(11,17,54,0.35)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-            {dateStr}
-          </span>
-        </div>
-        <div style={{ fontSize: 12, color: 'rgba(11,17,54,0.65)', lineHeight: 1.55, marginBottom: 4 }}>
-          {bodyPreview}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {message.type === 'practice' ? (
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: '#DBEAFE', color: '#2563EB', fontWeight: 500 }}>
-              Pratica
-            </span>
-          ) : (
-            <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: '#F1F2F4', color: 'rgba(11,17,54,0.45)', fontWeight: 500 }}>
-              Chat AI
-            </span>
-          )}
-          <span style={{ fontSize: 10, color: 'rgba(11,17,54,0.35)' }}>
-            {message.companyName}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (message.href) {
-    return (
-      <Link href={message.href} style={{ textDecoration: 'none', display: 'block' }}>
-        {inner}
-      </Link>
-    );
-  }
-  return inner;
 }
