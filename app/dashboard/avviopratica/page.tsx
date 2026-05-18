@@ -29,10 +29,12 @@ const PLAN_DATA: Record<PlanKey, { title: string; price: string; icon: typeof Sp
     price: '400 €',
     icon: UserCircle,
     features: [
-      'Consulente BNDO dedicato',
-      'Supporto personalizzato completo',
-      'Review documentale approfondita',
-      'Affiancamento fino all\'erogazione',
+      'Consulente BNDO dedicato al tuo progetto',
+      'Analisi approfondita dei requisiti del bando scelto',
+      'Compilazione e revisione di tutta la documentazione necessaria',
+      'Supporto nella preparazione del business plan',
+      'Assistenza nella raccolta degli allegati richiesti dal bando',
+      'Affiancamento continuo fino all\'erogazione del contributo',
     ],
   },
   videocall: {
@@ -40,10 +42,12 @@ const PLAN_DATA: Record<PlanKey, { title: string; price: string; icon: typeof Sp
     price: 'Gratuita',
     icon: Video,
     features: [
-      '15 minuti con un consulente',
-      'Valutazione preliminare del progetto',
-      'Risposte alle tue domande',
-      'Nessun impegno',
+      '30 minuti di consulenza individuale con un esperto BNDO',
+      'Valutazione preliminare del tuo progetto e delle tue idee',
+      'Analisi dei bandi più adatti al tuo profilo e alla tua regione',
+      'Spiegazione dettagliata del processo di richiesta contributo',
+      'Risposte personalizzate a tutte le tue domande',
+      'Nessun impegno: decidi tu se e come procedere dopo la call',
     ],
   },
 };
@@ -80,6 +84,10 @@ export default function AvvioPraticaPage() {
 
   const handlePlanClick = useCallback(
     (plan: PlanKey) => {
+      if (plan === 'videocall') {
+        window.open('https://calendly.com/admin-bndo/30min', '_blank');
+        return;
+      }
       setSelectedPlan(plan);
       if (!email) {
         // Dashboard user (already authenticated)
@@ -194,7 +202,7 @@ export default function AvvioPraticaPage() {
                 ))}
               </ul>
               <div className="avvio-pratica-card-action">
-                <span>Scegli</span>
+                <span>{key === 'videocall' ? 'Prenota call' : 'Scegli'}</span>
                 <ArrowRight size={16} />
               </div>
             </button>
