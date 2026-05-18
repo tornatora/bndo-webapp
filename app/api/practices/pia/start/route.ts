@@ -35,40 +35,33 @@ export async function POST(request: Request) {
 
     const admin = getSupabaseAdmin();
 
-    // Find or create the tender record for this bando
+    // Create a NEW tender for each practice (so multiple practices per bando are allowed)
     const bandoSlug = payload.bandoType === 'resto-al-sud-2-0' ? 'resto-al-sud-2-0' : 'autoimpiego-centro-nord';
-    const bandoExternalId = payload.bandoType === 'resto-al-sud-2-0' ? 'resto-al-sud-2-0-pia' : 'autoimpiego-centro-nord-pia';
+    const uniqueSuffix = Date.now().toString(36);
+    const bandoExternalId = `${payload.bandoType === 'resto-al-sud-2-0' ? 'resto-al-sud-2-0-pia' : 'autoimpiego-centro-nord-pia'}-${uniqueSuffix}`;
     const bandoTitle = payload.bandoType === 'resto-al-sud-2-0' ? 'Resto al Sud 2.0' : 'Autoimpiego Centro Nord';
 
-    let { data: tender } = await admin
+    const { data: newTender, error: tenderError } = await admin
       .from('tenders')
+      .insert({
+        title: bandoTitle,
+        authority_name: 'Invitalia',
+        deadline_at: '2026-12-31T23:59:59.000Z',
+        summary: `Pratica assistita BNDO per ${bandoTitle}`,
+        external_grant_id: bandoExternalId,
+        grant_slug: bandoSlug,
+        metadata: { pia: true, bandoType: payload.bandoType },
+      })
       .select('id')
-      .eq('external_grant_id', bandoExternalId)
-      .maybeSingle();
+      .single();
 
-    if (!tender) {
-      const { data: newTender, error: tenderError } = await admin
-        .from('tenders')
-        .insert({
-          title: bandoTitle,
-          authority_name: 'Invitalia',
-          deadline_at: '2026-12-31T23:59:59.000Z',
-          summary: `Pratica assistita BNDO per ${bandoTitle}`,
-          external_grant_id: bandoExternalId,
-          grant_slug: bandoSlug,
-          metadata: { pia: true, bandoType: payload.bandoType },
-        })
-        .select('id')
-        .single();
-
-      if (tenderError || !newTender) {
-        return NextResponse.json(
-          { error: `Impossibile creare il bando: ${tenderError?.message ?? 'errore sconosciuto'}` },
-          { status: 500 }
-        );
-      }
-      tender = newTender;
+    if (tenderError || !newTender) {
+      return NextResponse.json(
+        { error: `Impossibile creare il bando: ${tenderError?.message ?? 'errore sconosciuto'}` },
+        { status: 500 }
+      );
     }
+    const tender = newTender;
 
     // Ensure tender match exists
     await admin

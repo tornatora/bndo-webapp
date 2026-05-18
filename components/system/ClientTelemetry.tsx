@@ -74,6 +74,37 @@ export function ClientTelemetry() {
     };
   }, []);
 
+  // Auto-logout after 30 minutes of inactivity
+  useEffect(() => {
+    const INACTIVITY_MS = 30 * 60 * 1000; // 30 minuti
+    let logoutTimer: ReturnType<typeof setTimeout>;
+
+    function resetTimer() {
+      clearTimeout(logoutTimer);
+      logoutTimer = setTimeout(async () => {
+        try {
+          await fetch('/api/auth/logout', { method: 'POST', keepalive: true });
+        } catch {
+          // Best effort
+        }
+        window.location.href = '/login?error=Sessione%20scaduta%20per%20inattivit%C3%A0';
+      }, INACTIVITY_MS);
+    }
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'];
+    for (const evt of events) {
+      window.addEventListener(evt, resetTimer, { passive: true });
+    }
+    resetTimer();
+
+    return () => {
+      clearTimeout(logoutTimer);
+      for (const evt of events) {
+        window.removeEventListener(evt, resetTimer);
+      }
+    };
+  }, []);
+
   return null;
 }
 

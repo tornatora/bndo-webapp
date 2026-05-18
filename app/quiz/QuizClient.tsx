@@ -106,6 +106,8 @@ export default function QuizPage() {
   const [pendingEarlyBlock, setPendingEarlyBlock] = useState<StepId | null>(null);
   const [lastSavedNonEligibleStep, setLastSavedNonEligibleStep] = useState<StepId | null>(null);
   const [countdown, setCountdown] = useState(5);
+  const [warnings, setWarnings] = useState<Array<{ step: StepId; question: string }>>([]);
+  const [showFinalResult, setShowFinalResult] = useState(false);
 
   const progress = Math.round((progressMap[step] / 13) * 100);
   const region = answers.q3 ?? null;
@@ -243,11 +245,13 @@ export default function QuizPage() {
     });
   }
 
-  function showBlocked(fromStep: StepId) {
-    setBlockedFromStep(fromStep);
-    setPendingEarlyBlock(null);
-    setStep('blocked');
-    void persistNotEligible(fromStep);
+  function addWarningAndContinue(fromStep: StepId, nextStep: StepId) {
+    const questionTitle = q(fromStep)?.title ?? fromStep;
+    setWarnings((prev) => {
+      if (prev.some((w) => w.step === fromStep)) return prev;
+      return [...prev, { step: fromStep, question: questionTitle }];
+    });
+    goTo(nextStep);
   }
 
   function handleAnswer(questionId: string, value: string) {
@@ -276,7 +280,7 @@ export default function QuizPage() {
       return value === 'A' ? goTo('q5') : goTo('q4b');
     }
     if (questionId === 'q4b') {
-      return value === 'A' ? goTo('q5') : showBlocked('q4b');
+      return value === 'A' ? goTo('q5') : addWarningAndContinue('q4b', 'q5');
     }
     if (questionId === 'q5') {
       if (['A', 'B', 'C', 'D'].includes(value)) return goTo('q6');
@@ -284,16 +288,16 @@ export default function QuizPage() {
       return goTo('q5c');
     }
     if (questionId === 'q5b') {
-      return value === 'A' ? goTo('q6') : showBlocked('q5b');
+      return value === 'A' ? goTo('q6') : addWarningAndContinue('q5b', 'q6');
     }
     if (questionId === 'q5c') {
-      return value === 'A' ? goTo('q6') : showBlocked('q5c');
+      return value === 'A' ? goTo('q6') : addWarningAndContinue('q5c', 'q6');
     }
     if (questionId === 'q6') {
       return value === 'A' || value === 'B' ? goTo('q7') : goTo('q6b');
     }
     if (questionId === 'q6b') {
-      return value === 'A' ? goTo('q7') : showBlocked('q6b');
+      return value === 'A' ? goTo('q7') : addWarningAndContinue('q6b', 'q7');
     }
     if (questionId === 'q7') {
       return value === 'A' || value === 'C' ? goTo('q9') : goTo('q8');
@@ -302,19 +306,19 @@ export default function QuizPage() {
       return value === 'A' ? goTo('q9') : goTo('q8b');
     }
     if (questionId === 'q8b') {
-      return value === 'A' ? goTo('q9') : showBlocked('q8b');
+      return value === 'A' ? goTo('q9') : addWarningAndContinue('q8b', 'q9');
     }
     if (questionId === 'q9') {
-      return value === 'A' || value === 'B' ? goTo('q10') : showBlocked('q9');
+      return value === 'A' || value === 'B' ? goTo('q10') : addWarningAndContinue('q9', 'q10');
     }
     if (questionId === 'q10') {
       return goTo('q11');
     }
     if (questionId === 'q11') {
-      return value === 'A' ? showBlocked('q11') : goTo('q11b');
+      return value === 'A' ? addWarningAndContinue('q11', 'q11b') : goTo('q11b');
     }
     if (questionId === 'q11b') {
-      return value === 'C' ? showBlocked('q11b') : goTo('q12');
+      return value === 'C' ? addWarningAndContinue('q11b', 'q12') : goTo('q12');
     }
   }
 
@@ -399,11 +403,21 @@ export default function QuizPage() {
     setSubmitting(true);
 
     try {
-      const submissionId = await postQuizSubmission('eligible');
-      setLatestSubmissionId(submissionId);
-      setBlockedFromStep(null);
-      setPendingEarlyBlock(null);
-      setStep('success');
+      if (warnings.length > 0) {
+        // Non idoneo — invia tutte le risposte per l'analisi
+        await postQuizSubmission('not_eligible', {
+          _warning_count: String(warnings.length),
+          _warning_details: warnings.map((w) => `${w.step}: ${w.question}`).join(' | '),
+        });
+        setShowFinalResult(true);
+        setStep('blocked');
+      } else {
+        const submissionId = await postQuizSubmission('eligible');
+        setLatestSubmissionId(submissionId);
+        setBlockedFromStep(null);
+        setPendingEarlyBlock(null);
+        setStep('success');
+      }
     } catch (error) {
       setSubmissionError(error instanceof Error ? error.message : 'Errore invio quiz.');
     } finally {
@@ -417,7 +431,7 @@ export default function QuizPage() {
     if (pendingEarlyBlock) {
       const stopAt = pendingEarlyBlock;
       setPendingEarlyBlock(null);
-      showBlocked(stopAt);
+      addWarningAndContinue(stopAt, 'q3');
       return;
     }
     goTo('q3');
@@ -813,9 +827,24 @@ export default function QuizPage() {
         {step === 'blocked' ? (
           <div className="final-page">
             <div className="error-icon">⚠️</div>
-            <h2>Purtroppo non sei idoneo</h2>
-            <p>Con i dati inseriti non hai i requisiti per questi bandi Invitalia.</p>
-            {blockedFromStep ? (
+            <h2>Non sei idoneo</h2>
+            <p style={{ marginBottom: 16 }}>
+              {showFinalResult
+                ? 'Abbiamo analizzato tutte le tue risposte. Alcuni requisiti non sono soddisfatti:'
+                : 'Con i dati inseriti non hai i requisiti per questi bandi Invitalia.'}
+            </p>
+            {showFinalResult && warnings.length > 0 ? (
+              <div className="info-box" style={{ textAlign: 'left', lineHeight: 1.8 }}>
+                <strong>Requisiti non soddisfatti:</strong>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                  {warnings.map((w, i) => (
+                    <li key={i} style={{ marginBottom: 4 }}>
+                      <strong>{w.question}</strong> — questa caratteristica non ti permette di accedere al bando
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : blockedFromStep ? (
               <p className="info-box">
                 Domanda bloccante: <strong>{q(blockedFromStep)?.title ?? blockedFromStep}</strong> in quanto con questa caratteristica non puoi partecipare al bando in questione.
               </p>
