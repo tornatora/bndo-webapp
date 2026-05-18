@@ -168,7 +168,7 @@ export default function AvvioPraticaPage() {
             <a href={`/login${email ? `?next=/dashboard/avviopratica?email=${encodeURIComponent(email)}${bandoParam ? `&bando=${encodeURIComponent(bandoParam)}` : ''}` : ''}`} className="avvio-btn avvio-btn--primary">
               Accedi
             </a>
-            <a href="/esplora" className="avvio-btn avvio-btn--ghost">
+            <a href="/esplora?tour=1" className="avvio-btn avvio-btn--ghost">
               Esplora piattaforma
             </a>
           </div>
