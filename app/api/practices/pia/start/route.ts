@@ -78,27 +78,9 @@ export async function POST(request: Request) {
         { onConflict: 'company_id,tender_id' }
       );
 
-    // Check if an application already exists for this company + tender (any status)
-    let { data: application } = await admin
-      .from('tender_applications')
-      .select('id, status')
-      .eq('company_id', profile.company_id)
-      .eq('tender_id', tender.id)
-      .maybeSingle() as unknown as { data: { id: string; status: string } | null };
-
-    if (application && application.status !== 'draft') {
-      // Application already exists and is not a draft — can't create a new one
-      return NextResponse.json(
-        { error: `Esiste già una pratica per ${bandoTitle} in stato "${application.status}".` },
-        { status: 409 }
-      );
-    }
-
+    // Always create a new application — users can have multiple practices
     let applicationId: string;
-
-    if (application) {
-      applicationId = application.id;
-    } else {
+    {
       const { data: newApp, error: appError } = await admin
         .from('tender_applications')
         .insert({

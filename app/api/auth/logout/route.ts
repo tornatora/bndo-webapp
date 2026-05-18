@@ -28,13 +28,33 @@ function clearAuthCookies(response: NextResponse, request: NextRequest) {
     }
   }
 
+  const host = (
+    request.headers.get('x-forwarded-host') ??
+    request.headers.get('host') ??
+    ''
+  ).split(':')[0].toLowerCase();
+
+  // Must match middleware domain logic: bndo.it sets cookies on .bndo.it
+  const cookieDomain = host === 'bndo.it' || host.endsWith('.bndo.it') ? '.bndo.it' : undefined;
+
   for (const name of names) {
+    // Clear without domain (for cookies set without domain)
     response.cookies.set(name, '', {
       maxAge: 0,
       path: '/',
       expires: new Date(0),
       sameSite: 'lax',
     });
+    // Clear WITH domain (for cookies set with .bndo.it)
+    if (cookieDomain) {
+      response.cookies.set(name, '', {
+        maxAge: 0,
+        path: '/',
+        domain: cookieDomain,
+        expires: new Date(0),
+        sameSite: 'lax',
+      });
+    }
   }
 }
 
